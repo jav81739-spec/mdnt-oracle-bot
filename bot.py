@@ -5,6 +5,7 @@ Requires BOT_TOKEN set in .env (see .env.example)
 """
 import logging
 import os
+import asyncio
 from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
@@ -20,9 +21,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def main():
+async def run_bot():
     if not TOKEN:
-        raise RuntimeError("BOT_TOKEN not found. Add it to your .env file.")
+        raise RuntimeError("BOT_TOKEN not found. Add it to your environment variables.")
 
     app = Application.builder().token(TOKEN).build()
 
@@ -62,7 +63,17 @@ def main():
     app.add_handler(CommandHandler("duo", friendship.duo))
 
     logger.info("Bot starting...")
-    app.run_polling()
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    
+    # Keep the bot running
+    stop_signal = asyncio.Event()
+    await stop_signal.wait()
+
+
+def main():
+    asyncio.run(run_bot())
 
 
 if __name__ == "__main__":
