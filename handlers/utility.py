@@ -48,3 +48,5 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         when=delay,
     )
     await update.message.reply_text(f"Got it, I'll remind you in {time_str} ⏳")
+async def start_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("✨ Welcome to the Midnight Realm! Send /oracle or /help to begin.")
