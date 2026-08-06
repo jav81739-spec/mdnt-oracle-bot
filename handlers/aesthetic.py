@@ -133,3 +133,45 @@ async def confess(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🕯️ *Anonymous confession:*\n\n{confession_text}",
         parse_mode="Markdown",
     )
+
+
+MOOD_WORDS = ["ethereal", "feral", "unbothered", "nostalgic", "restless", "soft", "chaotic-good", "hazy"]
+MOOD_EMOJIS = ["🌫️", "🖤", "✨", "🌙", "🍂", "🕯️", "🌊", "⚡"]
+
+DREAM_INTERPRETATIONS = [
+    "This dream reflects a part of you seeking control you don't have right now.",
+    "This suggests unfinished business with someone from your past.",
+    "This is your mind processing a change you haven't fully accepted yet.",
+    "This points to a desire for freedom from something weighing on you.",
+]
+
+MANIFEST_TEMPLATE = "✨ It is done. {text} — the universe has heard you. ✨"
+
+
+async def moodboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    words = random.sample(MOOD_WORDS, 3)
+    emojis = random.sample(MOOD_EMOJIS, 3)
+    combo = " · ".join(f"{w} {e}" for w, e in zip(words, emojis))
+    await update.message.reply_text(f"🎨 *Today's mood:*\n\n{combo}", parse_mode="Markdown")
+
+
+async def dream(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: /dream [describe your dream]")
+        return
+    dream_text = " ".join(context.args)
+    interpretation = random.choice(DREAM_INTERPRETATIONS)
+    await update.message.reply_text(
+        f"💭 *Dream:* {dream_text}\n\n*Interpretation:*\n_{interpretation}_\n\n"
+        f"_(for fun only — not real dream analysis)_",
+        parse_mode="Markdown",
+    )
+
+
+async def manifest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: /manifest [what you want]")
+        return
+    text = " ".join(context.args)
+    card = MANIFEST_TEMPLATE.format(text=text)
+    await update.message.reply_text(f"🕊️ *Manifestation Card*\n\n{card}", parse_mode="Markdown")
