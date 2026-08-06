@@ -70,20 +70,22 @@ async def generate_reply(user_text: str, persona: str) -> str:
         "like a real chat message, not an essay."
     )
 
-    # ---- Example using Anthropic API (uncomment and configure) ----
-    # import anthropic
-    # client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    # response = client.messages.create(
-    #     model="claude-sonnet-4-6",
-    #     max_tokens=200,
-    #     system=system_prompt,
-    #     messages=[{"role": "user", "content": user_text}],
-    # )
-    # return response.content[0].text
+    # ---- Google Gemini API (free tier, no card required) ----
+    import google.generativeai as genai
 
-    # Placeholder until API is wired in:
-    return random.choice([
-        "Haan bhai, sach mein? 😄",
-        "That's actually a good point ngl",
-        "Arre wah, batao aur",
-    ])
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        # No key set yet — fallback placeholder so the bot still works
+        return random.choice([
+            "Haan bhai, sach mein? 😄",
+            "That's actually a good point ngl",
+            "Arre wah, batao aur",
+        ])
+
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(
+        model_name="gemini-2.0-flash",
+        system_instruction=system_prompt,
+    )
+    response = model.generate_content(user_text)
+    return response.text.strip()
