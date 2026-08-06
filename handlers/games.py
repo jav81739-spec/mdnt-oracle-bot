@@ -24,6 +24,35 @@ QUIZ_QUESTIONS = [
     {"q": "What year was Telegram launched?", "options": ["2011", "2013", "2015", "2017"], "correct": 1},
 ]
 
+NHIE = [
+    "Never have I ever stalked someone's profile at 3 AM.",
+    "Never have I ever lied about being busy to avoid plans.",
+    "Never have I ever pretended to like a gift I hated.",
+]
+
+RIDDLES = [
+    {"q": "I speak without a mouth and hear without ears. What am I?", "a": "echo"},
+    {"q": "The more you take, the more you leave behind. What am I?", "a": "footsteps"},
+    {"q": "What has keys but can't open locks?", "a": "piano"},
+]
+
+SCRAMBLE_WORDS = ["telegram", "midnight", "oracle", "mystery", "friendship"]
+
+# {chat_id: {user_id: wins}}
+leaderboard = {}
+
+
+def _record_win(chat_id: int, user_id: int, name: str):
+    leaderboard.setdefault(chat_id, {})
+    if user_id not in leaderboard[chat_id]:
+        leaderboard[chat_id][user_id] = {"name": name, "wins": 0}
+    leaderboard[chat_id][user_id]["wins"] += 1
+
+
+# {chat_id: {"word": str, "hint_shown": bool}}
+active_riddles = {}
+active_scrambles = {}
+
 
 async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = random.choice(QUIZ_QUESTIONS)
@@ -69,4 +98,110 @@ async def rock_paper_scissors(update: Update, context: ContextTypes.DEFAULT_TYPE
         result = "You win! 🎉"
     else:
         result = "I win! 😎"
+        _record_win(update.effective_chat.id, context.bot.id, "Bot")
+    if "You win" in result:
+        _record_win(update.effective_chat.id, update.effective_user.id, update.effective_user.first_name)
     await update.message.reply_text(f"You: {user_choice} | Me: {bot_choice}\n{result}")
+
+
+async def never_have_i_ever(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"🙊 {random.choice(NHIE)}")
+
+
+async def riddle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    r = random.choice(RIDDLES)
+    active_riddles[chat_id] = r["a"]
+    await update.message.reply_text(f"🧩 Riddle: {r['q']}\n\nReply with /riddleanswer [your guess]")
+
+
+async def riddle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if chat_id not in active_riddles:
+        await update.message.reply_text("No active riddle — start one with /riddle")
+        return
+    guess = " ".join(context.args).lower().strip()
+    answer = active_riddles[chat_id]
+    if guess == answer:
+        _record_win(chat_id, update.effective_user.id, update.effective_user.first_name)
+        del active_riddles[chat_id]
+        await update.message.reply_text(f"✅ Correct! It was '{answer}'")
+    else:
+        await update.message.reply_text("❌ Not quite, try again")
+
+
+async def scramble(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    word = random.choice(SCRAMBLE_WORDS)
+    scrambled = "".join(random.sample(word, len(word)))
+    active_scrambles[chat_id] = word
+    await update.message.reply_text(f"🔤 Unscramble: {scrambled.upper()}\n\nReply with /unscramble [your guess]")
+
+
+async def unscramble(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if chat_id not in active_scrambles:
+        await update.message.reply_text("No active scramble — start one with /scramble")
+        return
+    guess = " ".join(context.args).lower().strip()
+    word = active_scrambles[chat_id]
+    if guess == word:
+        _record_win(chat_id, update.effective_user.id, update.effective_user.first_name)
+        del active_scrambles[chat_id]
+        await update.message.reply_text(f"✅ Correct! It was '{word}'")
+    else:
+        await update.message.reply_text("❌ Not quite, try again")
+
+
+async def guess_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Simple 1-20 number guess, single message reveal (lightweight version)."""
+    if not context.args:
+        await update.message.reply_text("Usage: /guess [1-20]")
+        return
+    try:
+        user_guess = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Send a number between 1 and 20")
+        return
+    target = random.randint(1, 20)
+    if user_guess == target:
+        _record_win(update.effective_chat.id, update.effective_user.id, update.effective_user.first_name)
+        await update.message.reply_text(f"🎯 Correct! It was {target}!")
+    else:
+        hint = "higher" if target > user_guess else "lower"
+        await update.message.reply_text(f"❌ Nope, it was {target}. Try {hint} next time!")
+
+
+async def leaderboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    scores = leaderboard.get(chat_id, {})
+    if not scores:
+        await update.message.reply_text("No wins recorded yet — play some games first!")
+        return
+    ranked = sorted(scores.values(), key=lambda x: x["wins"], reverse=True)[:10]
+    lines = [f"{i+1}. {p['name']} — {p['wins']} wins" for i, p in enumerate(ranked)]
+    await update.message.reply_text("🏆 Leaderboard\n\n" + "\n".join(lines))
+
+
+async def dice_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_dice(update.effective_chat.id, emoji="🎲")
+
+
+async def darts_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_dice(update.effective_chat.id, emoji="🎯")
+
+
+async def basketball_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_dice(update.effective_chat.id, emoji="🏀")
+
+
+async def bowling_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_dice(update.effective_chat.id, emoji="🎳")
+
+
+async def football_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_dice(update.effective_chat.id, emoji="⚽")
+
+
+async def slot_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_dice(update.effective_chat.id, emoji="🎰")
