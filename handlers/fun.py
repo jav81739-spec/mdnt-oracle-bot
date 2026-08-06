@@ -102,3 +102,78 @@ async def rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{mention(target.id, target.first_name)}'s rank: *{tier}* ({count} messages)",
         parse_mode="Markdown",
     )
+
+
+RATINGS = [
+    "10/10, no notes, iconic",
+    "7/10, respectable effort",
+    "3/10, and I'm being generous",
+    "1/10, this offends me personally",
+    "9/10, borderline concerning how good this is",
+    "5/10, mid but I respect the confidence",
+]
+
+IMPOSTOR_ROLES_MSG = {
+    "impostor": "🔪 You are the IMPOSTOR. Blend in, don't get caught.",
+    "crew": "👨‍🚀 You are a CREWMATE. Find the impostor.",
+}
+
+# {chat_id: {"impostor_id": int, "players": [ids], "active": bool}}
+active_impostor_games = {}
+
+
+async def rate_this(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.reply_to_message:
+        await update.message.reply_text("Reply to a message (or photo) with /ratethis")
+        return
+    await update.message.reply_text(f"⭐ Rating: {random.choice(RATINGS)}")
+
+
+async def impostor_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lightweight Among-Us-style role assignment using recently active members."""
+    from handlers.friendship import message_counts
+
+    chat_id = update.effective_chat.id
+    pool = list(message_counts.get(chat_id, {}).items())
+    if len(pool) < 3:
+        await update.message.reply_text("Need at least 3 active members tracked — chat more first!")
+        return
+
+    players = random.sample(pool, min(len(pool), 6))
+    impostor_id = random.choice(players)[0]
+    active_impostor_games[chat_id] = {
+        "impostor_id": impostor_id,
+        "players": [p[0] for p in players],
+        "active": True,
+    }
+
+    failed_dms = []
+    for user_id, data in players:
+        role_text = IMPOSTOR_ROLES_MSG["impostor"] if user_id == impostor_id else IMPOSTOR_ROLES_MSG["crew"]
+        try:
+            await context.bot.send_message(user_id, f"🎭 {role_text}")
+        except Exception:
+            failed_dms.append(data["name"])
+
+    names = ", ".join(data["name"] for _, data in players)
+    msg = f"🎭 A round of Impostor has started with: {names}\n\nCheck your DMs for your role! Discuss, then an admin can /revealimpostor when ready."
+    if failed_dms:
+        msg += f"\n\n⚠️ Couldn't DM: {', '.join(failed_dms)} — they need to start a private chat with me first."
+    await update.message.reply_text(msg)
+
+
+async def impostor_reveal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from handlers.friendship import message_counts
+    from handlers.mentions import mention
+
+    chat_id = update.effective_chat.id
+    game = active_impostor_games.get(chat_id)
+    if not game or not game["active"]:
+        await update.message.reply_text("No active impostor round.")
+        return
+    impostor_id = game["impostor_id"]
+    name = message_counts.get(chat_id, {}).get(impostor_id, {}).get("name", "Unknown")
+    await update.message.reply_text(
+        f"🔎 The impostor was... {mention(impostor_id, name)}!", parse_mode="Markdown"
+    )
+    game["active"] = False
