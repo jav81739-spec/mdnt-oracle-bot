@@ -1,6 +1,7 @@
 import random
 from telegram import Update
 from telegram.ext import ContextTypes
+from handlers.mentions import mention
 
 bestie_pairs = {}  # {chat_id: [(user1_id, user2_id), ...]}
 declared_besties = {}  # {chat_id: {user_id: bestie_user_obj}}
@@ -43,9 +44,11 @@ async def ship(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.reply_to_message:
         user1 = update.effective_user
         user2 = update.message.reply_to_message.from_user
-        name1, name2 = user1.first_name, user2.first_name
+        name1_display, name2_display = user1.first_name, user2.first_name
+        mention1, mention2 = mention(user1.id, user1.first_name), mention(user2.id, user2.first_name)
     elif len(context.args) >= 2:
-        name1, name2 = context.args[0], context.args[1]
+        name1_display, name2_display = context.args[0], context.args[1]
+        mention1, mention2 = name1_display, name2_display  # plain text fallback, no real user to link
     else:
         await update.message.reply_text("Usage: reply to someone with /ship, or /ship [name1] [name2]")
         return
@@ -55,10 +58,10 @@ async def ship(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bar_empty = "🖤" * (10 - score // 10)
     tier = "low" if score < 40 else "mid" if score < 75 else "high"
     verdict = random.choice(SHIP_VERDICTS[tier])
-    ship_name = _ship_name(name1, name2)
+    ship_name = _ship_name(name1_display, name2_display)
 
     await update.message.reply_text(
-        f"🚢 Shipping *{name1}* + *{name2}*\n\n"
+        f"🚢 Shipping {mention1} + {mention2}\n\n"
         f"Ship name: *{ship_name}*\n"
         f"{bar_filled}{bar_empty} {score}%\n"
         f"_{verdict}_",
@@ -81,6 +84,7 @@ async def random_ship(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     (id1, data1), (id2, data2) = random.sample(pool, 2)
     name1, name2 = data1["name"], data2["name"]
+    mention1, mention2 = mention(id1, name1), mention(id2, name2)
 
     score = random.randint(0, 100)
     bar_filled = "❤️" * (score // 10)
@@ -91,7 +95,7 @@ async def random_ship(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"🎲 Random ship of the moment...\n\n"
-        f"🚢 *{name1}* + *{name2}*\n"
+        f"🚢 {mention1} + {mention2}\n"
         f"Ship name: *{ship_name}*\n"
         f"{bar_filled}{bar_empty} {score}%\n"
         f"_{verdict}_",
@@ -124,7 +128,8 @@ async def bestie(update: Update, context: ContextTypes.DEFAULT_TYPE):
     declared_besties[chat_id][user1.id] = user2
     declared_besties[chat_id][user2.id] = user1
     await update.message.reply_text(
-        f"💛 {user1.first_name} & {user2.first_name} are now official besties!"
+        f"💛 {mention(user1.id, user1.first_name)} & {mention(user2.id, user2.first_name)} are now official besties!",
+        parse_mode="Markdown",
     )
 
 
@@ -136,7 +141,8 @@ async def duo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user2 = update.message.reply_to_message.from_user
     name = f"{random.choice(DUO_PREFIXES)} {random.choice(DUO_SUFFIXES)}"
     await update.message.reply_text(
-        f"🔗 {user1.first_name} + {user2.first_name} = *{name}*", parse_mode="Markdown"
+        f"🔗 {mention(user1.id, user1.first_name)} + {mention(user2.id, user2.first_name)} = *{name}*",
+        parse_mode="Markdown",
     )
 
 
@@ -149,7 +155,7 @@ async def friendship_score(update: Update, context: ContextTypes.DEFAULT_TYPE):
     score = random.randint(40, 100)
     desc = random.choice(COMPAT_DESCRIPTIONS)
     await update.message.reply_text(
-        f"💫 {user1.first_name} + {user2.first_name}: *{score}%* compatible\n_{desc}_",
+        f"💫 {mention(user1.id, user1.first_name)} + {mention(user2.id, user2.first_name)}: *{score}%* compatible\n_{desc}_",
         parse_mode="Markdown",
     )
 
@@ -161,7 +167,11 @@ async def tag_bestie(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not bestie_user:
         await update.message.reply_text("You haven't declared a bestie yet — use /bestie (reply to their message) first")
         return
-    await update.message.reply_text(f"📣 {update.effective_user.first_name} is calling for their bestie: @{bestie_user.username or bestie_user.first_name}")
+    await update.message.reply_text(
+        f"📣 {mention(update.effective_user.id, update.effective_user.first_name)} is calling for their bestie: "
+        f"{mention(bestie_user.id, bestie_user.first_name)}",
+        parse_mode="Markdown",
+    )
 
 
 async def squad(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -171,12 +181,18 @@ async def squad(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Not enough activity data yet — chat more first!")
         return
     top = sorted(counts.items(), key=lambda x: x[1]["count"], reverse=True)[:4]
-    names = [entry[1]["name"] for entry in top]
-    await update.message.reply_text("👥 The most active squad right now:\n" + ", ".join(names))
+    mentions = [mention(uid, data["name"]) for uid, data in top]
+    await update.message.reply_text(
+        "👥 The most active squad right now:\n" + ", ".join(mentions),
+        parse_mode="Markdown",
+    )
 
 
 async def loyalty(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = update.message.reply_to_message.from_user if update.message.reply_to_message else update.effective_user
     score = random.randint(60, 100)
     desc = random.choice(LOYALTY_DESCRIPTIONS)
-    await update.message.reply_text(f"🛡️ {target.first_name}'s loyalty score: *{score}/100*\n_{desc}_", parse_mode="Markdown")
+    await update.message.reply_text(
+        f"🛡️ {mention(target.id, target.first_name)}'s loyalty score: *{score}/100*\n_{desc}_",
+        parse_mode="Markdown",
+    )
