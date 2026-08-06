@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-from handlers import chat, games, moderation, utility, aesthetic, friendship, fun
+from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
@@ -83,6 +83,10 @@ BOT_COMMANDS = [
     BotCommand("8ball", "Magic 8-ball answer"),
     BotCommand("vibe", "Vibe check the chat"),
     BotCommand("quote", "Random quote"),
+    BotCommand("crush", "Privately pick a crush (reply to their message)"),
+    BotCommand("clearcrush", "Clear your current pick"),
+    BotCommand("randomship", "Bot randomly ships two active members"),
+    BotCommand("secretadmirer", "Bot sends a random member an anonymous kind DM"),
     BotCommand("id", "Get user/chat ID"),
     BotCommand("info", "User info card"),
     BotCommand("remind", "Set a reminder"),
@@ -177,6 +181,7 @@ def main():
     app.add_handler(CommandHandler("squad", friendship.squad))
     app.add_handler(CommandHandler("loyalty", friendship.loyalty))
     app.add_handler(CommandHandler("ship", friendship.ship))
+    app.add_handler(CommandHandler("randomship", friendship.random_ship))
 
     # ---- Fun / Social ----
     app.add_handler(CommandHandler("roast", fun.roast))
@@ -184,6 +189,11 @@ def main():
     app.add_handler(CommandHandler("8ball", fun.eight_ball))
     app.add_handler(CommandHandler("vibe", fun.vibe))
     app.add_handler(CommandHandler("quote", fun.quote))
+
+    # ---- Matchmaking ----
+    app.add_handler(CommandHandler("crush", matchmaking.set_crush))
+    app.add_handler(CommandHandler("clearcrush", matchmaking.clear_crush))
+    app.add_handler(CommandHandler("secretadmirer", matchmaking.secret_admirer))
 
     # Use the token as the URL path — keeps the webhook endpoint private,
     # since guessing it means guessing your token.
