@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, ChatMemberHandler, filters
 
-from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events
+from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
@@ -117,6 +117,33 @@ BOT_COMMANDS = [
     BotCommand("invite", "Get a fresh invite link (admin)"),
     BotCommand("joined", "Recent joins log"),
     BotCommand("left", "Recent leaves log"),
+    BotCommand("hangman", "Start hangman"),
+    BotCommand("hangmanguess", "Guess a letter"),
+    BotCommand("tictactoe", "Challenge someone (reply)"),
+    BotCommand("ttt", "Make a tic-tac-toe move 1-9"),
+    BotCommand("wordchain", "Start a word chain"),
+    BotCommand("chainword", "Submit next word in chain"),
+    BotCommand("trivia", "Trivia by category"),
+    BotCommand("wordle", "Get today's wordle"),
+    BotCommand("wordleguess", "Guess the wordle word"),
+    BotCommand("daily", "Claim daily coins"),
+    BotCommand("balance", "Check coin balance"),
+    BotCommand("rob", "Try robbing someone (reply)"),
+    BotCommand("gamble", "Gamble your coins"),
+    BotCommand("richest", "Coin leaderboard"),
+    BotCommand("moodboard", "Today's aesthetic mood"),
+    BotCommand("dream", "AI-style dream interpretation"),
+    BotCommand("manifest", "Stylized affirmation card"),
+    BotCommand("matchmaker", "Bot pairs two random members"),
+    BotCommand("friendshiptest", "Mini friendship quiz score"),
+    BotCommand("hug", "Hug someone (reply)"),
+    BotCommand("pat", "Pat someone (reply)"),
+    BotCommand("highfive", "High-five someone (reply)"),
+    BotCommand("impostor", "Start an impostor round"),
+    BotCommand("revealimpostor", "Reveal who the impostor was"),
+    BotCommand("ratethis", "Rate the replied message"),
+    BotCommand("timecapsule", "Lock a message for later"),
+    BotCommand("capsules", "List pending time capsules"),
 ]
 
 
@@ -169,6 +196,15 @@ def main():
     app.add_handler(CommandHandler("bowling", games.bowling_game))
     app.add_handler(CommandHandler("football", games.football_game))
     app.add_handler(CommandHandler("slot", games.slot_game))
+    app.add_handler(CommandHandler("hangman", games.hangman))
+    app.add_handler(CommandHandler("hangmanguess", games.hangman_guess))
+    app.add_handler(CommandHandler("tictactoe", games.tictactoe))
+    app.add_handler(CommandHandler("ttt", games.ttt_move))
+    app.add_handler(CommandHandler("wordchain", games.wordchain_start))
+    app.add_handler(CommandHandler("chainword", games.chain_word))
+    app.add_handler(CommandHandler("trivia", games.trivia_category))
+    app.add_handler(CommandHandler("wordle", games.wordle))
+    app.add_handler(CommandHandler("wordleguess", games.wordle_guess))
 
     # ---- Moderation ----
     app.add_handler(CommandHandler("mute", moderation.mute))
@@ -191,6 +227,13 @@ def main():
     app.add_handler(CommandHandler("topactive", stats.top_active))
     app.add_handler(CommandHandler("msgcount", stats.msg_count))
 
+    # ---- Economy ----
+    app.add_handler(CommandHandler("daily", economy.daily))
+    app.add_handler(CommandHandler("balance", economy.balance))
+    app.add_handler(CommandHandler("rob", economy.rob))
+    app.add_handler(CommandHandler("gamble", economy.gamble))
+    app.add_handler(CommandHandler("richest", economy.economy_leaderboard))
+
     # ---- Utility ----
     app.add_handler(CommandHandler("id", utility.get_id))
     app.add_handler(CommandHandler("info", utility.user_info))
@@ -210,6 +253,9 @@ def main():
     app.add_handler(CommandHandler("lore", aesthetic.lore))
     app.add_handler(CommandHandler("starsign", aesthetic.starsign))
     app.add_handler(CommandHandler("confess", aesthetic.confess))
+    app.add_handler(CommandHandler("moodboard", aesthetic.moodboard))
+    app.add_handler(CommandHandler("dream", aesthetic.dream))
+    app.add_handler(CommandHandler("manifest", aesthetic.manifest))
 
     # ---- Friendship ----
     app.add_handler(CommandHandler("bestie", friendship.bestie))
@@ -220,6 +266,11 @@ def main():
     app.add_handler(CommandHandler("loyalty", friendship.loyalty))
     app.add_handler(CommandHandler("ship", friendship.ship))
     app.add_handler(CommandHandler("randomship", friendship.random_ship))
+    app.add_handler(CommandHandler("matchmaker", friendship.matchmaker))
+    app.add_handler(CommandHandler("friendshiptest", friendship.friendship_test))
+    app.add_handler(CommandHandler("hug", friendship.hug))
+    app.add_handler(CommandHandler("pat", friendship.pat))
+    app.add_handler(CommandHandler("highfive", friendship.highfive))
 
     # ---- Fun / Social ----
     app.add_handler(CommandHandler("roast", fun.roast))
@@ -229,6 +280,9 @@ def main():
     app.add_handler(CommandHandler("quote", fun.quote))
     app.add_handler(CommandHandler("poll", fun.poll))
     app.add_handler(CommandHandler("rank", fun.rank))
+    app.add_handler(CommandHandler("ratethis", fun.rate_this))
+    app.add_handler(CommandHandler("impostor", fun.impostor_start))
+    app.add_handler(CommandHandler("revealimpostor", fun.impostor_reveal))
 
     # ---- Matchmaking ----
     app.add_handler(CommandHandler("crush", matchmaking.set_crush))
@@ -242,6 +296,10 @@ def main():
     app.add_handler(CommandHandler("joined", events.show_joined))
     app.add_handler(CommandHandler("left", events.show_left))
     app.add_handler(ChatMemberHandler(events.on_chat_member_update, ChatMemberHandler.CHAT_MEMBER))
+
+    # ---- Time Capsule ----
+    app.add_handler(CommandHandler("timecapsule", timecapsule.timecapsule))
+    app.add_handler(CommandHandler("capsules", timecapsule.list_capsules))
 
     # Use the token as the URL path — keeps the webhook endpoint private,
     # since guessing it means guessing your token.
