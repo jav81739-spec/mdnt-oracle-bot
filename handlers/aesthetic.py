@@ -23,6 +23,36 @@ AURA_COLORS = [
     ("Gold 💛", "magnetic — people are drawn to you without knowing why"),
 ]
 
+FATE_LINES = [
+    "Today favors those who stay quiet and watch.",
+    "A message you're waiting for arrives sooner than expected.",
+    "Avoid decisions made before noon.",
+    "Someone from your past resurfaces — let them.",
+]
+
+LORE_TEMPLATES = [
+    "Legend says this group was born under a blood moon, and every message since has echoed through the void 🌑",
+    "They say the founder of this chat once bargained with silence itself just to keep the group alive 🕯️",
+    "In the old texts, it is written: this group shall never truly sleep, only whisper 👁️",
+]
+
+STARSIGNS = {
+    "aries": "Fire and impatience — you move before you think, and it usually works out.",
+    "taurus": "Grounded and stubborn — once you decide, the universe better keep up.",
+    "gemini": "Two minds in one body — restless, curious, impossible to predict.",
+    "cancer": "Guarded but deep — you feel everything, you just don't always show it.",
+    "leo": "Magnetic and proud — the room notices when you walk in.",
+    "virgo": "Precise and quietly powerful — chaos bends around your order.",
+    "libra": "Balance-seeking — you'd rather lose a little than break the peace.",
+    "scorpio": "Intense and private — few really know what's underneath.",
+    "sagittarius": "Free and blunt — you say what others are afraid to.",
+    "capricorn": "Patient and ambitious — you're playing a longer game than most.",
+    "aquarius": "Detached and visionary — you live slightly ahead of everyone else.",
+    "pisces": "Dreamy and absorbent — you carry the moods of the room.",
+}
+
+EMOJI_AURAS = ["🌊😌", "🔥😤", "🌙🥱", "⚡😏", "🍃😇", "🖤😈", "✨🥹"]
+
 
 async def oracle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     question = " ".join(context.args) if context.args else "your question"
@@ -38,6 +68,50 @@ async def aura(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = update.message.reply_to_message.from_user if update.message.reply_to_message else update.effective_user
     color, vibe = random.choice(AURA_COLORS)
     await update.message.reply_text(f"✨ {target.first_name}'s aura is *{color}*\n_{vibe}_", parse_mode="Markdown")
+
+
+async def fate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"🕯️ *Today's fate:*\n\n_{random.choice(FATE_LINES)}_", parse_mode="Markdown")
+
+
+async def whisper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.reply_to_message or not context.args:
+        await update.message.reply_text("Usage: reply to someone's message with /whisper [your secret text]")
+        return
+    target = update.message.reply_to_message.from_user
+    text = " ".join(context.args)
+    try:
+        await context.bot.send_message(target.id, f"👁️ A whisper from the group:\n\n{text}")
+        await update.message.reply_text(f"👁️ Someone whispered to {target.first_name}...")
+    except Exception:
+        await update.message.reply_text(
+            f"Couldn't deliver — {target.first_name} needs to have started a DM with me first."
+        )
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+
+async def lore(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"📜 {random.choice(LORE_TEMPLATES)}")
+
+
+async def starsign(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: /starsign [sign] — e.g. /starsign scorpio")
+        return
+    sign = context.args[0].lower()
+    meaning = STARSIGNS.get(sign)
+    if not meaning:
+        await update.message.reply_text("Unknown sign. Try: aries, taurus, gemini, cancer, leo, virgo, libra, scorpio, sagittarius, capricorn, aquarius, pisces")
+        return
+    await update.message.reply_text(f"🌌 *{sign.title()}*\n\n_{meaning}_", parse_mode="Markdown")
+
+
+async def emoji_aura(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    target = update.message.reply_to_message.from_user if update.message.reply_to_message else update.effective_user
+    await update.message.reply_text(f"{target.first_name}'s energy reading: {random.choice(EMOJI_AURAS)}")
 
 
 async def confess(update: Update, context: ContextTypes.DEFAULT_TYPE):
