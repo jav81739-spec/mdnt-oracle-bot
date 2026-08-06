@@ -69,7 +69,7 @@ async def run_bot():
     app.add_handler(CommandHandler("id", utility.get_id))
     app.add_handler(CommandHandler("info", utility.user_info))
     app.add_handler(CommandHandler("remind", utility.remind))
-
+app.add_handler(CommandHandler("help", utility.help_command))
     # ---- Aesthetic / Mysterious ----
     app.add_handler(CommandHandler("oracle", aesthetic.oracle))
     app.add_handler(CommandHandler("tarot", aesthetic.tarot))
