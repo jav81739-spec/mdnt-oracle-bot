@@ -48,5 +48,39 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         when=delay,
     )
     await update.message.reply_text(f"Got it, I'll remind you in {time_str} ⏳")
+
+
 async def start_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✨ Welcome to the Midnight Realm! Send /oracle or /help to begin.")
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "🌙 *Midnight Oracle — Commands*\n\n"
+        "*💬 Chat*\n"
+        "/chat — toggle AI chat mode\n"
+        "/persona [style] — set bot personality\n\n"
+        "*🎮 Games*\n"
+        "/quiz — trivia round\n"
+        "/truth — truth question\n"
+        "/dare — dare challenge\n"
+        "/wyr — would you rather\n"
+        "/rps [rock/paper/scissors] — play vs bot\n\n"
+        "*🌙 Aesthetic*\n"
+        "/oracle [question] — cryptic answer\n"
+        "/tarot — draw a card\n"
+        "/aura — reply to someone for their aura\n"
+        "/confess [text] — anonymous confession\n\n"
+        "*👥 Friendship*\n"
+        "/bestie — reply to someone to declare bestie\n"
+        "/duo — reply to someone for a duo name\n\n"
+        "*🛠️ Utility*\n"
+        "/id — get user/chat ID\n"
+        "/info — user info card\n"
+        "/remind [time] [text] — set a reminder (e.g. /remind 10m stretch)\n\n"
+        "*⚙️ Admin (admins only)*\n"
+        "/mute /unmute /ban /kick — reply to a user's message\n"
+        "/warn — reply to warn a user (3 warns = auto-ban)\n"
+        "/rules — show group rules"
+    )
+    await update.message.reply_text(text, parse_mode="Markdown")
