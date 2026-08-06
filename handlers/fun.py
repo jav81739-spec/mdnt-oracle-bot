@@ -1,6 +1,7 @@
 import random
 from telegram import Update
 from telegram.ext import ContextTypes
+from handlers.mentions import mention
 
 ROASTS = [
     "you're the human version of a buffering icon",
@@ -38,12 +39,16 @@ QUOTES = [
 
 async def roast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = update.message.reply_to_message.from_user if update.message.reply_to_message else update.effective_user
-    await update.message.reply_text(f"🔥 {target.first_name}, {random.choice(ROASTS)}")
+    await update.message.reply_text(
+        f"🔥 {mention(target.id, target.first_name)}, {random.choice(ROASTS)}", parse_mode="Markdown"
+    )
 
 
 async def compliment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = update.message.reply_to_message.from_user if update.message.reply_to_message else update.effective_user
-    await update.message.reply_text(f"💐 {target.first_name}, {random.choice(COMPLIMENTS)}")
+    await update.message.reply_text(
+        f"💐 {mention(target.id, target.first_name)}, {random.choice(COMPLIMENTS)}", parse_mode="Markdown"
+    )
 
 
 async def eight_ball(update: Update, context: ContextTypes.DEFAULT_TYPE):
