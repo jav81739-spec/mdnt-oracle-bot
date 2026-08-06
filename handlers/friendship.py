@@ -196,3 +196,79 @@ async def loyalty(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🛡️ {mention(target.id, target.first_name)}'s loyalty score: *{score}/100*\n_{desc}_",
         parse_mode="Markdown",
     )
+
+
+MATCHMAKER_REASONS = [
+    "you both reply to messages at 2 AM like it's normal",
+    "matching chaotic energy levels detected",
+    "you both have unread messages from everyone except each other",
+    "the algorithm has spoken, no notes",
+]
+
+ACTIONS = {
+    "hug": "🤗 wraps {target} in a warm hug",
+    "pat": "🖐️ gives {target} a gentle head pat",
+    "highfive": "🙌 high-fives {target}",
+}
+
+
+async def matchmaker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bot randomly pairs two active members with a compatibility % and a funny reason."""
+    chat_id = update.effective_chat.id
+    pool = list(message_counts.get(chat_id, {}).items())
+    if len(pool) < 2:
+        await update.message.reply_text("Not enough active members tracked yet — chat more first!")
+        return
+    (id1, data1), (id2, data2) = random.sample(pool, 2)
+    score = random.randint(50, 100)
+    reason = random.choice(MATCHMAKER_REASONS)
+    await update.message.reply_text(
+        f"💘 The matchmaker has spoken:\n\n"
+        f"{mention(id1, data1['name'])} + {mention(id2, data2['name'])} — *{score}%* match\n"
+        f"_{reason}_",
+        parse_mode="Markdown",
+    )
+
+
+async def friendship_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mini quiz-style score — reply to someone to test friendship strength."""
+    if not update.message.reply_to_message:
+        await update.message.reply_text("Reply to someone's message with /friendshiptest")
+        return
+    user1 = update.effective_user
+    user2 = update.message.reply_to_message.from_user
+    categories = {
+        "Trust": random.randint(50, 100),
+        "Humor sync": random.randint(50, 100),
+        "Loyalty": random.randint(50, 100),
+        "Chaos compatibility": random.randint(50, 100),
+    }
+    lines = [f"{k}: {'▓' * (v // 10)}{'░' * (10 - v // 10)} {v}%" for k, v in categories.items()]
+    overall = sum(categories.values()) // len(categories)
+    await update.message.reply_text(
+        f"🧪 Friendship Test: {mention(user1.id, user1.first_name)} + {mention(user2.id, user2.first_name)}\n\n"
+        + "\n".join(lines) + f"\n\nOverall: *{overall}%*",
+        parse_mode="Markdown",
+    )
+
+
+async def _action(update: Update, context: ContextTypes.DEFAULT_TYPE, action_key: str):
+    if not update.message.reply_to_message:
+        await update.message.reply_text(f"Reply to someone's message with /{action_key}")
+        return
+    actor = update.effective_user
+    target = update.message.reply_to_message.from_user
+    text = ACTIONS[action_key].format(target=mention(target.id, target.first_name))
+    await update.message.reply_text(f"{mention(actor.id, actor.first_name)} {text}", parse_mode="Markdown")
+
+
+async def hug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _action(update, context, "hug")
+
+
+async def pat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _action(update, context, "pat")
+
+
+async def highfive(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _action(update, context, "highfive")
