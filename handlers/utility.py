@@ -50,6 +50,68 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Got it, I'll remind you in {time_str} ⏳")
 
 
+afk_users = {}  # {chat_id: {user_id: reason}}
+
+
+async def group_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    member_count = await context.bot.get_chat_member_count(chat.id)
+    await update.message.reply_text(
+        f"📋 *{chat.title}*\n"
+        f"Chat ID: {chat.id}\n"
+        f"Members: {member_count}\n"
+        f"Type: {chat.type}",
+        parse_mode="Markdown",
+    )
+
+
+async def set_afk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    reason = " ".join(context.args) if context.args else "No reason given"
+    afk_users.setdefault(chat_id, {})
+    afk_users[chat_id][user_id] = reason
+    await update.message.reply_text(f"💤 {update.effective_user.first_name} is now AFK: {reason}")
+
+
+async def check_afk_mentions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Call on every message: if it replies to or mentions an AFK user, notify."""
+    chat_id = update.effective_chat.id
+    afk_dict = afk_users.get(chat_id, {})
+    if not afk_dict:
+        return
+
+    # Clear AFK if the AFK user themself sends a message
+    user_id = update.effective_user.id
+    if user_id in afk_dict:
+        del afk_dict[user_id]
+        await update.message.reply_text(f"👋 Welcome back, {update.effective_user.first_name}! AFK status cleared.")
+        return
+
+    # Notify if replying to an AFK user
+    if update.message.reply_to_message and update.message.reply_to_message.from_user:
+        target_id = update.message.reply_to_message.from_user.id
+        if target_id in afk_dict:
+            name = update.message.reply_to_message.from_user.first_name
+            await update.message.reply_text(f"💤 {name} is AFK: {afk_dict[target_id]}")
+
+
+async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.reply_to_message:
+        await update.message.reply_text("Reply to the message you want to report with /report")
+        return
+    target = update.message.reply_to_message.from_user
+    reporter = update.effective_user
+    try:
+        admins = await context.bot.get_chat_administrators(update.effective_chat.id)
+        admin_tags = " ".join(f"@{a.user.username}" for a in admins if a.user.username and not a.user.is_bot)
+    except Exception:
+        admin_tags = ""
+    await update.message.reply_text(
+        f"🚩 {reporter.first_name} reported a message from {target.first_name}. {admin_tags}".strip()
+    )
+
+
 async def start_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✨ Welcome to the Midnight Realm! Send /oracle or /help to begin.")
 
@@ -93,6 +155,23 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*⚙️ Admin (admins only)*\n"
         "/mute /unmute /ban /kick — reply to a user's message\n"
         "/warn — reply to warn a user (3 warns = auto-ban)\n"
-        "/rules — show group rules"
+        "/warnings /clearwarns — reply to check/clear warnings\n"
+        "/pin /unpin — reply to pin a message\n"
+        "/purge [count] — reply + delete N messages\n"
+        "/rules /setrules [text]\n"
+        "/lock [media/all] /unlock\n"
+        "/setwelcome [text] /setgoodbye [text] — use {name}\n"
+        "/invite — get a fresh invite link\n\n"
+        "*📊 Stats*\n"
+        "/stats — group activity totals\n"
+        "/topactive — ranked most active members\n"
+        "/msgcount — reply to check someone's count\n"
+        "/joined /left — recent join/leave logs\n\n"
+        "*🛠️ More Utility*\n"
+        "/groupinfo — group info card\n"
+        "/afk [reason] — mark yourself away\n"
+        "/report — reply to flag a message to admins\n"
+        "/poll Question | A | B | C\n"
+        "/rank — reply to check activity tier"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
