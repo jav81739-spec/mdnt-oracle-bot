@@ -64,3 +64,41 @@ async def vibe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def quote(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"📖 {random.choice(QUOTES)}")
+
+
+async def poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Usage: /poll Question | Option1 | Option2 | Option3"""
+    raw = " ".join(context.args)
+    parts = [p.strip() for p in raw.split("|") if p.strip()]
+    if len(parts) < 3:
+        await update.message.reply_text("Usage: /poll Question | Option1 | Option2 | Option3 (up to 10 options)")
+        return
+    question, options = parts[0], parts[1:]
+    await context.bot.send_poll(update.effective_chat.id, question=question, options=options, is_anonymous=False)
+
+
+RANK_TIERS = [
+    (0, "🌱 Newcomer"),
+    (10, "🥉 Bronze"),
+    (50, "🥈 Silver"),
+    (150, "🥇 Gold"),
+    (400, "💎 Diamond"),
+    (1000, "👑 Legend"),
+]
+
+
+async def rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from handlers.friendship import message_counts
+    from handlers.mentions import mention
+
+    target = update.message.reply_to_message.from_user if update.message.reply_to_message else update.effective_user
+    chat_id = update.effective_chat.id
+    count = message_counts.get(chat_id, {}).get(target.id, {}).get("count", 0)
+    tier = RANK_TIERS[0][1]
+    for threshold, name in RANK_TIERS:
+        if count >= threshold:
+            tier = name
+    await update.message.reply_text(
+        f"{mention(target.id, target.first_name)}'s rank: *{tier}* ({count} messages)",
+        parse_mode="Markdown",
+    )
