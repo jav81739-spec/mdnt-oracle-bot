@@ -1,6 +1,7 @@
 import random
 from telegram import Update
 from telegram.ext import ContextTypes
+from handlers.mentions import mention
 
 ORACLE_LINES = [
     "The answer lies where you least expect it...",
@@ -67,7 +68,7 @@ async def tarot(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def aura(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = update.message.reply_to_message.from_user if update.message.reply_to_message else update.effective_user
     color, vibe = random.choice(AURA_COLORS)
-    await update.message.reply_text(f"✨ {target.first_name}'s aura is *{color}*\n_{vibe}_", parse_mode="Markdown")
+    await update.message.reply_text(f"✨ {mention(target.id, target.first_name)}'s aura is *{color}*\n_{vibe}_", parse_mode="Markdown")
 
 
 async def fate(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -111,7 +112,10 @@ async def starsign(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def emoji_aura(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = update.message.reply_to_message.from_user if update.message.reply_to_message else update.effective_user
-    await update.message.reply_text(f"{target.first_name}'s energy reading: {random.choice(EMOJI_AURAS)}")
+    await update.message.reply_text(
+        f"{mention(target.id, target.first_name)}'s energy reading: {random.choice(EMOJI_AURAS)}",
+        parse_mode="Markdown",
+    )
 
 
 async def confess(update: Update, context: ContextTypes.DEFAULT_TYPE):
