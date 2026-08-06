@@ -66,6 +66,39 @@ async def ship(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def random_ship(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bot picks TWO random active members from the group itself and ships
+    them — fully bot-driven, no one chooses, no privacy concern since it's
+    random and public, not a real feelings reveal."""
+    chat_id = update.effective_chat.id
+    pool = list(message_counts.get(chat_id, {}).items())
+    if len(pool) < 2:
+        await update.message.reply_text(
+            "Not enough active members tracked yet — need at least 2 people "
+            "who've sent a message since I joined. Chat a bit more first!"
+        )
+        return
+
+    (id1, data1), (id2, data2) = random.sample(pool, 2)
+    name1, name2 = data1["name"], data2["name"]
+
+    score = random.randint(0, 100)
+    bar_filled = "❤️" * (score // 10)
+    bar_empty = "🖤" * (10 - score // 10)
+    tier = "low" if score < 40 else "mid" if score < 75 else "high"
+    verdict = random.choice(SHIP_VERDICTS[tier])
+    ship_name = _ship_name(name1, name2)
+
+    await update.message.reply_text(
+        f"🎲 Random ship of the moment...\n\n"
+        f"🚢 *{name1}* + *{name2}*\n"
+        f"Ship name: *{ship_name}*\n"
+        f"{bar_filled}{bar_empty} {score}%\n"
+        f"_{verdict}_",
+        parse_mode="Markdown",
+    )
+
+
 async def track_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Call this on every message to feed /squad's activity ranking."""
     if not update.effective_chat or not update.effective_user:
