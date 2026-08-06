@@ -20,9 +20,9 @@ import logging
 import os
 from dotenv import load_dotenv
 from telegram import BotCommand
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, ChatMemberHandler, filters
 
-from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking
+from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
@@ -96,6 +96,27 @@ BOT_COMMANDS = [
     BotCommand("kick", "Kick a user (admin)"),
     BotCommand("warn", "Warn a user (admin)"),
     BotCommand("rules", "Show group rules"),
+    BotCommand("warnings", "Check a user's warning count"),
+    BotCommand("clearwarns", "Clear a user's warnings (admin)"),
+    BotCommand("pin", "Pin the replied message (admin)"),
+    BotCommand("unpin", "Unpin current message (admin)"),
+    BotCommand("purge", "Delete N messages (admin)"),
+    BotCommand("setrules", "Set group rules (admin)"),
+    BotCommand("lock", "Restrict media/messages (admin)"),
+    BotCommand("unlock", "Restore normal permissions (admin)"),
+    BotCommand("stats", "Group activity stats"),
+    BotCommand("topactive", "Ranked most active members"),
+    BotCommand("msgcount", "A member's tracked message count"),
+    BotCommand("groupinfo", "Group info card"),
+    BotCommand("afk", "Mark yourself away"),
+    BotCommand("report", "Report a message to admins"),
+    BotCommand("poll", "Create a poll: /poll Q | A | B"),
+    BotCommand("rank", "Activity-based rank tier"),
+    BotCommand("setwelcome", "Set custom welcome message (admin)"),
+    BotCommand("setgoodbye", "Set custom goodbye message (admin)"),
+    BotCommand("invite", "Get a fresh invite link (admin)"),
+    BotCommand("joined", "Recent joins log"),
+    BotCommand("left", "Recent leaves log"),
 ]
 
 
@@ -156,11 +177,28 @@ def main():
     app.add_handler(CommandHandler("kick", moderation.kick))
     app.add_handler(CommandHandler("warn", moderation.warn))
     app.add_handler(CommandHandler("rules", moderation.show_rules))
+    app.add_handler(CommandHandler("warnings", moderation.check_warnings))
+    app.add_handler(CommandHandler("clearwarns", moderation.clear_warnings))
+    app.add_handler(CommandHandler("pin", moderation.pin))
+    app.add_handler(CommandHandler("unpin", moderation.unpin))
+    app.add_handler(CommandHandler("purge", moderation.purge))
+    app.add_handler(CommandHandler("setrules", moderation.set_rules))
+    app.add_handler(CommandHandler("lock", moderation.lock))
+    app.add_handler(CommandHandler("unlock", moderation.unlock))
+
+    # ---- Stats / Activity Log ----
+    app.add_handler(CommandHandler("stats", stats.stats))
+    app.add_handler(CommandHandler("topactive", stats.top_active))
+    app.add_handler(CommandHandler("msgcount", stats.msg_count))
 
     # ---- Utility ----
     app.add_handler(CommandHandler("id", utility.get_id))
     app.add_handler(CommandHandler("info", utility.user_info))
     app.add_handler(CommandHandler("remind", utility.remind))
+    app.add_handler(CommandHandler("groupinfo", utility.group_info))
+    app.add_handler(CommandHandler("afk", utility.set_afk))
+    app.add_handler(CommandHandler("report", utility.report))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, utility.check_afk_mentions), group=2)
 
     # ---- Aesthetic / Mysterious ----
     app.add_handler(CommandHandler("oracle", aesthetic.oracle))
@@ -189,11 +227,21 @@ def main():
     app.add_handler(CommandHandler("8ball", fun.eight_ball))
     app.add_handler(CommandHandler("vibe", fun.vibe))
     app.add_handler(CommandHandler("quote", fun.quote))
+    app.add_handler(CommandHandler("poll", fun.poll))
+    app.add_handler(CommandHandler("rank", fun.rank))
 
     # ---- Matchmaking ----
     app.add_handler(CommandHandler("crush", matchmaking.set_crush))
     app.add_handler(CommandHandler("clearcrush", matchmaking.clear_crush))
     app.add_handler(CommandHandler("secretadmirer", matchmaking.secret_admirer))
+
+    # ---- Events (join/leave/welcome/goodbye) ----
+    app.add_handler(CommandHandler("setwelcome", events.set_welcome))
+    app.add_handler(CommandHandler("setgoodbye", events.set_goodbye))
+    app.add_handler(CommandHandler("invite", events.get_invite))
+    app.add_handler(CommandHandler("joined", events.show_joined))
+    app.add_handler(CommandHandler("left", events.show_left))
+    app.add_handler(ChatMemberHandler(events.on_chat_member_update, ChatMemberHandler.CHAT_MEMBER))
 
     # Use the token as the URL path — keeps the webhook endpoint private,
     # since guessing it means guessing your token.
