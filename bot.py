@@ -1,5 +1,5 @@
 """
-Main entry point for the bot — WEBHOOK MODE with optimized command scopes.
+Main entry point for the bot — WEBHOOK MODE.
 Run with: python bot.py
 
 Requires these environment variables set on Render:
@@ -19,7 +19,7 @@ Render up if it was asleep. This is the correct setup for free hosting.
 import logging
 import os
 from dotenv import load_dotenv
-from telegram import BotCommand, BotCommandScope, BotCommandScopeDefault, BotCommandScopeAllGroupChats, BotCommandScopeAllChatAdministrators
+from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, ChatMemberHandler, filters
 
 from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule
@@ -27,6 +27,8 @@ from handlers import chat, games, moderation, utility, aesthetic, friendship, fu
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 
+# Render sets this automatically for every web service, e.g.
+# https://your-service-name.onrender.com
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
 PORT = int(os.getenv("PORT", 10000))
 
@@ -36,27 +38,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ===== COMMAND SCOPES =====
-# Private chats (DM): Core commands users interact with
-PRIVATE_COMMANDS = [
+# This list populates the "/" autocomplete menu in Telegram.
+BOT_COMMANDS = [
     BotCommand("start", "Welcome message"),
     BotCommand("help", "List all commands"),
     BotCommand("chat", "Toggle AI chat mode"),
     BotCommand("persona", "Set bot personality"),
-    BotCommand("balance", "Check coin balance"),
-    BotCommand("daily", "Claim daily coins"),
-    BotCommand("leaderboard", "Show game rankings"),
-    BotCommand("crush", "Privately pick a crush"),
-    BotCommand("clearcrush", "Clear your crush"),
-    BotCommand("bestie", "Declare a bestie"),
-    BotCommand("afk", "Mark yourself away"),
-    BotCommand("remind", "Set a reminder"),
-    BotCommand("id", "Get user/chat ID"),
-    BotCommand("info", "User info card"),
-]
-
-# Group chats: Fun & engagement commands
-GROUP_COMMANDS = [
     BotCommand("quiz", "Trivia round"),
     BotCommand("truth", "Truth question"),
     BotCommand("dare", "Dare challenge"),
@@ -64,14 +51,13 @@ GROUP_COMMANDS = [
     BotCommand("nhie", "Never have I ever"),
     BotCommand("rps", "Rock paper scissors vs bot"),
     BotCommand("riddle", "Get a riddle"),
-    BotCommand("riddleanswer", "Answer the active riddle"),
     BotCommand("scramble", "Unscramble a word"),
-    BotCommand("unscramble", "Answer the active scramble"),
     BotCommand("guess", "Guess a number 1-20"),
+    BotCommand("leaderboard", "Show game win rankings"),
     BotCommand("dice", "Roll a dice"),
     BotCommand("darts", "Throw darts"),
     BotCommand("basketball", "Shoot a basketball"),
-    BotCommand("bowling", "Bowl a strike"),
+    BotCommand("bowling", "Bowl a strike (maybe)"),
     BotCommand("football", "Kick a football"),
     BotCommand("slot", "Spin the slot machine"),
     BotCommand("oracle", "Ask the oracle a question"),
@@ -83,6 +69,7 @@ GROUP_COMMANDS = [
     BotCommand("lore", "Random group lore drop"),
     BotCommand("starsign", "Zodiac reading"),
     BotCommand("confess", "Anonymous confession"),
+    BotCommand("bestie", "Declare a bestie"),
     BotCommand("duo", "Generate a duo name"),
     BotCommand("friendship", "Compatibility score"),
     BotCommand("tagbestie", "Ping your declared bestie"),
@@ -94,24 +81,48 @@ GROUP_COMMANDS = [
     BotCommand("8ball", "Magic 8-ball answer"),
     BotCommand("vibe", "Vibe check the chat"),
     BotCommand("quote", "Random quote"),
-    BotCommand("randomship", "Bot randomly ships two members"),
-    BotCommand("secretadmirer", "Bot sends anonymous kind DM"),
+    BotCommand("crush", "Privately pick a crush (reply to their message)"),
+    BotCommand("clearcrush", "Clear your current pick"),
+    BotCommand("randomship", "Bot randomly ships two active members"),
+    BotCommand("secretadmirer", "Bot sends a random member an anonymous kind DM"),
+    BotCommand("id", "Get user/chat ID"),
+    BotCommand("info", "User info card"),
+    BotCommand("remind", "Set a reminder"),
+    BotCommand("mute", "Mute a user (admin)"),
+    BotCommand("unmute", "Unmute a user (admin)"),
+    BotCommand("ban", "Ban a user (admin)"),
+    BotCommand("kick", "Kick a user (admin)"),
+    BotCommand("warn", "Warn a user (admin)"),
+    BotCommand("rules", "Show group rules"),
+    BotCommand("warnings", "Check a user's warning count"),
+    BotCommand("clearwarns", "Clear a user's warnings (admin)"),
+    BotCommand("pin", "Pin the replied message (admin)"),
+    BotCommand("unpin", "Unpin current message (admin)"),
+    BotCommand("purge", "Delete N messages (admin)"),
+    BotCommand("setrules", "Set group rules (admin)"),
+    BotCommand("lock", "Restrict media/messages (admin)"),
+    BotCommand("unlock", "Restore normal permissions (admin)"),
     BotCommand("stats", "Group activity stats"),
     BotCommand("topactive", "Ranked most active members"),
     BotCommand("msgcount", "A member's tracked message count"),
     BotCommand("groupinfo", "Group info card"),
+    BotCommand("afk", "Mark yourself away"),
     BotCommand("report", "Report a message to admins"),
     BotCommand("poll", "Create a poll: /poll Q | A | B"),
     BotCommand("rank", "Activity-based rank tier"),
+    BotCommand("setwelcome", "Set custom welcome message (admin)"),
+    BotCommand("setgoodbye", "Set custom goodbye message (admin)"),
+    BotCommand("invite", "Get a fresh invite link (admin)"),
+    BotCommand("joined", "Recent joins log"),
+    BotCommand("left", "Recent leaves log"),
     BotCommand("hangman", "Start hangman"),
-    BotCommand("hangmanguess", "Guess a letter"),
     BotCommand("tictactoe", "Challenge someone (reply)"),
     BotCommand("ttt", "Make a tic-tac-toe move 1-9"),
     BotCommand("wordchain", "Start a word chain"),
-    BotCommand("chainword", "Submit next word in chain"),
     BotCommand("trivia", "Trivia by category"),
     BotCommand("wordle", "Get today's wordle"),
-    BotCommand("wordleguess", "Guess the wordle word"),
+    BotCommand("daily", "Claim daily coins"),
+    BotCommand("balance", "Check coin balance"),
     BotCommand("rob", "Try robbing someone (reply)"),
     BotCommand("gamble", "Gamble your coins"),
     BotCommand("richest", "Coin leaderboard"),
@@ -128,58 +139,21 @@ GROUP_COMMANDS = [
     BotCommand("ratethis", "Rate the replied message"),
     BotCommand("timecapsule", "Lock a message for later"),
     BotCommand("capsules", "List pending time capsules"),
-    BotCommand("joined", "Recent joins log"),
-    BotCommand("left", "Recent leaves log"),
-]
-
-# Admin-only commands (shown only to admins)
-ADMIN_COMMANDS = [
-    BotCommand("mute", "Mute a user (admin)"),
-    BotCommand("unmute", "Unmute a user (admin)"),
-    BotCommand("ban", "Ban a user (admin)"),
-    BotCommand("kick", "Kick a user (admin)"),
-    BotCommand("warn", "Warn a user (admin)"),
-    BotCommand("rules", "Show group rules"),
-    BotCommand("warnings", "Check a user's warning count"),
-    BotCommand("clearwarns", "Clear a user's warnings (admin)"),
-    BotCommand("pin", "Pin the replied message (admin)"),
-    BotCommand("unpin", "Unpin current message (admin)"),
-    BotCommand("purge", "Delete N messages (admin)"),
-    BotCommand("setrules", "Set group rules (admin)"),
-    BotCommand("lock", "Restrict media/messages (admin)"),
-    BotCommand("unlock", "Restore normal permissions (admin)"),
-    BotCommand("setwelcome", "Set custom welcome message (admin)"),
-    BotCommand("setgoodbye", "Set custom goodbye message (admin)"),
-    BotCommand("invite", "Get a fresh invite link (admin)"),
 ]
 
 
 async def _post_init(app: Application):
-    """Runs once on startup — registers command menus by scope with Telegram."""
-    try:
-        # Private chats (DM) - show essential commands
-        await app.bot.set_my_commands(
-            PRIVATE_COMMANDS,
-            scope=BotCommandScopeDefault()
-        )
-        logger.info(f"✓ Private commands registered ({len(PRIVATE_COMMANDS)} commands)")
-        
-        # Group chats - show fun & engagement commands
-        await app.bot.set_my_commands(
-            GROUP_COMMANDS,
-            scope=BotCommandScopeAllGroupChats()
-        )
-        logger.info(f"✓ Group commands registered ({len(GROUP_COMMANDS)} commands)")
-        
-        # Group admins - show all admin tools
-        await app.bot.set_my_commands(
-            ADMIN_COMMANDS,
-            scope=BotCommandScopeAllChatAdministrators()
-        )
-        logger.info(f"✓ Admin commands registered ({len(ADMIN_COMMANDS)} commands)")
-        
-    except Exception as e:
-        logger.error(f"Failed to set bot commands: {e}")
+    """Runs once on startup — registers the / command menu with Telegram,
+    and restores persisted data (coins, pending time capsules) from
+    Redis if it's configured."""
+    await app.bot.set_my_commands(BOT_COMMANDS)
+    logger.info("Command menu registered with Telegram.")
+
+    await economy.load_from_storage()
+    logger.info("Economy balances loaded from persistent storage.")
+
+    await timecapsule.load_and_reschedule(app)
+    logger.info("Time capsules loaded and rescheduled from persistent storage.")
 
 
 def main():
@@ -202,6 +176,8 @@ def main():
     app.add_handler(CommandHandler("chat", chat.toggle_chat))
     app.add_handler(CommandHandler("persona", chat.set_persona))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat.auto_reply), group=0)
+    # Separate group so activity tracking runs on every message independently
+    # of whether chat mode replied to it.
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, friendship.track_message), group=1)
 
     # ---- Games ----
@@ -328,6 +304,8 @@ def main():
     app.add_handler(CommandHandler("timecapsule", timecapsule.timecapsule))
     app.add_handler(CommandHandler("capsules", timecapsule.list_capsules))
 
+    # Use the token as the URL path — keeps the webhook endpoint private,
+    # since guessing it means guessing your token.
     webhook_path = TOKEN
     full_webhook_url = f"{RENDER_EXTERNAL_URL}/{webhook_path}"
 
