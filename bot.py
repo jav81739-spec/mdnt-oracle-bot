@@ -155,6 +155,9 @@ async def _post_init(app: Application):
     await timecapsule.load_and_reschedule(app)
     logger.info("Time capsules loaded and rescheduled from persistent storage.")
 
+    await chat.load_from_storage()
+    logger.info("Chat mode settings loaded from persistent storage — /chat toggle now survives restarts.")
+
 
 def main():
     if not TOKEN:
@@ -179,6 +182,9 @@ def main():
     # Separate group so activity tracking runs on every message independently
     # of whether chat mode replied to it.
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, friendship.track_message), group=1)
+    app.add_handler(CommandHandler("sticker", chat.send_random_sticker))
+    app.add_handler(CommandHandler("gif", chat.send_random_gif))
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, chat.maybe_react_to_message), group=3)
 
     # ---- Games ----
     app.add_handler(CommandHandler("quiz", games.quiz))
