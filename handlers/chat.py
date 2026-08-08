@@ -168,7 +168,16 @@ STICKER_SETS = [
 # A small set of direct sticker file_ids from Telegram's default packs.
 # These are stable, public, and don't require your bot to own the pack.
 SAMPLE_STICKERS = [
-    "CAACAgIAAxkBAAEBdummy1",  # placeholder — replace with real file_ids, see note below
+    "CAACAgUAAxkBAAEGBzJqdp9ai3sYNonxPitgXwW1HsGYLQACigEAAqMYnj7IByAbmW8_0z0E",
+    "CAACAgUAAxkBAAEGBzBqdp8mL5Juj0jyC3nh7q2mdBwJbAACyRMAAlJekFeBRat3I0udiz0E",
+    "CAACAgUAAxkBAAEGBy5qdp8Uv6Pi3-VK9BJ7nn8_08Ju5wACsQQAAqQhMVYQIkv-OAABHc49BA",
+    "CAACAgUAAxkBAAEGByxqdp7ystKCl2Rj7YKklllelMrR2gACqRUAAkggCFejMbHj9ySCNj0E",
+    "CAACAgUAAxkBAAEGByZqdp6sg55QIGUcBVbW5ZvbvR1B8QACFhEAAlYTiVduxmgSyR8nUT0E",
+    "CAACAgUAAxkBAAEGBxxqdp587c9-Vw1hftneSbQ9pWWtXQAC5BgAAremsVRaWlNEWRIuZz0E",
+    "CAACAgUAAxkBAAEGBxpqdp5twHyvyAABbNEdbXdkTXCb7eAAAukaAAK32rhVVsDSda6ab2w9BA",
+    "CAACAgUAAxkBAAEGBzRqdp_FeJQQ3EJfKq_Y7fZ-5l9lngAC5wEAAq4xRgWFtzPKdb1ZuD0E",
+    "CAACAgUAAxkBAAEGBzZqdp_rySrqxo6FHWJ7J7VCq9HesAAC_xAAAn9jEVbXO-B4ukFDLz0E",
+    "CAACAgUAAxkBAAEGBzhqdqAQk68E9J2t0sf1bwMizD3_ogACqgMAAnC-SFblo1QW5PoU0D0E",
 ]
 
 GIF_SEARCH_TERMS = ["funny reaction", "excited", "lol", "confused", "celebration", "facepalm"]
