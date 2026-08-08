@@ -22,8 +22,11 @@ chat_history = {}
 
 DEFAULT_PERSONA = "friendly, casual, mixes Hinglish naturally, matches the tone of whoever it's replying to"
 MAX_HISTORY = 10
+COOLDOWN_SECONDS = 3  # minimum gap between AI replies per chat — protects free quota
 
 STORAGE_KEY = "chat_settings"
+
+_last_reply_time = {}  # {"<chat_id>": float timestamp} — not persisted, resets on restart, that's fine
 
 
 async def load_from_storage():
@@ -83,6 +86,12 @@ async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not (was_mentioned or was_replied_to or was_keyword_triggered):
         return
 
+    import time
+    now = time.time()
+    if now - _last_reply_time.get(chat_id, 0) < COOLDOWN_SECONDS:
+        return  # too soon since last reply — stay quiet rather than spam-triggering the API
+    _last_reply_time[chat_id] = now
+
     persona = chat_persona.get(chat_id, DEFAULT_PERSONA)
 
     # Track history per chat so replies stay connected to the conversation
@@ -95,10 +104,17 @@ async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f"Gemini API call failed: {e}")
-        await message.reply_text(
-            f"⚠️ AI reply failed — this usually means the Gemini model name changed "
-            f"again or the API key has an issue. Error: {str(e)[:200]}"
-        )
+
+        error_str = str(e).lower()
+        if "429" in error_str or "quota" in error_str or "rate" in error_str:
+            # Free tier hit its request limit — sounds like the bot is
+            # just "thinking" or "resting," not broken, to the group.
+            await message.reply_text("🌙 give me a sec, catching my breath... try again in a minute 😌")
+        else:
+            # Any other failure — stay vague and in-character rather than
+            # dumping a technical error in front of the group. Full details
+            # are already in the Render logs above for us to debug together.
+            await message.reply_text("🌙 my thoughts got a little tangled just now — try that again?")
         return
 
     if reply_text is None:
