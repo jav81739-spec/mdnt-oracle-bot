@@ -212,15 +212,16 @@ async def send_random_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def send_random_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    /gif [search term] — fetches a real random GIF from Tenor's free API.
-    Needs TENOR_API_KEY set in your environment (see README for the free
-    5-minute setup). Without it, tells you clearly instead of failing silently.
+    /gif [search term] — fetches a real random GIF from GIPHY's free API.
+    Needs GIPHY_API_KEY set in your environment (see README — free signup
+    at developers.giphy.com, no credit card required). Without it, tells
+    you clearly instead of failing silently.
     """
-    api_key = os.getenv("TENOR_API_KEY")
+    api_key = os.getenv("GIPHY_API_KEY")
     if not api_key:
         await update.message.reply_text(
-            "🎬 GIFs need a free TENOR_API_KEY — see README for the 2-minute setup "
-            "(no credit card needed)."
+            "🎬 GIFs need a free GIPHY_API_KEY — sign up at developers.giphy.com "
+            "(no card needed), see README for the 2-minute setup."
         )
         return
 
@@ -229,17 +230,17 @@ async def send_random_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import httpx
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
-            "https://tenor.googleapis.com/v2/search",
-            params={"q": term, "key": api_key, "limit": 20, "media_filter": "gif"},
+            "https://api.giphy.com/v1/gifs/search",
+            params={"q": term, "api_key": api_key, "limit": 20, "rating": "pg-13"},
         )
     data = resp.json()
-    results = data.get("results", [])
+    results = data.get("data", [])
     if not results:
         await update.message.reply_text(f"No GIFs found for '{term}' — try a different term.")
         return
 
     chosen = _random.choice(results)
-    gif_url = chosen["media_formats"]["gif"]["url"]
+    gif_url = chosen["images"]["original"]["url"]
     await context.bot.send_animation(update.effective_chat.id, gif_url)
 
 
