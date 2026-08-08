@@ -264,3 +264,18 @@ async def maybe_react_to_message(update: Update, context: ContextTypes.DEFAULT_T
         )
     except Exception:
         pass  # reactions can fail silently (permissions, old message, etc.) — not critical
+
+
+async def sticker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Fires when someone sends a sticker. If chat mode is ON and real
+    sticker IDs are configured (via /getstickerid), the bot replies
+    with a random sticker of its own — sticker gets a sticker back.
+    """
+    chat_id = str(update.effective_chat.id)
+    if not chat_enabled.get(chat_id, False):
+        return
+    if not SAMPLE_STICKERS or SAMPLE_STICKERS[0] == "CAACAgIAAxkBAAEBdummy1":
+        return  # no real stickers configured yet — stay silent, don't spam an error
+    sticker_id = _random.choice(SAMPLE_STICKERS)
+    await context.bot.send_sticker(update.effective_chat.id, sticker_id)
