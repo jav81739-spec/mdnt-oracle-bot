@@ -183,6 +183,7 @@ def main():
     # of whether chat mode replied to it.
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, friendship.track_message), group=1)
     app.add_handler(CommandHandler("sticker", chat.send_random_sticker))
+    app.add_handler(CommandHandler("getstickerid", chat.get_sticker_id))
     app.add_handler(CommandHandler("gif", chat.send_random_gif))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, chat.maybe_react_to_message), group=3)
 
