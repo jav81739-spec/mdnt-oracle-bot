@@ -76,8 +76,11 @@ async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         and message.reply_to_message.from_user
         and message.reply_to_message.from_user.id == context.bot.id
     )
+    # Trigger word: saying "midnight" anywhere in a message wakes the bot up,
+    # same as tagging it — feels more natural, like calling someone's name.
+    was_keyword_triggered = "midnight" in (message.text or "").lower()
 
-    if not (was_mentioned or was_replied_to):
+    if not (was_mentioned or was_replied_to or was_keyword_triggered):
         return
 
     persona = chat_persona.get(chat_id, DEFAULT_PERSONA)
@@ -87,7 +90,16 @@ async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_history[chat_id].append({"role": "user", "text": message.text})
     chat_history[chat_id] = chat_history[chat_id][-MAX_HISTORY:]
 
-    reply_text = await generate_reply(message.text, persona, chat_history[chat_id])
+    try:
+        reply_text = await generate_reply(message.text, persona, chat_history[chat_id])
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Gemini API call failed: {e}")
+        await message.reply_text(
+            f"⚠️ AI reply failed — this usually means the Gemini model name changed "
+            f"again or the API key has an issue. Error: {str(e)[:200]}"
+        )
+        return
 
     if reply_text is None:
         # No API key configured — say so honestly instead of sending a
@@ -136,7 +148,7 @@ async def generate_reply(user_text: str, persona: str, history: list) -> str | N
 
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(
-        model_name="gemini-2.0-flash",
+        model_name="gemini-3.5-flash",  # gemini-2.0-flash was shut down June 1 2026 — this was the actual bug
         system_instruction=system_prompt,
     )
 
@@ -277,13 +289,23 @@ async def maybe_react_to_message(update: Update, context: ContextTypes.DEFAULT_T
 
 async def sticker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Fires when someone sends a sticker. If chat mode is ON and real
-    sticker IDs are configured (via /getstickerid), the bot replies
-    with a random sticker of its own — sticker gets a sticker back.
+    Fires when someone sends a sticker AS A REPLY to the bot's own
+    message specifically — not just any sticker sent anywhere in the
+    chat. This keeps it intentional (someone replying to the bot with
+    a sticker) instead of random/spammy.
     """
     chat_id = str(update.effective_chat.id)
     if not chat_enabled.get(chat_id, False):
         return
+
+    was_replied_to_bot = (
+        update.message.reply_to_message
+        and update.message.reply_to_message.from_user
+        and update.message.reply_to_message.from_user.id == context.bot.id
+    )
+    if not was_replied_to_bot:
+        return
+
     if not SAMPLE_STICKERS or SAMPLE_STICKERS[0] == "CAACAgIAAxkBAAEBdummy1":
         return  # no real stickers configured yet — stay silent, don't spam an error
     sticker_id = _random.choice(SAMPLE_STICKERS)
