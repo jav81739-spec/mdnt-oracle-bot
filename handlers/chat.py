@@ -194,7 +194,7 @@ SAMPLE_STICKERS = [
 
 GIF_SEARCH_TERMS = ["funny reaction", "excited", "lol", "confused", "celebration", "facepalm"]
 
-REACTION_EMOJIS = ["👍", "😂", "🔥", "❤️", "😢", "🎉", "🤔", "👀"]
+REACTION_EMOJIS = ["👍", "🔥", "🎉", "👀", "😁"]
 
 import random as _random
 
@@ -283,8 +283,11 @@ async def maybe_react_to_message(update: Update, context: ContextTypes.DEFAULT_T
             message_id=update.message.message_id,
             reaction=_random.choice(REACTION_EMOJIS),
         )
-    except Exception:
-        pass  # reactions can fail silently (permissions, old message, etc.) — not critical
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).info(
+            f"Reaction failed (likely group has reactions restricted/disabled): {e}"
+        )
 
 
 async def sticker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
