@@ -189,21 +189,21 @@ async def get_sticker_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     sticker = update.message.reply_to_message.sticker
     await update.message.reply_text(f"📎 Sticker file_id:\n`{sticker.file_id}`", parse_mode="Markdown")
+
+
+async def send_random_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /sticker — sends a random sticker.
     NOTE: Telegram requires real sticker file_ids or a real pack name to
     send stickers — there's no universal "random sticker" API. The
-    honest setup: pick a public sticker pack (search Telegram for one,
-    e.g. search a sticker in the app, forward it here, and I can grab
-    its file_id for you), then list those file_ids in SAMPLE_SM_STICKERS
-    above. Placeholder below explains this instead of silently failing.
+    honest setup: use /getstickerid on a few stickers you like, send me
+    the IDs, and I'll wire them into SAMPLE_STICKERS below.
     """
     if not SAMPLE_STICKERS or SAMPLE_STICKERS[0] == "CAACAgIAAxkBAAEBdummy1":
         await update.message.reply_text(
             "🎨 Sticker feature needs real sticker IDs first — Telegram doesn't "
-            "have a generic 'random sticker' API. Easiest way: send any sticker "
-            "to this chat and forward it to me, then I'll wire up its ID. "
-            "Want me to walk you through that?"
+            "have a generic 'random sticker' API. Use /getstickerid (reply to "
+            "a sticker) to grab some IDs, send them to me, and I'll wire them in."
         )
         return
     sticker_id = _random.choice(SAMPLE_STICKERS)
