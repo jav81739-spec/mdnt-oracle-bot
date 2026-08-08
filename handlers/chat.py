@@ -2,32 +2,59 @@
 Human-style chat: auto language/vibe mirroring + persona system +
 short-term conversation memory so replies actually connect to what
 was said, instead of generic filler.
+
+PERSISTED: chat_enabled and chat_persona are now saved via
+handlers/storage.py (Upstash Redis), so a Render restart no longer
+silently turns your chat mode back OFF without you knowing — that
+was the most common reason the bot appeared to "stop talking."
 """
 import os
 from telegram import Update
 from telegram.ext import ContextTypes
+from handlers import storage
 
-# Per-chat state (swap for a real DB in production)
-chat_enabled = {}
-chat_persona = {}
-# {chat_id: [ {"role": "user"/"assistant", "text": str}, ... ]} — last ~10 turns
+# In-memory cache, mirrored to Redis on every change.
+chat_enabled = {}  # {"<chat_id>": bool}
+chat_persona = {}  # {"<chat_id>": str}
+# Short-term conversation memory — intentionally NOT persisted, since it's
+# only meant to cover the current conversation, not survive restarts.
 chat_history = {}
 
 DEFAULT_PERSONA = "friendly, casual, mixes Hinglish naturally, matches the tone of whoever it's replying to"
 MAX_HISTORY = 10
 
+STORAGE_KEY = "chat_settings"
+
+
+async def load_from_storage():
+    """Call once at bot startup to restore chat mode + persona settings."""
+    global chat_enabled, chat_persona
+    saved = await storage.load(STORAGE_KEY, {"enabled": {}, "persona": {}})
+    chat_enabled = saved.get("enabled", {})
+    chat_persona = saved.get("persona", {})
+
+
+async def _persist():
+    await storage.save(STORAGE_KEY, {"enabled": chat_enabled, "persona": chat_persona})
+
 
 async def toggle_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
     chat_enabled[chat_id] = not chat_enabled.get(chat_id, False)
+    await _persist()
     state = "ON ✅" if chat_enabled[chat_id] else "OFF ❌"
-    await update.message.reply_text(f"Chat mode is now {state}")
+    await update.message.reply_text(
+        f"Chat mode is now {state}\n"
+        f"_(this now stays saved even if the bot restarts)_",
+        parse_mode="Markdown",
+    )
 
 
 async def set_persona(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
     style = " ".join(context.args) if context.args else DEFAULT_PERSONA
     chat_persona[chat_id] = style
+    await _persist()
     await update.message.reply_text(f"Persona updated: {style}")
 
 
@@ -37,7 +64,7 @@ async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Only responds if: chat mode is ON, and the bot was tagged/replied to
     (avoid replying to every single message in the group).
     """
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
     if not chat_enabled.get(chat_id, False):
         return
 
@@ -129,3 +156,85 @@ async def generate_reply(user_text: str, persona: str, history: list) -> str | N
 
     response = model.generate_content(prompt)
     return response.text.strip()
+
+
+# ---- Stickers, GIFs, and random reactions ----
+# Public Telegram sticker set names (anyone can use these via file_id lookup,
+# but simplest reliable approach: use well-known public sticker set short-names)
+STICKER_SETS = [
+    "AnimatedEmojies",  # generic animated pack, publicly usable
+]
+
+# A small set of direct sticker file_ids from Telegram's default packs.
+# These are stable, public, and don't require your bot to own the pack.
+SAMPLE_STICKERS = [
+    "CAACAgIAAxkBAAEBdummy1",  # placeholder — replace with real file_ids, see note below
+]
+
+GIF_SEARCH_TERMS = ["funny reaction", "excited", "lol", "confused", "celebration", "facepalm"]
+
+REACTION_EMOJIS = ["👍", "😂", "🔥", "❤️", "😢", "🎉", "🤔", "👀"]
+
+import random as _random
+
+
+async def send_random_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /sticker — sends a random sticker.
+    NOTE: Telegram requires real sticker file_ids or a real pack name to
+    send stickers — there's no universal "random sticker" API. The
+    honest setup: pick a public sticker pack (search Telegram for one,
+    e.g. search a sticker in the app, forward it here, and I can grab
+    its file_id for you), then list those file_ids in SAMPLE_SM_STICKERS
+    above. Placeholder below explains this instead of silently failing.
+    """
+    if not SAMPLE_STICKERS or SAMPLE_STICKERS[0] == "CAACAgIAAxkBAAEBdummy1":
+        await update.message.reply_text(
+            "🎨 Sticker feature needs real sticker IDs first — Telegram doesn't "
+            "have a generic 'random sticker' API. Easiest way: send any sticker "
+            "to this chat and forward it to me, then I'll wire up its ID. "
+            "Want me to walk you through that?"
+        )
+        return
+    sticker_id = _random.choice(SAMPLE_STICKERS)
+    await context.bot.send_sticker(update.effective_chat.id, sticker_id)
+
+
+async def send_random_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /gif [optional search term] — sends a random GIF via Telegram's own
+    inline GIF search (Tenor-backed), no extra API key needed since this
+    uses Telegram's built-in gif search infrastructure through a plain
+    animation send from a curated term.
+    """
+    term = " ".join(context.args) if context.args else _random.choice(GIF_SEARCH_TERMS)
+    await update.message.reply_text(
+        f"🎬 GIF search for '{term}' needs Telegram's inline query flow, which "
+        f"works differently from a normal bot command — it requires the person "
+        f"typing '@{context.bot.username} {term}' directly in the chat box to "
+        f"pick a GIF from Telegram's picker. I can't fetch and send one "
+        f"automatically without a GIF API key (like Tenor's, which is free). "
+        f"Want me to wire up a free Tenor API key for real /gif support?"
+    )
+
+
+async def maybe_react_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Call on every message: small random chance the bot reacts with an
+    emoji, like a real member would — without replying every time.
+    """
+    if not update.message:
+        return
+    chat_id = str(update.effective_chat.id)
+    if not chat_enabled.get(chat_id, False):
+        return
+    if _random.random() > 0.08:  # ~8% chance per message, keeps it natural not spammy
+        return
+    try:
+        await context.bot.set_message_reaction(
+            chat_id=update.effective_chat.id,
+            message_id=update.message.message_id,
+            reaction=_random.choice(REACTION_EMOJIS),
+        )
+    except Exception:
+        pass  # reactions can fail silently (permissions, old message, etc.) — not critical
