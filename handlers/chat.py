@@ -178,7 +178,17 @@ REACTION_EMOJIS = ["👍", "😂", "🔥", "❤️", "😢", "🎉", "🤔", "�
 import random as _random
 
 
-async def send_random_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def get_sticker_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /getstickerid — reply to any sticker with this command, and the bot
+    tells you its file_id. Collect a few of these, send them back to me,
+    and I'll wire them into the real /sticker command.
+    """
+    if not update.message.reply_to_message or not update.message.reply_to_message.sticker:
+        await update.message.reply_text("Reply to a sticker with /getstickerid to grab its ID")
+        return
+    sticker = update.message.reply_to_message.sticker
+    await update.message.reply_text(f"📎 Sticker file_id:\n`{sticker.file_id}`", parse_mode="Markdown")
     """
     /sticker — sends a random sticker.
     NOTE: Telegram requires real sticker file_ids or a real pack name to
@@ -202,20 +212,35 @@ async def send_random_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def send_random_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    /gif [optional search term] — sends a random GIF via Telegram's own
-    inline GIF search (Tenor-backed), no extra API key needed since this
-    uses Telegram's built-in gif search infrastructure through a plain
-    animation send from a curated term.
+    /gif [search term] — fetches a real random GIF from Tenor's free API.
+    Needs TENOR_API_KEY set in your environment (see README for the free
+    5-minute setup). Without it, tells you clearly instead of failing silently.
     """
+    api_key = os.getenv("TENOR_API_KEY")
+    if not api_key:
+        await update.message.reply_text(
+            "🎬 GIFs need a free TENOR_API_KEY — see README for the 2-minute setup "
+            "(no credit card needed)."
+        )
+        return
+
     term = " ".join(context.args) if context.args else _random.choice(GIF_SEARCH_TERMS)
-    await update.message.reply_text(
-        f"🎬 GIF search for '{term}' needs Telegram's inline query flow, which "
-        f"works differently from a normal bot command — it requires the person "
-        f"typing '@{context.bot.username} {term}' directly in the chat box to "
-        f"pick a GIF from Telegram's picker. I can't fetch and send one "
-        f"automatically without a GIF API key (like Tenor's, which is free). "
-        f"Want me to wire up a free Tenor API key for real /gif support?"
-    )
+
+    import httpx
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            "https://tenor.googleapis.com/v2/search",
+            params={"q": term, "key": api_key, "limit": 20, "media_filter": "gif"},
+        )
+    data = resp.json()
+    results = data.get("results", [])
+    if not results:
+        await update.message.reply_text(f"No GIFs found for '{term}' — try a different term.")
+        return
+
+    chosen = _random.choice(results)
+    gif_url = chosen["media_formats"]["gif"]["url"]
+    await context.bot.send_animation(update.effective_chat.id, gif_url)
 
 
 async def maybe_react_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
