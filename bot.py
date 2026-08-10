@@ -187,6 +187,7 @@ def main():
     app.add_handler(CommandHandler("gif", chat.send_random_gif))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, chat.maybe_react_to_message), group=3)
     app.add_handler(MessageHandler(filters.Sticker.ALL, chat.sticker_reply), group=4)
+    app.add_handler(MessageHandler(filters.ANIMATION, chat.gif_reply), group=5)
 
     # ---- Games ----
     app.add_handler(CommandHandler("quiz", games.quiz))
