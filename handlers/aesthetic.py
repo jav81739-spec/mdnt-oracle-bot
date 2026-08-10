@@ -58,11 +58,15 @@ EMOJI_AURAS = ["🌊😌", "🔥😤", "🌙🥱", "⚡😏", "🍃😇", "🖤�
 async def oracle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     question = " ".join(context.args) if context.args else "your question"
     await update.message.reply_text(f"🔮 *The Oracle speaks on \"{question}\":*\n\n_{random.choice(ORACLE_LINES)}_", parse_mode="Markdown")
+    from handlers.chat import send_mood_gif
+    await send_mood_gif(context.bot, update.effective_chat.id, "mystical crystal ball")
 
 
 async def tarot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     card, meaning = random.choice(TAROT_CARDS)
     await update.message.reply_text(f"🃏 You drew: *{card}*\n\n_{meaning}_", parse_mode="Markdown")
+    from handlers.chat import send_mood_gif
+    await send_mood_gif(context.bot, update.effective_chat.id, "tarot cards mystical")
 
 
 async def aura(update: Update, context: ContextTypes.DEFAULT_TYPE):
