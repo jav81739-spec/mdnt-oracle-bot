@@ -365,7 +365,6 @@ async def gif_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chosen = _random.choice(results)
     gif_url = chosen["images"]["original"]["url"]
 
-    await update.message.reply_text(f"{mention(sender.id, sender.first_name)} 👀", parse_mode="Markdown")
     await context.bot.send_animation(
         update.effective_chat.id, gif_url, reply_to_message_id=update.message.message_id
     )
@@ -422,11 +421,7 @@ async def sticker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not SAMPLE_STICKERS or SAMPLE_STICKERS[0] == "CAACAgIAAxkBAAEBdummy1":
         return  # no real stickers configured yet — stay silent, don't spam an error
 
-    from handlers.mentions import mention
-    sender = update.effective_user
     sticker_id = _pick_sticker(chat_id)
-
-    await update.message.reply_text(f"{mention(sender.id, sender.first_name)} 👀", parse_mode="Markdown")
     await context.bot.send_sticker(
         update.effective_chat.id, sticker_id, reply_to_message_id=update.message.message_id
     )
