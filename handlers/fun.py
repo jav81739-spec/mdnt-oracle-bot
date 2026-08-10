@@ -42,6 +42,8 @@ async def roast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🔥 {mention(target.id, target.first_name)}, {random.choice(ROASTS)}", parse_mode="Markdown"
     )
+    from handlers.chat import send_mood_gif
+    await send_mood_gif(context.bot, update.effective_chat.id, "savage roast burn")
 
 
 async def compliment(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -49,6 +51,8 @@ async def compliment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"💐 {mention(target.id, target.first_name)}, {random.choice(COMPLIMENTS)}", parse_mode="Markdown"
     )
+    from handlers.chat import send_mood_gif
+    await send_mood_gif(context.bot, update.effective_chat.id, "wholesome sweet")
 
 
 async def eight_ball(update: Update, context: ContextTypes.DEFAULT_TYPE):
