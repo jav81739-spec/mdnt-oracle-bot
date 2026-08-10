@@ -206,7 +206,22 @@ SAMPLE_STICKERS = [
     "CAACAgUAAxkBAAEGBzRqdp_FeJQQ3EJfKq_Y7fZ-5l9lngAC5wEAAq4xRgWFtzPKdb1ZuD0E",
     "CAACAgUAAxkBAAEGBzZqdp_rySrqxo6FHWJ7J7VCq9HesAAC_xAAAn9jEVbXO-B4ukFDLz0E",
     "CAACAgUAAxkBAAEGBzhqdqAQk68E9J2t0sf1bwMizD3_ogACqgMAAnC-SFblo1QW5PoU0D0E",
+    "CAACAgUAAxkBAAEGDn9qeGY4_JoN1L6EAu56kQPx5H8hhgACCgQAAsIkiFcGn8ZlVTJpDz0E",
 ]
+
+# Tracks which stickers were recently used per chat, so the same one
+# doesn't fire back-to-back — makes the full set of 11 actually feel used.
+_recent_stickers = {}  # {"<chat_id>": [sticker_id, ...]} — last few used
+
+
+def _pick_sticker(chat_id: str) -> str:
+    recent = _recent_stickers.get(chat_id, [])
+    # Avoid repeating any of the last 4 used, if enough variety exists
+    available = [s for s in SAMPLE_STICKERS if s not in recent] or SAMPLE_STICKERS
+    choice = _random.choice(available)
+    recent.append(choice)
+    _recent_stickers[chat_id] = recent[-4:]  # keep only last 4
+    return choice
 
 GIF_SEARCH_TERMS = ["funny reaction", "excited", "lol", "confused", "celebration", "facepalm"]
 
@@ -243,7 +258,7 @@ async def send_random_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE
             "a sticker) to grab some IDs, send them to me, and I'll wire them in."
         )
         return
-    sticker_id = _random.choice(SAMPLE_STICKERS)
+    sticker_id = _pick_sticker(str(update.effective_chat.id))
     await context.bot.send_sticker(update.effective_chat.id, sticker_id)
 
 
@@ -281,6 +296,81 @@ async def send_random_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_animation(update.effective_chat.id, gif_url)
 
 
+async def send_mood_gif(bot, chat_id: int, term: str):
+    """
+    Reusable helper other command files can call to attach a matching
+    GIF to their reply. Silently does nothing if GIPHY_API_KEY isn't
+    set, so commands using this stay fully functional either way.
+    """
+    api_key = os.getenv("GIPHY_API_KEY")
+    if not api_key:
+        return
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://api.giphy.com/v1/gifs/search",
+                params={"q": term, "api_key": api_key, "limit": 15, "rating": "pg-13"},
+            )
+        data = resp.json()
+        results = data.get("data", [])
+        if not results:
+            return
+        chosen = _random.choice(results)
+        gif_url = chosen["images"]["original"]["url"]
+        await bot.send_animation(chat_id, gif_url)
+    except Exception:
+        pass  # gif is a nice-to-have extra — never let it break the main command reply
+
+
+async def gif_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Fires when someone sends a GIF/animation AS A REPLY to the bot's own
+    message. Fetches a real random GIF from GIPHY and replies with it,
+    tagging the sender (GIFs also can't carry text captions with mentions
+    reliably across all clients, so the tag goes in a short text message
+    alongside it, same pattern as sticker_reply).
+    """
+    chat_id = str(update.effective_chat.id)
+    if not chat_enabled.get(chat_id, False):
+        return
+
+    was_replied_to_bot = (
+        update.message.reply_to_message
+        and update.message.reply_to_message.from_user
+        and update.message.reply_to_message.from_user.id == context.bot.id
+    )
+    if not was_replied_to_bot:
+        return
+
+    api_key = os.getenv("GIPHY_API_KEY")
+    if not api_key:
+        return  # GIF feature not configured yet — stay silent, don't spam an error
+
+    from handlers.mentions import mention
+    sender = update.effective_user
+    term = _random.choice(GIF_SEARCH_TERMS)
+
+    import httpx
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            "https://api.giphy.com/v1/gifs/search",
+            params={"q": term, "api_key": api_key, "limit": 20, "rating": "pg-13"},
+        )
+    data = resp.json()
+    results = data.get("data", [])
+    if not results:
+        return
+
+    chosen = _random.choice(results)
+    gif_url = chosen["images"]["original"]["url"]
+
+    await update.message.reply_text(f"{mention(sender.id, sender.first_name)} 👀", parse_mode="Markdown")
+    await context.bot.send_animation(
+        update.effective_chat.id, gif_url, reply_to_message_id=update.message.message_id
+    )
+
+
 async def maybe_react_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Call on every message: small random chance the bot reacts with an
@@ -312,6 +402,10 @@ async def sticker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message specifically — not just any sticker sent anywhere in the
     chat. This keeps it intentional (someone replying to the bot with
     a sticker) instead of random/spammy.
+
+    Tags the sender by name (Telegram stickers can't carry captions, so
+    the mention goes in a short text message alongside the sticker,
+    which is also reply-threaded directly to their message).
     """
     chat_id = str(update.effective_chat.id)
     if not chat_enabled.get(chat_id, False):
@@ -327,5 +421,12 @@ async def sticker_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not SAMPLE_STICKERS or SAMPLE_STICKERS[0] == "CAACAgIAAxkBAAEBdummy1":
         return  # no real stickers configured yet — stay silent, don't spam an error
-    sticker_id = _random.choice(SAMPLE_STICKERS)
-    await context.bot.send_sticker(update.effective_chat.id, sticker_id)
+
+    from handlers.mentions import mention
+    sender = update.effective_user
+    sticker_id = _pick_sticker(chat_id)
+
+    await update.message.reply_text(f"{mention(sender.id, sender.first_name)} 👀", parse_mode="Markdown")
+    await context.bot.send_sticker(
+        update.effective_chat.id, sticker_id, reply_to_message_id=update.message.message_id
+    )
