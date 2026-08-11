@@ -206,9 +206,16 @@ MATCHMAKER_REASONS = [
 ]
 
 ACTIONS = {
-    "hug": "🤗 wraps {target} in a warm hug",
-    "pat": "🖐️ gives {target} a gentle head pat",
-    "highfive": "🙌 high-fives {target}",
+    "hug": ("🤗 wraps {target} in a warm hug", "anime hug"),
+    "pat": ("🖐️ gives {target} a gentle head pat", "head pat anime"),
+    "highfive": ("🙌 high-fives {target}", "high five"),
+    "slap": ("👋 slaps {target}", "anime slap"),
+    "kiss": ("😘 kisses {target}", "anime kiss"),
+    "poke": ("👉 pokes {target}", "anime poke"),
+    "cuddle": ("🥺 cuddles up with {target}", "anime cuddle"),
+    "wave": ("👋 waves at {target}", "anime wave hello"),
+    "bite": ("😬 playfully bites {target}", "anime bite"),
+    "tickle": ("🤣 tickles {target}", "anime tickle"),
 }
 
 
@@ -258,8 +265,12 @@ async def _action(update: Update, context: ContextTypes.DEFAULT_TYPE, action_key
         return
     actor = update.effective_user
     target = update.message.reply_to_message.from_user
-    text = ACTIONS[action_key].format(target=mention(target.id, target.first_name))
+    text_template, gif_term = ACTIONS[action_key]
+    text = text_template.format(target=mention(target.id, target.first_name))
     await update.message.reply_text(f"{mention(actor.id, actor.first_name)} {text}", parse_mode="Markdown")
+
+    from handlers.chat import send_mood_gif
+    await send_mood_gif(context.bot, update.effective_chat.id, gif_term)
 
 
 async def hug(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -272,3 +283,31 @@ async def pat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def highfive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _action(update, context, "highfive")
+
+
+async def slap(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _action(update, context, "slap")
+
+
+async def kiss(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _action(update, context, "kiss")
+
+
+async def poke(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _action(update, context, "poke")
+
+
+async def cuddle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _action(update, context, "cuddle")
+
+
+async def wave(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _action(update, context, "wave")
+
+
+async def bite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _action(update, context, "bite")
+
+
+async def tickle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _action(update, context, "tickle")
