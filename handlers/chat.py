@@ -296,15 +296,15 @@ async def send_random_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_animation(update.effective_chat.id, gif_url)
 
 
-async def send_mood_gif(bot, chat_id: int, term: str):
+async def get_gif_url(term: str) -> str | None:
     """
-    Reusable helper other command files can call to attach a matching
-    GIF to their reply. Silently does nothing if GIPHY_API_KEY isn't
-    set, so commands using this stay fully functional either way.
+    Fetches a real GIF url from GIPHY for the given search term.
+    Returns None if GIPHY_API_KEY isn't set or nothing is found —
+    callers should fall back to plain text in that case.
     """
     api_key = os.getenv("GIPHY_API_KEY")
     if not api_key:
-        return
+        return None
     try:
         import httpx
         async with httpx.AsyncClient(timeout=10) as client:
@@ -315,12 +315,34 @@ async def send_mood_gif(bot, chat_id: int, term: str):
         data = resp.json()
         results = data.get("data", [])
         if not results:
-            return
+            return None
         chosen = _random.choice(results)
-        gif_url = chosen["images"]["original"]["url"]
-        await bot.send_animation(chat_id, gif_url)
+        return chosen["images"]["original"]["url"]
     except Exception:
-        pass  # gif is a nice-to-have extra — never let it break the main command reply
+        return None
+
+
+async def send_text_with_gif(bot, chat_id: int, text: str, term: str, parse_mode: str = "Markdown", reply_to_message_id: int = None):
+    """
+    Sends text and a matching GIF as ONE combined message (GIF with the
+    text as its caption), instead of two separate messages. Falls back
+    to plain text only if no GIF is available (no API key or no results),
+    so this never breaks a command even without GIF support configured.
+    """
+    gif_url = await get_gif_url(term)
+    if gif_url:
+        await bot.send_animation(
+            chat_id, gif_url, caption=text, parse_mode=parse_mode, reply_to_message_id=reply_to_message_id
+        )
+    else:
+        await bot.send_message(chat_id, text, parse_mode=parse_mode, reply_to_message_id=reply_to_message_id)
+
+
+async def send_mood_gif(bot, chat_id: int, term: str):
+    """Kept for backward compatibility — sends a GIF with no caption."""
+    gif_url = await get_gif_url(term)
+    if gif_url:
+        await bot.send_animation(chat_id, gif_url)
 
 
 async def gif_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
