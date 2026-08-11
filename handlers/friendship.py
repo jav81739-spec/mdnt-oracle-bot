@@ -267,10 +267,10 @@ async def _action(update: Update, context: ContextTypes.DEFAULT_TYPE, action_key
     target = update.message.reply_to_message.from_user
     text_template, gif_term = ACTIONS[action_key]
     text = text_template.format(target=mention(target.id, target.first_name))
-    await update.message.reply_text(f"{mention(actor.id, actor.first_name)} {text}", parse_mode="Markdown")
+    full_text = f"{mention(actor.id, actor.first_name)} {text}"
 
-    from handlers.chat import send_mood_gif
-    await send_mood_gif(context.bot, update.effective_chat.id, gif_term)
+    from handlers.chat import send_text_with_gif
+    await send_text_with_gif(context.bot, update.effective_chat.id, full_text, gif_term)
 
 
 async def hug(update: Update, context: ContextTypes.DEFAULT_TYPE):
