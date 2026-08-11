@@ -39,20 +39,16 @@ QUOTES = [
 
 async def roast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = update.message.reply_to_message.from_user if update.message.reply_to_message else update.effective_user
-    await update.message.reply_text(
-        f"🔥 {mention(target.id, target.first_name)}, {random.choice(ROASTS)}", parse_mode="Markdown"
-    )
-    from handlers.chat import send_mood_gif
-    await send_mood_gif(context.bot, update.effective_chat.id, "savage roast burn")
+    text = f"🔥 {mention(target.id, target.first_name)}, {random.choice(ROASTS)}"
+    from handlers.chat import send_text_with_gif
+    await send_text_with_gif(context.bot, update.effective_chat.id, text, "savage roast burn")
 
 
 async def compliment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = update.message.reply_to_message.from_user if update.message.reply_to_message else update.effective_user
-    await update.message.reply_text(
-        f"💐 {mention(target.id, target.first_name)}, {random.choice(COMPLIMENTS)}", parse_mode="Markdown"
-    )
-    from handlers.chat import send_mood_gif
-    await send_mood_gif(context.bot, update.effective_chat.id, "wholesome sweet")
+    text = f"💐 {mention(target.id, target.first_name)}, {random.choice(COMPLIMENTS)}"
+    from handlers.chat import send_text_with_gif
+    await send_text_with_gif(context.bot, update.effective_chat.id, text, "wholesome sweet")
 
 
 async def eight_ball(update: Update, context: ContextTypes.DEFAULT_TYPE):
