@@ -283,6 +283,13 @@ def main():
     app.add_handler(CommandHandler("hug", friendship.hug))
     app.add_handler(CommandHandler("pat", friendship.pat))
     app.add_handler(CommandHandler("highfive", friendship.highfive))
+    app.add_handler(CommandHandler("slap", friendship.slap))
+    app.add_handler(CommandHandler("kiss", friendship.kiss))
+    app.add_handler(CommandHandler("poke", friendship.poke))
+    app.add_handler(CommandHandler("cuddle", friendship.cuddle))
+    app.add_handler(CommandHandler("wave", friendship.wave))
+    app.add_handler(CommandHandler("bite", friendship.bite))
+    app.add_handler(CommandHandler("tickle", friendship.tickle))
 
     # ---- Fun / Social ----
     app.add_handler(CommandHandler("roast", fun.roast))
