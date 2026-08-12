@@ -161,8 +161,8 @@ async def _post_init(app: Application):
     await economy.load_from_storage()
     logger.info("Economy balances loaded from persistent storage.")
 
-     await marriage.load_from_storage()
-     logger.info("Marriage/shop data loaded from persistent storage.")
+    await marriage.load_from_storage()
+    logger.info("Marriage/shop data loaded from persistent storage.")
     
     await timecapsule.load_and_reschedule(app)
     logger.info("Time capsules loaded and rescheduled from persistent storage.")
