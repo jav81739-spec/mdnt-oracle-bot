@@ -22,8 +22,7 @@ from dotenv import load_dotenv
 from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, ChatMemberHandler, filters
 
-from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule
-
+from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule, marriage
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 
