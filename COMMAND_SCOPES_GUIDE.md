@@ -314,3 +314,14 @@ BotCommandScope.CHAT_ADMINISTRATORS(chat_id=123456)  # Admins in group 123456
 ```
 
 For now, the three scopes in the updated code are perfect for your bot!
+BotCommand("marry", "Propose marriage (reply to someone)"),
+    BotCommand("accept", "Accept a pending proposal"),
+    BotCommand("divorce", "End your marriage"),
+    BotCommand("profile", "View a profile card"),
+    BotCommand("work", "Earn coins with a random job"),
+    BotCommand("chests", "Open today's free chest"),
+    BotCommand("shop", "View the item shop"),
+    BotCommand("buy", "Buy an item: /buy <item name>"),
+    BotCommand("inventory", "View your items"),
+    BotCommand("gift", "Gift coins: /gift <amount> (reply)"),
+    BotCommand("settings", "Toggle chat-level bot settings"),
