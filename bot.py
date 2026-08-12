@@ -258,7 +258,18 @@ def main():
     app.add_handler(CommandHandler("gamble", economy.gamble))
     app.add_handler(CommandHandler("richest", economy.economy_leaderboard))
 
-    # ---- Utility ----
+    # ---- Marriage / Shop ----
+    app.add_handler(CommandHandler("marry", marriage.marry))
+    app.add_handler(CommandHandler("accept", marriage.accept))
+    app.add_handler(CommandHandler("divorce", marriage.divorce))
+    app.add_handler(CommandHandler("profile", marriage.profile))
+    app.add_handler(CommandHandler("work", marriage.work))
+    app.add_handler(CommandHandler("chests", marriage.chests))
+    app.add_handler(CommandHandler("shop", marriage.shop))
+    app.add_handler(CommandHandler("buy", marriage.buy))
+    app.add_handler(CommandHandler("inventory", marriage.inventory))
+    app.add_handler(CommandHandler("gift", marriage.gift))
+    app.add_handler(CommandHandler("settings", marriage.settings)) # ---- Utility ----
     app.add_handler(CommandHandler("id", utility.get_id))
     app.add_handler(CommandHandler("info", utility.user_info))
     app.add_handler(CommandHandler("remind", utility.remind))
