@@ -146,7 +146,7 @@ async def _post_init(app: Application):
     """Runs once on startup — registers the / command menu with Telegram,
     and restores persisted data (coins, pending time capsules) from
     Redis if it's configured."""
-    await app.bot.set_my_commands(BOT_COMMANDS)
+    await app.bot.set_my_commands(BOT_COMMANDS[:100])
     logger.info("Command menu registered with Telegram.")
 
     await economy.load_from_storage()
