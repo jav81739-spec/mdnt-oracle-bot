@@ -143,18 +143,15 @@ BOT_COMMANDS = [
     BotCommand("ratethis", "Rate the replied message"),
     BotCommand("timecapsule", "Lock a message for later"),
     BotCommand("capsules", "List pending time capsules"),
-
-    # -- Marriage / Shop highlights --
-    BotCommand("marry", "Propose marriage (reply to someone)"),
-    BotCommand("profile", "View a profile card"),
-    BotCommand("shop", "View the item shop"),
-    BotCommand("work", "Earn coins with a random job"),
-
-    # -- Death Life Games highlights --
-    BotCommand("survive", "Daily survival risk roll"),
-    BotCommand("roulette", "One-shot coin gamble"),
-    BotCommand("deathgame", "Start a Mafia-style elimination game"),
 ]
+# NOTE: Telegram hard-caps set_my_commands() at 100 entries — the list
+# above is already at 99, right at the limit. The new marriage.py and
+# deathgames.py commands (marry, profile, shop, work, survive,
+# roulette, deathgame, etc.) are intentionally NOT added to this menu
+# to avoid tripping Telegram's Bot_commands_too_much error. They still
+# work completely fine when typed manually — the menu is just a
+# shortcut popup, not a permissions list. If you want to promote one
+# into the popup later, remove an existing line above to make room.
 
 
 async def _post_init(app: Application):
