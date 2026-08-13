@@ -22,7 +22,8 @@ from dotenv import load_dotenv
 from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, ChatMemberHandler, filters
 
-from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule, marriage
+from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule, marriage, deathgames
+
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -38,6 +39,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # This list populates the "/" autocomplete menu in Telegram.
+# NOTE: Telegram caps this list at 100 entries, so only the most-used
+# commands from the newer modules (marriage, deathgames) are included
+# here to avoid clutter. Every command still works if typed manually,
+# even the ones left out of this list — see bot_py_changes.md for details.
 BOT_COMMANDS = [
     BotCommand("start", "Welcome message"),
     BotCommand("help", "List all commands"),
@@ -125,20 +130,30 @@ BOT_COMMANDS = [
     BotCommand("rob", "Try robbing someone (reply)"),
     BotCommand("gamble", "Gamble your coins"),
     BotCommand("richest", "Coin leaderboard"),
-    BotCommand("marry", "Propose marriage (reply to someone)"),
-    BotCommand("accept", "Accept a pending proposal"),
-    BotCommand("divorce", "End your marriage"),
-    BotCommand("profile", "View a profile card"),
-    BotCommand("work", "Earn coins with a random job"),
-    BotCommand("chests", "Open today's free chest"),
-    BotCommand("shop", "View the item shop"),
-    BotCommand("buy", "Buy an item: /buy <item name>"),
-    BotCommand("inventory", "View your items"),
-    BotCommand("gift", "Gift coins: /gift <amount> (reply)"),
-    BotCommand("settings", "Toggle chat-level bot settings"),BotCommand("moodboard", "Today's aesthetic mood"),
+    BotCommand("moodboard", "Today's aesthetic mood"),
+    BotCommand("dream", "AI-style dream interpretation"),
+    BotCommand("manifest", "Stylized affirmation card"),
+    BotCommand("matchmaker", "Bot pairs two random members"),
+    BotCommand("friendshiptest", "Mini friendship quiz score"),
+    BotCommand("hug", "Hug someone (reply)"),
+    BotCommand("pat", "Pat someone (reply)"),
+    BotCommand("highfive", "High-five someone (reply)"),
+    BotCommand("impostor", "Start an impostor round"),
+    BotCommand("revealimpostor", "Reveal who the impostor was"),
     BotCommand("ratethis", "Rate the replied message"),
     BotCommand("timecapsule", "Lock a message for later"),
     BotCommand("capsules", "List pending time capsules"),
+
+    # -- Marriage / Shop highlights --
+    BotCommand("marry", "Propose marriage (reply to someone)"),
+    BotCommand("profile", "View a profile card"),
+    BotCommand("shop", "View the item shop"),
+    BotCommand("work", "Earn coins with a random job"),
+
+    # -- Death Life Games highlights --
+    BotCommand("survive", "Daily survival risk roll"),
+    BotCommand("roulette", "One-shot coin gamble"),
+    BotCommand("deathgame", "Start a Mafia-style elimination game"),
 ]
 
 
@@ -146,20 +161,23 @@ async def _post_init(app: Application):
     """Runs once on startup — registers the / command menu with Telegram,
     and restores persisted data (coins, pending time capsules) from
     Redis if it's configured."""
-    await app.bot.set_my_commands(BOT_COMMANDS[:100])
+    await app.bot.set_my_commands(BOT_COMMANDS)
     logger.info("Command menu registered with Telegram.")
 
     await economy.load_from_storage()
     logger.info("Economy balances loaded from persistent storage.")
 
-    await marriage.load_from_storage()
-    logger.info("Marriage/shop data loaded from persistent storage.")
-    
     await timecapsule.load_and_reschedule(app)
     logger.info("Time capsules loaded and rescheduled from persistent storage.")
 
     await chat.load_from_storage()
     logger.info("Chat mode settings loaded from persistent storage — /chat toggle now survives restarts.")
+
+    await marriage.load_from_storage()
+    logger.info("Marriage/shop data loaded from persistent storage.")
+
+    await deathgames.load_from_storage()
+    logger.info("Death Life Games data loaded from persistent storage.")
 
 
 def main():
@@ -260,7 +278,21 @@ def main():
     app.add_handler(CommandHandler("buy", marriage.buy))
     app.add_handler(CommandHandler("inventory", marriage.inventory))
     app.add_handler(CommandHandler("gift", marriage.gift))
-    app.add_handler(CommandHandler("settings", marriage.settings)) # ---- Utility ----
+    app.add_handler(CommandHandler("settings", marriage.settings))
+
+    # ---- Death Life Games ----
+    app.add_handler(CommandHandler("survive", deathgames.survive))
+    app.add_handler(CommandHandler("revive", deathgames.revive))
+    app.add_handler(CommandHandler("deathstatus", deathgames.deathstatus))
+    app.add_handler(CommandHandler("roulette", deathgames.roulette))
+    app.add_handler(CommandHandler("deathgame", deathgames.deathgame))
+    app.add_handler(CommandHandler("joingame", deathgames.joingame))
+    app.add_handler(CommandHandler("startround", deathgames.startround))
+    app.add_handler(CommandHandler("kill", deathgames.kill))
+    app.add_handler(CommandHandler("vote", deathgames.vote))
+    app.add_handler(CommandHandler("endgame", deathgames.endgame))
+
+    # ---- Utility ----
     app.add_handler(CommandHandler("id", utility.get_id))
     app.add_handler(CommandHandler("info", utility.user_info))
     app.add_handler(CommandHandler("remind", utility.remind))
