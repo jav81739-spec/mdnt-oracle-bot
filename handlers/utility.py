@@ -203,7 +203,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/work — earn coins /chests — free daily reward\n"
         "/shop /buy [item] /inventory (reply?)\n"
         "/gift [amount] (reply) — send coins\n"
-        "/settings marry_accept — toggle auto-accept\n\n"
+        "/settings `marry_accept` — toggle auto-accept\n\n"
         "*💀 Death Life Games*\n"
         "/survive /revive /deathstatus (reply?) — daily risk roll\n"
         "/roulette — instant coin gamble\n"
