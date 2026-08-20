@@ -9,7 +9,7 @@ from datetime import datetime, date, timedelta
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
-from redis_client import redis_client  # your existing redis wrapper
+from redis_client import redis_client
 
 # ─── Coins helpers (reuse your existing pattern) ───────────────────────────
 async def get_coins(user_id: int) -> int:
