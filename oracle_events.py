@@ -9,6 +9,7 @@ FEATURES:
 - Auto scheduled events via job queue
 - Weekly summary auto-post (Sunday)
 """
+import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import random
 import asyncio
