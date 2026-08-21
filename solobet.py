@@ -17,6 +17,7 @@ USAGE:
   /bet 5+3          — bet 5000 coins (base+exponent shorthand)
   bbet 200          — works without the slash too (text trigger)
 """
+import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import random
 import asyncio
