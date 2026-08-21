@@ -16,6 +16,7 @@ Normal coins CAN be robbed.
 Wallet coins CANNOT be robbed (protected vault).
 Max 30% of total balance can be in wallet (50% with "Vault" upgrade — future premium feature).
 """
+import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import hashlib
 import json
