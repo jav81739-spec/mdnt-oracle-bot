@@ -62,8 +62,7 @@ from oracle_engagement import (
 )
 
 from handlers.oracle_aesthetic import *
-from handlers import (
-    aura_command,
+from handlers.chat import aura_command
     identity_command,
     oracle_command,
     vibecheck_command,
