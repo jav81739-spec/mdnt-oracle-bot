@@ -1,3 +1,8 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'handlers')))
+from chat import *
+from oracle_aesthetic import *
 import http.server
 import socketserver
 import threading
