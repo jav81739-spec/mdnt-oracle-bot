@@ -95,7 +95,10 @@ from oracle_wallet import (
     recover_command,
 )
 
-# ── Original handlers/ modules (completely untouched) ────────────────────load_dotenv()
+import handlers.chat as chat
+from handlers.chat import aura_command, identity_command, corecode_command
+from handlers.oracle_aesthetic import aesthetic
+load_dotenv()
 TOKEN              = os.getenv("BOT_TOKEN")
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
 PORT               = int(os.getenv("PORT", 10000))
