@@ -40,8 +40,16 @@ Files in handlers/ folder (unchanged):
   events.py, economy.py, timecapsule.py, marriage.py, deathgames.py
 """
 
-import logging
+import sys
 import os
+
+# ─── PATH FIX FOR RENDER ───────────────────────────────────────────────────
+# Render runs from /opt/render/project/src/ but our new modules
+# (aesthetic.py, engagement.py, etc.) sit in the same folder as bot.py.
+# This line ensures Python can always find them regardless of cwd.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import logging
 from dotenv import load_dotenv
 from telegram import BotCommand
 from telegram.ext import (
