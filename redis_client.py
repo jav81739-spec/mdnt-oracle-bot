@@ -16,6 +16,7 @@ This wrapper tries all known patterns and falls back gracefully.
 If none match, update the STORAGE_EXPORT_NAME below to match
 whatever name your storage.py actually exports.
 """
+import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import os
 import importlib
