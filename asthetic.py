@@ -17,6 +17,7 @@ NEW COMMANDS:
 /duality     — Shows your light and dark side
 /glitch      — The Oracle glitches and says something unhinged
 """
+import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import random
 import hashlib
