@@ -2,6 +2,7 @@
 engagement.py — Daily Check-in, Streaks, Gift, Rob, Vent, Leaderboard
 Midnight Oracle Bot | Persistent via Upstash Redis
 """
+import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import random
 import asyncio
