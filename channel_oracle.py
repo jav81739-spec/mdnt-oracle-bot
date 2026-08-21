@@ -12,6 +12,7 @@ SETUP:
   2. Bot must be ADMIN in the discussion GROUP (Send Messages permission)
   3. Bot does NOT need to be in the channel
 """
+import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import random
 import asyncio
