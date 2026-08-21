@@ -8,6 +8,7 @@ Triggered by:
   - Using the word "midnight" in a message
   - Direct messages to the bot
 """
+import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import os
 import random
