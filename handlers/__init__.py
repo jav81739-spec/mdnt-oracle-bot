@@ -1,2 +1,1 @@
-from .oracle_aesthetic import aesthetic
-
+from .oracle_aesthetic import *
