@@ -61,13 +61,8 @@ from oracle_engagement import (
     streakcheck_command,
 )
 
+from handlers.chat import *
 from handlers.oracle_aesthetic import *
-from handlers.chat import aura_command
-    identity_command,
-    oracle_command,
-    vibecheck_command,
-    shadow_command,
-    element_command,
     corecode_command,
     universe_command,
     ritual_command,
