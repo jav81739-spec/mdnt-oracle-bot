@@ -63,14 +63,7 @@ from oracle_engagement import (
 
 from handlers.chat import *
 from handlers.oracle_aesthetic import *
-    corecode_command,
-    universe_command,
-    ritual_command,
-    duality_command,
-    glitch_command,
-    nightreport_command,
-    sigil_command,
-)
+
 
 from oracle_events_mod import (
     oraclehour_command,
