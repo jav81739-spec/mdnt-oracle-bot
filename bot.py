@@ -1,3 +1,17 @@
+import http.server
+import socketserver
+import threading
+
+def run_dummy_server():
+    # Render automatically provides a PORT environment variable
+    import os
+    port = int(os.environ.get("PORT", 8080))
+    handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", port), handler) as httpd:
+        httpd.serve_forever()
+
+# This runs the dummy server in the background so your bot code can still run
+threading.Thread(target=run_dummy_server, daemon=True).start()
 """
 bot.py — Midnight Oracle Bot | FINAL VERSION
 Webhook mode for Render free tier.
