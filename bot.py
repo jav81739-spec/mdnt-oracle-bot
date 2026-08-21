@@ -61,7 +61,8 @@ from oracle_engagement import (
     streakcheck_command,
 )
 
-from handlers.oracle_aesthetic import (
+from handlers.oracle_aesthetic import *
+
     aura_command,
     identity_command,
     oracle_command,
