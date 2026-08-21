@@ -95,25 +95,7 @@ from oracle_wallet import (
     recover_command,
 )
 
-# ── Original handlers/ modules (completely untouched) ────────────────────
-from handlers.oracle_aesthetic import aesthetic
-    chat,
-    games,
-    moderation,
-    utility,
-    aesthetic,          # handlers/aesthetic.py — tarot, fate, whisper etc.
-    friendship,
-    fun,
-    matchmaking,
-    stats,
-    events,
-    economy,
-    timecapsule,
-    marriage,
-    deathgames,
-)
-
-load_dotenv()
+# ── Original handlers/ modules (completely untouched) ────────────────────load_dotenv()
 TOKEN              = os.getenv("BOT_TOKEN")
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
 PORT               = int(os.getenv("PORT", 10000))
