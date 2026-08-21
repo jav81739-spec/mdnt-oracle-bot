@@ -91,7 +91,7 @@ from oracle_wallet import (
 )
 
 # ── Original handlers/ modules (completely untouched) ────────────────────
-from handlers import (
+from handlers.oracle_aesthetic import aesthetic
     chat,
     games,
     moderation,
