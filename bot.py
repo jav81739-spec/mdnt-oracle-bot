@@ -315,28 +315,51 @@ _MOTI = ["🔱 the oracle believed in you before you believed in yourself",
 async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     m = update.message
     if not m or not m.is_automatic_forward: return
-    await asyncio.sleep(random.uniform(2.0, 7.0))
-    # Try Gemini
+    await asyncio.sleep(random.uniform(2.0, 5.0))
+
     comment = None
-    model = _get_gemini()
-    if model:
-        if m.text: ctx = f"Channel post: {m.text[:300]}"
-        elif m.caption: ctx = f"Caption: {m.caption[:200]}"
-        elif m.photo: ctx = "A photo was posted"
-        elif m.video: ctx = "A video was posted"
-        elif m.poll: ctx = f"Poll: {m.poll.question}"
-        else: ctx = "A channel post"
-        prompt = f"You are Midnight Oracle, mysterious warm Telegram bot. Leave a SHORT comment (1-2 lines, 1-2 emojis, moon/star/void themes) on this channel post. Sound like a cool friend. Post: {ctx}\nWrite ONLY the comment:"
-        try:
+
+    # Build context from post
+    if m.text:       ctx = m.text[:400]
+    elif m.caption:  ctx = m.caption[:300]
+    elif m.photo:    ctx = "[photo post]"
+    elif m.video:    ctx = "[video post]"
+    elif m.poll:     ctx = f"[poll] {m.poll.question}"
+    else:            ctx = "[channel post]"
+
+    # Try Gemini
+    try:
+        import google.generativeai as genai
+        key = os.getenv("GEMINI_API_KEY","")
+        if key:
+            genai.configure(api_key=key)
+            mdl = genai.GenerativeModel("gemini-1.5-flash")
+            prompt = (
+                f"You are Midnight Oracle — a mysterious, warm, witty Telegram group bot. "
+                f"Someone just posted this to a Telegram channel:\n\n"
+                f"\"{ctx}\"\n\n"
+                f"Write ONE short comment (1-2 lines max) that is relevant to this post. "
+                f"React to the actual content — if it's about cricket, react to cricket. "
+                f"If it's a photo, react to the photo vibe. "
+                f"If it's news, react to the news. "
+                f"Use 1-2 emojis naturally. Sound like a cool mysterious friend, not a bot. "
+                f"NEVER use generic phrases like 'filed into archives' or 'shadow archives'. "
+                f"Write ONLY the comment, nothing else."
+            )
             loop = asyncio.get_event_loop()
-            resp = await loop.run_in_executor(None, lambda: model.generate_content(prompt))
-            txt = (resp.text or "").strip().replace("```","")
-            if txt and len(txt) < 280: comment = txt
-        except: pass
+            resp = await loop.run_in_executor(None, lambda: mdl.generate_content(prompt))
+            txt = (resp.text or "").strip().replace("```","").strip()
+            if txt and 5 < len(txt) < 300:
+                comment = txt
+                logger.info(f"[ChanOracle] Gemini replied: {txt[:60]}")
+    except Exception as e:
+        logger.warning(f"[ChanOracle] Gemini failed: {e}")
+
+    # Smart fallback based on content
     if not comment:
-        t = m.text.lower() if m.text else ""
-        if m.sticker or any(w in t for w in ["💀","😭","lol","lmao"]): pool = _MEME
-        elif any(w in t for w in ["inspire","believe","hope","keep going"]): pool = _MOTI
+        t = ctx.lower()
+        if any(w in t for w in ["💀","😭","lol","lmao","bruh","😂","😹"]): pool = _MEME
+        elif any(w in t for w in ["inspire","believe","hope","keep going","proud","strength","motivat"]): pool = _MOTI
         else: pool = _CHAN
         comment = random.choice(pool)
     try: await m.reply_text(comment, parse_mode=ParseMode.MARKDOWN)
