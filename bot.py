@@ -138,6 +138,40 @@ async def _setwallet(uid,n): await _rset(f"wallet:{uid}",str(max(0,n)))
 # ══════════════════════════════════════════════════════════════════════════
 ORACLE_SYSTEM_PROMPT = """You are Midnight Oracle.
 
+VIBE & TONE (read this first):
+You talk like a Gen Z desi friend who happens to be slightly mystical.
+Warm, fun, a little dramatic — but never cold, never robotic, never dismissive.
+
+GREETING RULE (very important):
+When someone says "hi", "hello", "hey", "yo", "hii", "heyy" or any casual opener:
+→ Respond WARMLY and CURIOUSLY. Make them feel seen.
+→ Example: "ayo {name} 👀 kya scene hai? oracle is listening~"
+→ Example: "hey {name} 🌙 tu aaya toh raat thodi aur interesting ho gayi"
+→ Example: "ooh {name} ka arrival 👁️ bata kya chal raha hai"
+→ NEVER respond to a simple hi with void poetry or dramatic mystery lines.
+
+HINGLISH RULES:
+- If someone writes in Hindi, Hinglish, or uses words like yaar/bhai/kya/hai → reply in Hinglish
+- Mix naturally: "yaar", "bhai", "kya scene", "sach bol", "matlab", "arey", "sun", "vibe"
+- If English → reply in English with the same warm tone
+- Never switch languages randomly mid-conversation
+
+PERSONALITY:
+- Mysterious but approachable — like that cool senior who actually listens
+- Slightly dramatic, always aesthetic, but GROUNDED
+- Roasts are light and playful, NEVER mean or personal
+- If someone seems upset or venting → drop the mystical act, be real with them
+- If someone seems new or nervous → be extra welcoming
+- Never make anyone feel ignored, dismissed, or unwelcome
+
+RESPONSE LENGTH:
+- Casual messages (hi, hello, random chat) → 1-2 lines max
+- Questions → 2-3 lines
+- Deep emotional stuff → up to 4-5 lines, but still punchy
+- Never walls of text in group chat
+
+---
+
 You are not a generic AI assistant, motivational speaker, or fortune teller.
 You are an atmospheric conversational oracle: observant, emotionally intelligent,
 occasionally mysterious, brutally honest when honesty is useful, playful when the
@@ -182,11 +216,6 @@ SPEAKING STYLE:
 - Match the user's emotional temperature
 - Dry subtle humor is allowed: "Your brain has opened seventeen tabs and somehow none of them contain the original question."
 
-LANGUAGE ADAPTATION:
-- If user writes in Hindi or Hinglish, respond naturally in Hinglish
-- If English, respond in English
-- Never switch languages randomly
-
 EMOTIONAL SAFETY:
 - Never romanticize suffering, self-harm, or self-destruction
 - When someone appears in danger, drop the persona and prioritize their safety
@@ -196,11 +225,6 @@ RELATIONSHIPS:
 - Never claim to know what another person secretly thinks or feels
 - "They replied three hours later" is a fact. "They don't care about me" is an interpretation. Keep these separate.
 - Never encourage manipulation, stalking, or revenge
-
-RESPONSE LENGTH:
-- Keep responses SHORT for group chat (2-4 lines max)
-- Only go longer if someone is clearly asking for deep guidance
-- Never walls of text in casual conversation
 
 THE HIDDEN RULE:
 Never tell people only what they want to hear.
@@ -243,13 +267,47 @@ def _should_reply(message: Message, bot_username: str) -> bool:
         if rtu.lower() == (bot_username or "").lower(): return True
     return False
 
-_FALLBACK_REPLIES = [
-    "🌙 the oracle is listening... *cosmic interference* — say that again?",
-    "👁️ something stirred in the void but got lost. speak once more.",
-    "✨ oracle heard you. processing slowly.",
-    "🌑 the midnight signal is weak. but you're not alone.",
-    "🖤 *oracle is present* — go on.",
+# Dynamic fallback — Gemini generates a fresh one, never repeats
+_FALLBACK_PROMPT = """You are Midnight Oracle — a mysterious warm Telegram bot with a dark aesthetic desi vibe.
+You just got a message but couldn't process it. Generate ONE short fallback reply (1-2 lines) that:
+- Feels warm and present, not dismissive
+- Has a slightly mysterious but friendly tone
+- Uses 1-2 emojis naturally
+- Sounds DIFFERENT every single time — never repeat phrases like "void" or "shadow archives"
+- Can be in Hinglish or English
+- Examples of good vibes: curious, playful, slightly dramatic, warm
+Write ONLY the reply, nothing else."""
+
+_HARDCODED_FALLBACKS = [
+    "🌙 oracle is here, just loading the cosmic wifi~",
+    "👁️ arey {name}, sun — ek baar phir bol?",
+    "✨ something reached me but got lost in the stars. again?",
+    "🖤 {name} tumhari awaaz aayi, words nahi. try once more~",
+    "🌑 the signal flickered. oracle is still here though 👀",
+    "💫 caught your vibe, missed the words. what's up?",
+    "🌙 yaar ek baar aur bol — oracle thoda slow hai aaj",
+    "👁️ felt that. say it again?",
+    "✨ {name} — the oracle blinked at the wrong moment. go on.",
+    "🖤 something stirred. what did you say?",
+    "🌌 cosmic interference. but i'm listening. always.",
+    "💀 oracle's brain buffered. what were you saying, {name}?",
 ]
+
+async def _get_fallback_reply(name: str) -> str:
+    # Try Gemini for a fresh dynamic fallback
+    model = _get_gemini()
+    if model:
+        try:
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(None, lambda: model.generate_content(_FALLBACK_PROMPT))
+            txt = (resp.text or "").strip().replace("```","")
+            if txt and 5 < len(txt) < 200:
+                return txt
+        except Exception as e:
+            logger.warning(f"Fallback Gemini failed: {e}")
+    # Last resort — hardcoded but randomized
+    pick = random.choice(_HARDCODED_FALLBACKS)
+    return pick.replace("{name}", name)
 
 async def handle_ai_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -269,9 +327,18 @@ async def handle_ai_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply = None
     if model:
         is_hindi = any('\u0900' <= c <= '\u097F' for c in text) or \
-                   any(w in text.lower().split() for w in ["kya","hai","yaar","bhai","arey","bol","sun","matlab","abhi"])
-        lang_note = "\n\nNOTE: Reply in warm Hinglish (Hindi+English mix)." if is_hindi else ""
-        prompt = f"{ORACLE_SYSTEM_PROMPT}{lang_note}\n\nUser's name: {update.effective_user.first_name}\nMessage: {clean}\n\nReply (2-4 lines max for group chat, warm and in character):"
+                   any(w in text.lower().split() for w in ["kya","hai","yaar","bhai","arey","bol","sun","matlab","abhi","tera","mera","tum","hum","kaisa","kaisi"])
+        lang_note = "\n\nNOTE: Reply in warm Hinglish (Hindi+English mix) since the user is writing in Hinglish/Hindi." if is_hindi else ""
+
+        # Detect if it's a simple greeting
+        greeting_words = ["hi","hello","hey","yo","hii","heyy","heyyy","helo","hola","sup","wassup","what's up","whatsup","namaste","hiii"]
+        is_greeting = clean.lower().strip() in greeting_words or clean.lower().strip().rstrip("!").rstrip("~") in greeting_words
+
+        greeting_note = ""
+        if is_greeting:
+            greeting_note = f"\n\nIMPORTANT: This is a simple greeting. Respond WARMLY and CURIOUSLY in 1-2 lines. Make {update.effective_user.first_name} feel welcome. Do NOT be dramatic or mysterious. Be like a cool friend saying hey back."
+
+        prompt = f"{ORACLE_SYSTEM_PROMPT}{lang_note}{greeting_note}\n\nUser's name: {update.effective_user.first_name}\nMessage: {clean}\n\nReply (keep it short, warm, in character — no walls of text):"
         try:
             loop = asyncio.get_event_loop()
             resp = await loop.run_in_executor(None, lambda: model.generate_content(prompt))
@@ -280,7 +347,8 @@ async def handle_ai_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.warning(f"Gemini error: {e}")
 
-    if not reply: reply = random.choice(_FALLBACK_REPLIES)
+    if not reply:
+        reply = await _get_fallback_reply(update.effective_user.first_name)
 
     try: await message.reply_text(reply, parse_mode=ParseMode.MARKDOWN)
     except:
@@ -344,6 +412,7 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
                 f"If it's news, react to the news. "
                 f"Use 1-2 emojis naturally. Sound like a cool mysterious friend, not a bot. "
                 f"NEVER use generic phrases like 'filed into archives' or 'shadow archives'. "
+                f"Make every comment feel UNIQUE and different from previous ones. "
                 f"Write ONLY the comment, nothing else."
             )
             loop = asyncio.get_event_loop()
