@@ -67,13 +67,13 @@ class _Silent(BaseHTTPRequestHandler):
 # Free Render Web Service: polling + health server
 logger.info("🌙 Midnight Oracle awakening... polling mode")
 
-_start_dummy_server()
-
-app.run_polling(drop_pending_updates=True). start()
+def _start_dummy_server():
+    try:
+        s = HTTPServer(("0.0.0.0", PORT), _Silent)
+        threading.Thread(target=s.serve_forever, daemon=True).start()
         logger.info(f"Health HTTP server running on 0.0.0.0:{PORT}")
     except Exception as e:
         logger.warning(f"Health server failed: {e}")
-
 # ══════════════════════════════════════════════════════════════════════════
 # REDIS CLIENT — auto-wraps your existing storage.py
 # ══════════════════════════════════════════════════════════════════════════
