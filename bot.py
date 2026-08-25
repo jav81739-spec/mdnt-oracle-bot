@@ -4455,9 +4455,10 @@ def main():
         days=(6,),
         name="weekly_titles"
     )
-    logger.info("✅ Verdict, night mode, weekly titles jobs registered")
-
-
+        # Free Render Web Service
+    logger.info("🌙 Midnight Oracle awakening... polling mode")
+    _start_dummy_server()
+    app.run_polling(drop_pending_updates=True)
 
 if __name__=="__main__":
     main()
