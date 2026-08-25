@@ -1,14 +1,3 @@
-"""
-bot.py — Midnight Oracle Bot | FINAL SELF-CONTAINED VERSION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ZERO external oracle_*.py files needed.
-Everything is embedded in this single file.
-Only needs: handlers/ folder (untouched) + your existing storage.py
-
-Upload ONLY this file to replace bot.py. That's it.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"""
-
 import sys, os, logging, random, asyncio, json, hashlib, re, threading
 from datetime import datetime, date, timedelta
 from http.server import HTTPServer, BaseHTTPRequestHandler
