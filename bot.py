@@ -1,3 +1,5 @@
+import threading
+from http.server import HTTPServer
 import sys, os, logging, random, asyncio, json, hashlib, re, threading
 from datetime import datetime, date, timedelta
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -62,10 +64,12 @@ class _Silent(BaseHTTPRequestHandler):
         pass
 
 
-def _start_dummy_server():
-    try:
-        s = HTTPServer(("0.0.0.0", PORT), _Silent)
-        threading.Thread(target=s.serve_forever, daemon=True).start()
+# Free Render Web Service: polling + health server
+logger.info("🌙 Midnight Oracle awakening... polling mode")
+
+_start_dummy_server()
+
+app.run_polling(drop_pending_updates=True). start()
         logger.info(f"Health HTTP server running on 0.0.0.0:{PORT}")
     except Exception as e:
         logger.warning(f"Health server failed: {e}")
