@@ -11,7 +11,10 @@ if _HERE not in sys.path:
 
 from dotenv import load_dotenv
 from telegram import (
-    BotCommand, Update, Message, InputFile,
+    BotCommand,
+    BotCommandScopeAllGroupChats,
+    BotCommandScopeAllPrivateChats,
+    Update, Message, InputFile,
     InlineKeyboardButton, InlineKeyboardMarkup,
 )
 from telegram.ext import (
