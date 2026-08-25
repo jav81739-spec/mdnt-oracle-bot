@@ -4112,9 +4112,26 @@ BOT_COMMANDS=[
 # ══════════════════════════════════════════════════════════════════════════
 # STARTUP + MAIN
 # ══════════════════════════════════════════════════════════════════════════
-async def _post_init(app:Application):
-    await app.bot.set_my_commands(BOT_COMMANDS)
-    logger.info("✅ Commands registered (%d)",len(BOT_COMMANDS))
+async def _post_init(app: Application):
+    # Register the complete Midnight command list in DMs
+    await app.bot.set_my_commands(
+        BOT_COMMANDS,
+        scope=BotCommandScopeAllPrivateChats(),
+    )
+
+    # Register the SAME complete command list in every group
+    await app.bot.set_my_commands(
+        BOT_COMMANDS,
+        scope=BotCommandScopeAllGroupChats(),
+    )
+
+    logger.info(
+        "✅ Commands registered everywhere (%d)",
+        len(BOT_COMMANDS),
+    )
+
+    await economy.load_from_storage()
+    logger.info("✅ Economy loaded")
     await economy.load_from_storage(); logger.info("✅ Economy loaded")
     await timecapsule.load_and_reschedule(app); logger.info("✅ Capsules rescheduled")
     await chat.load_from_storage(); logger.info("✅ Chat settings loaded")
