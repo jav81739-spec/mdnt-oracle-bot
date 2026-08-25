@@ -47,17 +47,28 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════════════════════════════
 class _Silent(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200); self.end_headers()
-        self.wfile.write(b"Midnight Oracle is awake.")
-    def log_message(self, *a): pass
+        if self.path in ("/", "/health", "/healthz"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"Midnight Oracle is awake.")
+        else:
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"Not Found")
+
+    def log_message(self, *args):
+        pass
+
 
 def _start_dummy_server():
     try:
-        s = HTTPServer(("0.0.0.0", 8080), _Silent)
+        s = HTTPServer(("0.0.0.0", PORT), _Silent)
         threading.Thread(target=s.serve_forever, daemon=True).start()
-        logger.info("Dummy HTTP server running on :8080")
+        logger.info(f"Health HTTP server running on 0.0.0.0:{PORT}")
     except Exception as e:
-        logger.warning(f"Dummy server failed: {e}")
+        logger.warning(f"Health server failed: {e}")
 
 # ══════════════════════════════════════════════════════════════════════════
 # REDIS CLIENT — auto-wraps your existing storage.py
