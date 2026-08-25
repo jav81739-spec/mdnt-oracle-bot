@@ -4457,10 +4457,7 @@ def main():
     )
     logger.info("✅ Verdict, night mode, weekly titles jobs registered")
 
-    # Webhook
-    full_url=f"{RENDER_EXTERNAL_URL}/{TOKEN}"
-    logger.info("🌙 Midnight Oracle awakening... webhook at %s",full_url)
-    app.run_webhook(listen="0.0.0.0",port=PORT,url_path=TOKEN,webhook_url=full_url)
+
 
 if __name__=="__main__":
     main()
