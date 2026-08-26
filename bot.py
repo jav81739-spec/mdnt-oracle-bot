@@ -1854,6 +1854,115 @@ _SIGNAL_HOURS = max(1, min(12, int(os.getenv("MIDNIGHT_SIGNAL_HOURS", "3"))))
 _BOND_LOOP_SECONDS = max(15, int(os.getenv("MIDNIGHT_BOND_LOOP_SECONDS", "30")))
 _BOND_MEMBER_TTL = 7 * 24 * 3600
 
+async def _register_bond_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Register group users for Midnight Bond/Signal."""
+
+    try:
+        chat = update.effective_chat
+        user = update.effective_user
+
+        if not chat or chat.type not in ("group", "supergroup"):
+            return
+
+        if not user or user.is_bot:
+            return
+
+        chat_id = chat.id
+        user_id = user.id
+
+        name = (
+            user.full_name
+            or user.username
+            or str(user_id)
+        ).strip()[:80]
+
+        # -----------------------------------------------------
+        # Update in-memory activity
+        # -----------------------------------------------------
+        current = _recent_members.setdefault(chat_id, [])
+
+        # Remove previous entry for this user.
+        current[:] = [
+            item
+            for item in current
+            if not (
+                isinstance(item, (list, tuple))
+                and len(item) >= 1
+                and int(item[0]) == user_id
+            )
+        ]
+
+        # Add latest activity.
+        current.append((user_id, name))
+
+        # Keep only the latest 100 members.
+        if len(current) > 100:
+            del current[:-100]
+
+        # -----------------------------------------------------
+        # Update persistent Bond member store
+        # -----------------------------------------------------
+        key = f"bond_members:{chat_id}"
+
+        members = []
+
+        try:
+            raw = await _rget(key)
+
+            if raw:
+                decoded = json.loads(raw)
+
+                if isinstance(decoded, list):
+                    members = decoded
+
+        except Exception:
+            members = []
+
+        # Remove this user if already present.
+        members = [
+            m for m in members
+            if isinstance(m, dict)
+            and str(
+                m.get("id")
+                or m.get("user_id")
+                or ""
+            ) != str(user_id)
+        ]
+
+        # Add current user.
+        members.append({
+            "id": user_id,
+            "name": name,
+            "last_active": datetime.now(
+                ORACLE_TZ
+            ).isoformat(),
+        })
+
+        # Keep persistent list bounded.
+        members = members[-100:]
+
+        await _rsetex(
+            key,
+            30 * 86400,
+            json.dumps(
+                members,
+                ensure_ascii=False,
+            ),
+        )
+
+        logger.info(
+            "BOND ACTIVITY | chat=%s | user=%s | members=%s",
+            chat_id,
+            user_id,
+            len(members),
+        )
+
+    except Exception as e:
+        logger.warning(
+            "Bond activity registration failed: %s",
+            e,
+        )
+        
 async def _bond_members(chat_id):
     """
     Self-healing Bond member loader.
