@@ -20,7 +20,7 @@ from core.utility import check_afk_mentions as core_check_afk_mentions
 from core.utility import set_afk as core_set_afk
 from core.autonomy import install as install_autonomy
 from core.v2_features import install as install_v2_features
-from core.v2_social import install as install_v2_social
+from core.v2_social2 import install as install_v2_social
 from handlers import deathgames_v2
 
 log = logging.getLogger("midnight.entrypoint")
