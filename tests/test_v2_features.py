@@ -1,5 +1,3 @@
-import pytest
-
 from core.v2_features import CRICKET_SHOTS, _scorecard
 
 
@@ -25,7 +23,5 @@ def test_cricket_scorecard_contains_no_economy_fields():
 
 
 def test_upgrade_alias_is_intentionally_supported():
-    # Kept as a tiny contract test because the historical spelling is part of
-    # the requested V2 command surface.
     from core.v2_features import install
     assert callable(install)
