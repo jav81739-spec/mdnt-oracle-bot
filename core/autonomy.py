@@ -134,9 +134,9 @@ def install(application) -> None:
     application.add_handler(MessageHandler(filters.ALL, record_activity), group=100)
     if application.job_queue is not None:
         application.job_queue.run_repeating(autonomous_tick, interval=20 * 60, first=90, name="oracle-autonomy")
-    # V2 feature surfaces are installed alongside autonomy so the production
-    # entrypoint needs only one bootstrap hook.
     from .v2_features import install as install_features
     from .cricket_duel import install as install_cricket_duel
+    from .music_v2 import install as install_music
     install_features(application)
     install_cricket_duel(application)
+    install_music(application)
