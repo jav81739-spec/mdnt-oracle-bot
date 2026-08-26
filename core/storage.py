@@ -35,6 +35,7 @@ class Storage:
         self._client: httpx.AsyncClient | None = None
         self._local: dict[str, Any] = {}
         self._local_expiry: dict[str, float] = {}
+        self._local_lists: dict[str, list[str]] = {}
         self._local_lock = asyncio.Lock()
         self._closed = False
 
@@ -140,6 +141,7 @@ class Storage:
                         count += 1
                         self._local.pop(key, None)
                         self._local_expiry.pop(key, None)
+                    self._local_lists.pop(key, None)
                 return count
         try:
             result = await self._request("POST", "/", json=["DEL", *keys])
@@ -162,9 +164,39 @@ class Storage:
             log.exception("INCRBY failed for key=%s", key)
             raise
 
+    async def lpush(self, key: str, *values: Any) -> int:
+        if not values:
+            return 0
+        if not self.configured:
+            async with self._local_lock:
+                items = self._local_lists.setdefault(key, [])
+                for value in values:
+                    items.insert(0, str(value))
+                return len(items)
+        try:
+            result = await self._request("POST", "/", json=["LPUSH", key, *[str(v) for v in values]])
+            return int(result or 0)
+        except StorageError:
+            log.exception("LPUSH failed for key=%s", key)
+            raise
+
+    async def lrange(self, key: str, start: int, end: int) -> list[str]:
+        if not self.configured:
+            async with self._local_lock:
+                items = self._local_lists.get(key, [])
+                if end == -1:
+                    return items[start:]
+                return items[start:end + 1]
+        try:
+            result = await self._request("POST", "/", json=["LRANGE", key, int(start), int(end)])
+            return list(result or [])
+        except StorageError:
+            log.exception("LRANGE failed for key=%s", key)
+            return []
+
     async def exists(self, key: str) -> bool:
         if not self.configured:
-            return (await self.get(key, None)) is not None
+            return (await self.get(key, None)) is not None or bool(self._local_lists.get(key))
         try:
             result = await self._request("GET", f"/exists/{quote(key, safe='')}")
             return bool(int(result or 0))
@@ -196,7 +228,11 @@ class Storage:
             yield acquired
         finally:
             if acquired:
-                await self.delete(key)
+                # Best-effort release. TTL remains the safety net if a worker
+                # disappears; the token is unique per lock acquisition.
+                current = await self.get(key, None)
+                if current == token:
+                    await self.delete(key)
 
 
 storage = Storage()
