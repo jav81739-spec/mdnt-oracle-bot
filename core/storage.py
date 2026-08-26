@@ -92,6 +92,20 @@ class Storage:
             log.exception("GET failed for key=%s", key)
             return default
 
+    async def load(self, key: str, default: Any = None) -> Any:
+        """Read a JSON-encoded value, returning *default* on missing/corrupt data."""
+        value = await self.get(key, None)
+        if value is None:
+            return default
+        if isinstance(value, (dict, list, int, float, bool)):
+            return value
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (TypeError, ValueError):
+                return default
+        return default
+
     async def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
         encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")) if not isinstance(value, str) else value
         if not self.configured:
@@ -109,6 +123,14 @@ class Storage:
             return True
         except StorageError:
             log.exception("SET failed for key=%s", key)
+            return False
+
+    async def save(self, key: str, value: Any, ttl: int | None = None) -> bool:
+        """Persist a JSON-serializable value through the common storage boundary."""
+        try:
+            return await self.set(key, value, ttl=ttl)
+        except (TypeError, ValueError):
+            log.exception("Could not serialize value for key=%s", key)
             return False
 
     async def setnx(self, key: str, value: str, ttl: int = 15) -> bool:
@@ -229,7 +251,7 @@ class Storage:
                 remaining = int(expiry - time.time())
                 if remaining < 0: self._local.pop(key, None); self._local_expiry.pop(key, None); return -2
                 return remaining
-        try: return int(await self._request("GET", f"/ttl/{quote(key, safe='')}"))
+        try: return int(await self._request("GET", f"/ttl/{quote(key, safe='')}") )
         except StorageError: return -1
 
     def _expire_local_locked(self) -> None:
