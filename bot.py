@@ -1921,45 +1921,148 @@ def _bond_payload(pairs, start, end, cycle_id):
 
 async def _generate_bond_for_chat(chat_id, start, end, cycle_id, announce=False, bot=None):
     members = await _bond_members(chat_id)
+
+    logger.info(
+        "BOND CHECK | chat=%s | members=%s | cycle=%s",
+        chat_id,
+        len(members),
+        cycle_id,
+    )
+
     if len(members) < 2:
+        logger.warning(
+            "BOND WAITING | chat=%s | only %s eligible members",
+            chat_id,
+            len(members),
+        )
         return False
+
     old_raw = await _rget(f"bond:{chat_id}")
     old_pairs = []
+
     if old_raw:
-        try: old_pairs = json.loads(old_raw).get("pairs", [])
-        except Exception: old_pairs = []
-    pairs, unpaired = await _make_pairs(members, old_pairs)
-    if not pairs:
-        return False
-    payload = _bond_payload(pairs, start, end, cycle_id)
-    payload["unpaired"] = unpaired
-    # Long TTL: state must survive a Render restart and the whole cycle.
-    await _rsetex(f"bond:{chat_id}", int(max(3600, (end - datetime.now(ORACLE_TZ)).total_seconds() + 86400)), json.dumps(payload, ensure_ascii=False))
-    await _rset(f"bond_cycle:{chat_id}", cycle_id)
-    if announce and bot:
-        lines = [f"{html.escape(p['an'])} × {html.escape(p['bn'])}" for p in pairs]
-        text = "✦ <b>MIDNIGHT BOND — REVEALED</b>\n\n" + "\n".join(lines)
-        if unpaired:
-            text += f"\n\n<i>{html.escape(unpaired[0]['name'])} remains unpaired this cycle.</i>"
-        text += "\n\n<i>New bonds are now in place. Next reveal · 06:30.</i>"
         try:
-            await bot.send_message(chat_id, text, parse_mode="HTML")
+            old_pairs = json.loads(old_raw).get("pairs", [])
+        except Exception:
+            old_pairs = []
+
+    pairs, unpaired = await _make_pairs(members, old_pairs)
+
+    logger.info(
+        "BOND PAIRING | chat=%s | members=%s | pairs=%s | unpaired=%s",
+        chat_id,
+        len(members),
+        len(pairs),
+        len(unpaired),
+    )
+
+    if not pairs:
+        logger.warning(
+            "BOND NO PAIRS | chat=%s | eligible members=%s",
+            chat_id,
+            len(members),
+        )
+        return False
+
+    payload = _bond_payload(
+        pairs,
+        start,
+        end,
+        cycle_id,
+    )
+
+    payload["unpaired"] = unpaired
+
+    ttl = int(
+        max(
+            3600,
+            (end - datetime.now(ORACLE_TZ)).total_seconds() + 86400,
+        )
+    )
+
+    await _rsetex(
+        f"bond:{chat_id}",
+        ttl,
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+        ),
+    )
+
+    await _rset(
+        f"bond_cycle:{chat_id}",
+        cycle_id,
+    )
+
+    if announce and bot:
+        lines = [
+            f"{html.escape(p['an'])} × {html.escape(p['bn'])}"
+            for p in pairs
+        ]
+
+        text = (
+            "✦ <b>MIDNIGHT BOND — REVEALED</b>\n\n"
+            + "\n".join(lines)
+        )
+
+        if unpaired:
+            text += (
+                f"\n\n<i>"
+                f"{html.escape(unpaired[0]['name'])}"
+                f" remains unpaired this cycle."
+                f"</i>"
+            )
+
+        text += (
+            "\n\n"
+            "<i>New bonds are now in place. "
+            "Next reveal · 06:30.</i>"
+        )
+
+        try:
+            await bot.send_message(
+                chat_id,
+                text,
+                parse_mode="HTML",
+            )
         except Exception as e:
-            logger.warning("Bond reveal failed for %s: %s", chat_id, e)
+            logger.warning(
+                "Bond reveal failed for %s: %s",
+                chat_id,
+                e,
+            )
+
     # Quietly notify each member of their private partner.
     if bot:
         for p in pairs:
-            for uid, partner_name in ((p["a"], p["bn"]), (p["b"], p["an"])):
+            for uid, partner_name in (
+                (p["a"], p["bn"]),
+                (p["b"], p["an"]),
+            ):
                 try:
                     await bot.send_message(
                         uid,
                         "✦ <b>MIDNIGHT BOND</b>\n\n"
-                        f"Your connection for this cycle: <b>{html.escape(partner_name)}</b>\n\n"
-                        f"06:30 → 06:30\n⏳ <b>{_remaining_text(end)}</b> remaining",
+                        f"Your connection for this cycle: "
+                        f"<b>{html.escape(partner_name)}</b>\n\n"
+                        f"06:30 → 06:30\n"
+                        f"⏳ <b>{_remaining_text(end)}</b> remaining",
                         parse_mode="HTML",
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        "Private bond notification failed for %s: %s",
+                        uid,
+                        e,
+                    )
+
+    logger.info(
+        "BOND CREATED | chat=%s | cycle=%s | pairs=%s",
+        chat_id,
+        cycle_id,
+        len(pairs),
+    )
+
     return True
 
 def _oracle_cycle_start(now=None):
