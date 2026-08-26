@@ -4421,7 +4421,22 @@ def main():
     # Polling — webhook intentionally removed. The Render health server above
     # handles the web-service port while Telegram updates arrive via polling.
     logger.info("🌙 Midnight Oracle awakening... polling mode")
-    app.run_polling(drop_pending_updates=False, allowed_updates=Update.ALL_TYPES)
+        # Midnight Oracle — register group activity for Bond/Signal
+    app.add_handler(
+        MessageHandler(
+            filters.ChatType.GROUPS & ~filters.COMMAND,
+            _register_bond_activity,
+        ),
+        group=-10,
+    )
 
-if __name__=="__main__":
+    # Polling — webhook intentionally removed. The Render health server above
+    # handles the web-service port while Telegram updates arrive via polling.
+    logger.info("🌙 Midnight Oracle awakening... polling mode")
+    app.run_polling(
+        drop_pending_updates=False,
+        allowed_updates=Update.ALL_TYPES
+    )
+
+if __name__ == "__main__":
     main()
