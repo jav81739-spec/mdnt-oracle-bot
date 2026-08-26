@@ -1855,55 +1855,156 @@ _BOND_LOOP_SECONDS = max(15, int(os.getenv("MIDNIGHT_BOND_LOOP_SECONDS", "30")))
 _BOND_MEMBER_TTL = 7 * 24 * 3600
 
 async def _bond_members(chat_id):
-    """Return persistent bond members, with in-memory fallback."""
-    raw = await _rget(f"bond_members:{chat_id}")
+    """
+    Self-healing Bond member loader.
 
-    members = []
+    It:
+    - Loads persistent Bond members.
+    - Loads recent in-memory members.
+    - Merges both sources.
+    - Removes duplicates/invalid IDs.
+    - Persists the merged list.
+    - Keeps the Bond engine alive across Render restarts.
+    """
 
-    if raw:
-        try:
+    key = f"bond_members:{chat_id}"
+
+    persistent = []
+    recent = []
+
+    # ---------------------------------------------------------
+    # 1. LOAD PERSISTENT BOND MEMBERS
+    # ---------------------------------------------------------
+    try:
+        raw = await _rget(key)
+
+        if raw:
             decoded = json.loads(raw)
+
             if isinstance(decoded, list):
-                members = decoded
-        except Exception as e:
-            logger.warning(
-                "BOND MEMBERS JSON ERROR | chat=%s | error=%s",
-                chat_id,
-                e,
-            )
+                persistent = decoded
 
-    # Fall back to recent in-memory activity.
-    if not members:
-        recent = _recent_members.get(chat_id, [])
+    except Exception as e:
+        logger.warning(
+            "BOND MEMBER LOAD FAILED | chat=%s | %s",
+            chat_id,
+            e,
+        )
 
-        members = [
-            {"id": uid, "name": name}
-            for uid, name in recent
-        ]
+    # ---------------------------------------------------------
+    # 2. LOAD RECENT IN-MEMORY MEMBERS
+    # ---------------------------------------------------------
+    try:
+        recent_data = _recent_members.get(chat_id, [])
+
+        if isinstance(recent_data, dict):
+            recent_data = list(recent_data.values())
+
+        for item in recent_data:
+
+            if isinstance(item, dict):
+                recent.append({
+                    "id": item.get("id") or item.get("user_id"),
+                    "name": (
+                        item.get("name")
+                        or item.get("username")
+                        or item.get("first_name")
+                        or "Unknown"
+                    ),
+                })
+
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                recent.append({
+                    "id": item[0],
+                    "name": item[1],
+                })
+
+    except Exception as e:
+        logger.warning(
+            "BOND RECENT MEMBERS FAILED | chat=%s | %s",
+            chat_id,
+            e,
+        )
+
+    # ---------------------------------------------------------
+    # 3. MERGE ALL KNOWN MEMBERS
+    # ---------------------------------------------------------
+    combined = persistent + recent
 
     clean = []
     seen = set()
 
-    for m in members:
+    for member in combined:
+
+        if not isinstance(member, dict):
+            continue
+
         try:
-            uid = int(m.get("id"))
-            name = str(
-                m.get("name") or "Unknown"
-            ).strip()[:80]
+            uid = int(
+                member.get("id")
+                or member.get("user_id")
+                or member.get("uid")
+            )
         except Exception:
             continue
 
-        if uid > 0 and uid not in seen:
-            seen.add(uid)
-            clean.append({
-                "id": uid,
-                "name": name,
-            })
+        # Ignore invalid Telegram IDs.
+        if uid <= 0:
+            continue
 
+        # Remove duplicates.
+        if uid in seen:
+            continue
+
+        name = str(
+            member.get("name")
+            or member.get("username")
+            or member.get("first_name")
+            or "Unknown"
+        ).strip()
+
+        if not name:
+            name = "Unknown"
+
+        name = name[:80]
+
+        seen.add(uid)
+
+        clean.append({
+            "id": uid,
+            "name": name,
+        })
+
+    # ---------------------------------------------------------
+    # 4. PERSIST THE SELF-HEALED MEMBER LIST
+    # ---------------------------------------------------------
+    if clean:
+
+        try:
+            await _rsetex(
+                key,
+                30 * 86400,
+                json.dumps(
+                    clean,
+                    ensure_ascii=False,
+                ),
+            )
+
+        except Exception as e:
+            logger.warning(
+                "BOND MEMBER PERSIST FAILED | chat=%s | %s",
+                chat_id,
+                e,
+            )
+
+    # ---------------------------------------------------------
+    # 5. LOG EXACTLY WHAT MIDNIGHT SEES
+    # ---------------------------------------------------------
     logger.info(
-        "BOND MEMBERS | chat=%s | persistent=%s | eligible=%s",
+        "BOND MEMBERS | chat=%s | persistent=%d | recent=%d | eligible=%d",
         chat_id,
-        bool(raw),
+        len(persistent),
+        len(recent),
         len(clean),
     )
 
