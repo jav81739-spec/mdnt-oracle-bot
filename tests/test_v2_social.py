@@ -9,9 +9,21 @@ def test_v2_has_large_original_interaction_surface():
 
 def test_channel_comment_is_cricket_relevant():
     comment = relevant_comment("India win a T20 match by 8 wickets with 190 runs")
-    assert any(word in comment.lower() for word in ("cricket", "boundary", "update", "timeline", "scene"))
+    assert any(word in comment.lower() for word in ("cricket", "boundary", "update", "scene", "result"))
 
 
-def test_channel_comment_handles_generic_post():
-    comment = relevant_comment("new edit is out tonight")
+def test_channel_comment_is_edit_relevant():
+    comment = relevant_comment("new cricket edit video is out tonight")
+    assert any(word in comment.lower() for word in ("edit", "visual", "video"))
+
+
+def test_channel_comment_handles_media_only_post():
+    comment = relevant_comment("")
     assert comment
+    assert any(word in comment.lower() for word in ("visual", "caption", "frame", "seen"))
+
+
+def test_channel_comment_is_not_a_generic_fixed_fallback():
+    cricket = relevant_comment("wicket and innings update")
+    edit = relevant_comment("new montage edit")
+    assert cricket != edit
