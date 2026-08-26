@@ -17,6 +17,7 @@ from core.health import check as health_check
 from core.storage import Storage, storage
 from core.utility import check_afk_mentions as core_check_afk_mentions
 from core.utility import set_afk as core_set_afk
+from core.autonomy import install as install_autonomy
 from handlers import deathgames_v2
 
 log = logging.getLogger("midnight.entrypoint")
@@ -145,8 +146,10 @@ async def _post_init(application):
         await _legacy_post_init(application)
         await deathgames_v2.load_from_storage()
         recovered = await recover_deathgames(application, legacy_bot)
+        install_autonomy(application)
         if recovered:
             log.info("Recovered %d death-game record(s)", recovered)
+        log.info("Midnight Oracle V2 autonomous social layer online")
     except Exception:
         log.exception("Startup initialization/recovery failed")
         raise
