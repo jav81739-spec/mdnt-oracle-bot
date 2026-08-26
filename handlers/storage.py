@@ -12,6 +12,7 @@ bot continues to run without persistence.
 import json
 import os
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -34,8 +35,9 @@ class UpstashRedis:
         if not self.url or not self.token:
             return None
 
-        # Upstash REST command routes are /<command>/<arg>... .
-        encoded = [str(arg) for arg in args]
+        # REST command arguments are path segments, so encode keys and values
+        # before putting them into the URL. This matters for JSON/list payloads.
+        encoded = [quote(str(arg), safe="") for arg in args]
         path = "/".join([command, *encoded])
         try:
             async with httpx.AsyncClient(timeout=10) as client:
