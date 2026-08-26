@@ -25,67 +25,50 @@ def _scope(chat_id: int) -> str:
 async def _register(chat_id: int, user_id: int, name: str) -> None:
     key = f"economy:members:{chat_id}"
     async with storage.lock(f"economy-members:{chat_id}") as acquired:
-        if not acquired:
-            return
+        if not acquired: return
         raw = await storage.get(key, "[]")
-        try:
-            members = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        except (TypeError, ValueError):
-            members = []
+        try: members = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        except (TypeError, ValueError): members = []
         by_id = {int(x.get("id")): x for x in members if isinstance(x, dict) and str(x.get("id", "")).lstrip("-").isdigit()}
         by_id[int(user_id)] = {"id": int(user_id), "name": str(name or "Member")[:80]}
-        await storage.set(key, list(by_id.values()))
+        if not await storage.set(key, list(by_id.values())):
+            raise EconomyError("economy member registry could not be saved")
 
 
 async def load_from_storage() -> None:
-    """One-time migration from the legacy giant ``economy`` JSON blob."""
     marker = "economy:migration:v2"
-    if await storage.exists(marker):
-        return
+    if await storage.exists(marker): return
     async with storage.lock("economy-migration", ttl=30, wait=1) as acquired:
-        if not acquired or await storage.exists(marker):
-            return
+        if not acquired or await storage.exists(marker): return
         raw = await storage.get("economy", "{}")
-        try:
-            legacy = json.loads(raw) if isinstance(raw, str) else (raw or {})
-        except (TypeError, ValueError):
-            legacy = {}
+        try: legacy = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except (TypeError, ValueError): legacy = {}
         if isinstance(legacy, dict):
             for chat_id, accounts in legacy.items():
-                if not isinstance(accounts, dict):
-                    continue
-                for uid, data in accounts.items():
-                    if not isinstance(data, dict):
-                        continue
-                    try:
-                        user_id = int(uid)
-                        coins = max(0, int(data.get("coins", 0)))
-                    except (TypeError, ValueError):
-                        continue
+                if not isinstance(accounts, dict): continue
+                for uid, item in accounts.items():
+                    if not isinstance(item, dict): continue
+                    try: user_id, coins = int(uid), max(0, int(item.get("coins", 0)))
+                    except (TypeError, ValueError): continue
                     await storage.set(economy.key(user_id, str(chat_id)), str(coins))
-                    await _register(int(chat_id), user_id, str(data.get("name", "Member")))
-                    if data.get("last_daily"):
-                        await storage.set(f"economy:daily:{chat_id}:{user_id}", str(data["last_daily"]))
+                    await _register(int(chat_id), user_id, str(item.get("name", "Member")))
+                    if item.get("last_daily"): await storage.set(f"economy:legacy-daily:{chat_id}:{user_id}", str(item["last_daily"]))
         await storage.set(marker, "1")
 
 
 async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    user = update.effective_user
+    chat_id, user = update.effective_chat.id, update.effective_user
     await _register(chat_id, user.id, user.first_name)
-    key = f"economy:daily:{chat_id}:{user.id}"
     today = datetime.date.today().isoformat()
-    async with storage.lock(f"economy-daily-claim:{chat_id}:{user.id}") as acquired:
-        if not acquired:
-            await update.message.reply_text("⏳ Midnight is processing your claim — try again in a moment.")
-            return
-        if await storage.get(key, "") == today:
-            await update.message.reply_text("⏳ You already claimed today's coins — come back tomorrow!")
-            return
-        await economy.add(user.id, DAILY_AMOUNT, "daily", scope=_scope(chat_id))
-        await storage.set(key, today)
-    balance = await economy.balance(user.id, _scope(chat_id))
-    await update.message.reply_text(f"💰 +{DAILY_AMOUNT} coins claimed! Balance: {balance}")
+    try:
+        tx = await economy.claim_once(user.id, DAILY_AMOUNT, f"daily:{today}", 172800, "daily", scope=_scope(chat_id))
+    except EconomyError as exc:
+        await update.message.reply_text(f"⏳ Daily claim couldn't be committed safely: {exc}")
+        return
+    if tx.amount == 0:
+        await update.message.reply_text("⏳ You already claimed today's coins — come back tomorrow!")
+        return
+    await update.message.reply_text(f"💰 +{DAILY_AMOUNT} coins claimed! Balance: {tx.balance}")
 
 
 async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -93,112 +76,62 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     await _register(chat_id, target.id, target.first_name)
     coins = await economy.balance(target.id, _scope(chat_id))
-    await update.message.reply_text(
-        f"💰 {mention(target.id, target.first_name)}'s balance: *{coins}* coins",
-        parse_mode="Markdown",
-    )
+    await update.message.reply_text(f"💰 {mention(target.id, target.first_name)}'s balance: *{coins}* coins", parse_mode="Markdown")
 
 
 async def rob(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message:
-        await update.message.reply_text("Reply to someone's message with /rob to try robbing them")
-        return
-    chat_id = update.effective_chat.id
-    robber = update.effective_user
-    victim = update.message.reply_to_message.from_user
-    if robber.id == victim.id:
-        await update.message.reply_text("You can't rob yourself 😭")
-        return
-    await _register(chat_id, robber.id, robber.first_name)
-    await _register(chat_id, victim.id, victim.first_name)
+        await update.message.reply_text("Reply to someone's message with /rob to try robbing them"); return
+    chat_id, robber, victim = update.effective_chat.id, update.effective_user, update.message.reply_to_message.from_user
+    if robber.id == victim.id: await update.message.reply_text("You can't rob yourself 😭"); return
+    await _register(chat_id, robber.id, robber.first_name); await _register(chat_id, victim.id, victim.first_name)
     scope = _scope(chat_id)
     async with storage.lock(f"economy-rob:{chat_id}:{min(robber.id, victim.id)}:{max(robber.id, victim.id)}") as acquired:
-        if not acquired:
-            await update.message.reply_text("⏳ Economy is busy — try again.")
-            return
+        if not acquired: await update.message.reply_text("⏳ Economy is busy — try again."); return
         victim_balance = await economy.balance(victim.id, scope)
-        if victim_balance < 20:
-            await update.message.reply_text(f"{victim.first_name} is too broke to rob 💀")
-            return
+        if victim_balance < 20: await update.message.reply_text(f"{victim.first_name} is too broke to rob 💀"); return
         if random.random() < ROB_SUCCESS_CHANCE:
             stolen = max(1, int(victim_balance * ROB_STEAL_PERCENT))
-            try:
-                await economy.transfer(victim.id, robber.id, stolen, "rob", scope)
-            except EconomyError:
-                await update.message.reply_text("⏳ The heist hit a concurrency snag — try again.")
-                return
-            await update.message.reply_text(
-                f"🥷 {mention(robber.id, robber.first_name)} successfully robbed "
-                f"{stolen} coins from {mention(victim.id, victim.first_name)}!",
-                parse_mode="Markdown",
-            )
+            try: await economy.transfer(victim.id, robber.id, stolen, "rob", scope)
+            except EconomyError: await update.message.reply_text("⏳ The heist hit a concurrency snag — try again."); return
+            await update.message.reply_text(f"🥷 {mention(robber.id, robber.first_name)} successfully robbed {stolen} coins from {mention(victim.id, victim.first_name)}!", parse_mode="Markdown")
         else:
-            try:
-                await economy.remove(robber.id, ROB_FAIL_PENALTY, "rob-fine", scope)
+            try: await economy.remove(robber.id, ROB_FAIL_PENALTY, "rob-fine", scope)
             except EconomyError:
-                pass
-            await update.message.reply_text(
-                f"🚨 {mention(robber.id, robber.first_name)} got caught robbing "
-                f"{mention(victim.id, victim.first_name)} and paid a {ROB_FAIL_PENALTY} coin fine!",
-                parse_mode="Markdown",
-            )
+                await update.message.reply_text("🚨 You were caught, but the fine couldn't be committed safely. Try again."); return
+            await update.message.reply_text(f"🚨 {mention(robber.id, robber.first_name)} got caught robbing {mention(victim.id, victim.first_name)} and paid a {ROB_FAIL_PENALTY} coin fine!", parse_mode="Markdown")
 
 
 async def gamble(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    user = update.effective_user
+    chat_id, user = update.effective_chat.id, update.effective_user
     await _register(chat_id, user.id, user.first_name)
-    if not context.args:
-        await update.message.reply_text("Usage: /gamble [amount]")
-        return
-    try:
-        amount = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("Enter a valid number")
-        return
-    if amount <= 0:
-        await update.message.reply_text("Enter a positive amount")
-        return
+    if not context.args: await update.message.reply_text("Usage: /gamble [amount]"); return
+    try: amount = int(context.args[0])
+    except ValueError: await update.message.reply_text("Enter a valid number"); return
+    if amount <= 0: await update.message.reply_text("Enter a positive amount"); return
     scope = _scope(chat_id)
     async with storage.lock(f"economy-gamble:{chat_id}:{user.id}") as acquired:
-        if not acquired:
-            await update.message.reply_text("⏳ Economy is busy — try again.")
-            return
+        if not acquired: await update.message.reply_text("⏳ Economy is busy — try again."); return
         balance_now = await economy.balance(user.id, scope)
-        if amount > balance_now:
-            await update.message.reply_text(f"You only have {balance_now} coins")
-            return
+        if amount > balance_now: await update.message.reply_text(f"You only have {balance_now} coins"); return
         try:
-            if random.random() < 0.5:
-                result = await economy.add(user.id, amount, "gamble-win", scope)
-                await update.message.reply_text(f"🎰 You won! +{amount} coins. Balance: {result.balance}")
-            else:
-                result = await economy.remove(user.id, amount, "gamble-loss", scope)
-                await update.message.reply_text(f"💸 You lost {amount} coins. Balance: {result.balance}")
-        except EconomyError:
-            await update.message.reply_text("⏳ The gamble couldn't be committed safely. Try again.")
+            result = await economy.add(user.id, amount, "gamble-win", scope) if random.random() < 0.5 else await economy.remove(user.id, amount, "gamble-loss", scope)
+        except EconomyError as exc:
+            await update.message.reply_text(f"⏳ The gamble couldn't be committed safely: {exc}"); return
+        await update.message.reply_text(f"🎰 You {'won' if result.amount > 0 else 'lost'}! {abs(result.amount)} coins. Balance: {result.balance}")
 
 
 async def economy_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     raw = await storage.get(f"economy:members:{chat_id}", "[]")
-    try:
-        members = json.loads(raw) if isinstance(raw, str) else (raw or [])
-    except (TypeError, ValueError):
-        members = []
-    if not members:
-        await update.message.reply_text("No accounts yet — use /daily to get started!")
-        return
+    try: members = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except (TypeError, ValueError): members = []
     rows = []
-    for item in members:
-        try:
-            uid = int(item["id"])
-        except (TypeError, ValueError, KeyError):
-            continue
+    for item in members if isinstance(members, list) else []:
+        try: uid = int(item["id"])
+        except (TypeError, ValueError, KeyError): continue
         rows.append((uid, str(item.get("name", "Member")), await economy.balance(uid, _scope(chat_id))))
     ranked = sorted(rows, key=lambda x: x[2], reverse=True)[:10]
-    if not ranked:
-        await update.message.reply_text("No accounts yet — use /daily to get started!")
-        return
+    if not ranked: await update.message.reply_text("No accounts yet — use /daily to get started!"); return
     lines = [f"{i+1}. {mention(uid, name)} — {coins} coins" for i, (uid, name, coins) in enumerate(ranked)]
     await update.message.reply_text("💰 *Richest Members*\n\n" + "\n".join(lines), parse_mode="Markdown")
