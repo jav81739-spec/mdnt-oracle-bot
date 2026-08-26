@@ -19,8 +19,7 @@ class Health:
 async def check(store: Storage = storage) -> Health:
     if not store.configured:
         return Health("degraded", "unconfigured")
-    try:
-        await store.set("health:midnight", "ok", ttl=30)
-        return Health("ok", "ok")
-    except Exception:
+    ok = await store.set("health:midnight", "ok", ttl=30)
+    if not ok:
         return Health("degraded", "error")
+    return Health("ok", "ok")
