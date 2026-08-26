@@ -15,6 +15,8 @@ from core.chat import generate_reply as core_generate_reply
 from core.recovery import recover_deathgames
 from core.health import check as health_check
 from core.storage import Storage, storage
+from core.utility import check_afk_mentions as core_check_afk_mentions
+from core.utility import set_afk as core_set_afk
 from handlers import deathgames_v2
 
 log = logging.getLogger("midnight.entrypoint")
@@ -103,7 +105,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path in ("/", "/health", "/healthz"):
-            self._send(200, {"status": "ok", "service": "midnight-oracle"})
+            self._send(200, {"status": "ok", "service": "midnight-oracle", "engine": "v2"})
             return
         if self.path == "/ready":
             try:
@@ -111,7 +113,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
                 self._send(200 if result.status == "ok" else 503, result.as_dict())
             except Exception:
                 log.exception("Readiness probe failed")
-                self._send(503, {"status": "degraded", "storage": "error", "bot": "unknown"})
+                self._send(503, {"status": "degraded", "storage": "error", "bot": "unknown", "engine": "v2"})
             return
         self._send(404, {"status": "not_found"})
 
@@ -130,9 +132,9 @@ def _start_health_server():
     return server
 
 
-# Activate the durable second-generation death-game engine before the legacy
-# runtime registers command handlers. The old module remains in the tree as a
-# rollback reference until this branch is proven stable by CI.
+# Activate second-generation engines before the compatibility runtime registers
+# its handlers. The Telegram command surface stays intact while stateful paths
+# are migrated behind the v2 core one subsystem at a time.
 legacy_bot.deathgames = deathgames_v2
 _legacy_post_init = legacy_bot._post_init
 
@@ -144,7 +146,7 @@ async def _post_init(application):
         await deathgames_v2.load_from_storage()
         recovered = await recover_deathgames(application, legacy_bot)
         if recovered:
-            log.info("Recovered %d legacy death-game record(s)", recovered)
+            log.info("Recovered %d death-game record(s)", recovered)
     except Exception:
         log.exception("Startup initialization/recovery failed")
         raise
@@ -160,6 +162,8 @@ legacy_bot._setwallet = _legacy_setwallet
 legacy_bot._start_dummy_server = _start_health_server
 legacy_bot._post_init = _post_init
 legacy_bot.chat.generate_reply = core_generate_reply
+legacy_bot.utility.set_afk = core_set_afk
+legacy_bot.utility.check_afk_mentions = core_check_afk_mentions
 
 
 if __name__ == "__main__":
