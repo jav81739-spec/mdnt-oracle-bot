@@ -1,50 +1,45 @@
-# Your Telegram Bot — v1 (25 commands)
+# Midnight Oracle — v2
 
-This is a working starting build. It covers one solid batch from each
-category in your 87-command list: human chat, games, moderation,
-utility, aesthetic/mysterious, and friendship.
+Midnight Oracle is a Telegram group bot built around a durable, restart-safe core while preserving the established command surface.
 
-## ⚠️ Before anything else
-Go to @BotFather, send `/revoke`, and generate a **new** token —
-the one shared earlier in chat should be treated as compromised.
+## v2 architecture
 
-## Setup
+- `bot.py` — the single production entrypoint.
+- `core/storage.py` — durable Upstash Redis boundary with deterministic local fallback for tests.
+- `core/economy.py` — serialized, atomic economy operations and idempotent claims.
+- `core/ai.py` — one bounded Gemini HTTPS gateway with explicit unavailable behavior.
+- `core/chat.py` — centralized Oracle chat generation.
+- `core/game_runtime.py` — restart-safe, per-chat persistence for stateful games.
+- `core/recovery.py` — startup recovery for durable game state.
+- `core/utility.py` — restart-safe utility state such as AFK status.
+- `core/health.py` — deterministic health/readiness checks for Render.
+- `handlers/` — Telegram command handlers, migrated behind the core boundaries where state or concurrency matters.
+- `legacy_bot.py` — compatibility runtime during the remaining migration; it is not a second production entrypoint.
 
-1. Install Python 3.10+
-2. In this folder, run:
-   ```
-   pip install -r requirements.txt
-   ```
-3. Copy `.env.example` to `.env` and fill in:
-   - `BOT_TOKEN` — your new token from @BotFather
-   - `GEMINI_API_KEY` — free, no card required. Get one at
-     https://aistudio.google.com/apikey (sign in with Google, click
-     "Create API Key"). Needed for real AI chat replies — without it,
-     `/chat` mode uses placeholder responses.
-4. Run the bot:
-   ```
-   python bot.py
-   ```
-5. Add your bot to your group, make it admin (needed for mute/ban/kick),
-   and test in a private/small group first.
+## What v2 is protecting
 
-## What's implemented (v1)
-- `/chat`, `/persona` + auto language/vibe-mirroring replies
-- `/quiz`, `/truth`, `/dare`, `/wyr`, `/rps`
-- `/mute`, `/unmute`, `/ban`, `/kick`, `/warn`, `/rules`
-- `/id`, `/info`, `/remind`
-- `/oracle`, `/tarot`, `/aura`, `/confess`
-- `/bestie`, `/duo`
+The rebuild is not just a cosmetic rewrite. It targets the failures that matter after deployment:
 
-## To activate real AI chat replies
-Just add your free `GEMINI_API_KEY` to `.env` — the code in
-`handlers/chat.py` already calls Gemini automatically once the key is
-set. That's the piece that makes the bot actually mirror language and
-tone like a real person, and it costs nothing at normal group-chat
-volume.
+- process restarts must not erase important game state;
+- economy rewards must not be duplicated by retries;
+- concurrent transfers must not corrupt balances;
+- AI outages must degrade cleanly instead of hanging the bot;
+- startup recovery must be repeatable;
+- Render health/readiness must be deterministic;
+- stateful utilities such as AFK must survive a restart;
+- the production entrypoint must remain isolated from secrets and legacy Redis clients.
 
-## Next batches
-The remaining ~60 commands from your full list (stats/activity log,
-retention, more games, more aesthetic/friendship commands) get added
-the same way — one handler file, a few functions, registered in
-`bot.py`. Tell me which batch to build next.
+## Development
+
+```bash
+python -m pip install -r requirements.txt
+python -m pip check
+python -m compileall -q .
+python -m unittest discover -s tests -v
+```
+
+Required deployment secrets are documented in `docs/PRODUCTION_READINESS.md`. Never commit a real Telegram, Gemini, Redis, or other service credential.
+
+## Release rule
+
+A green test suite is necessary, not sufficient. The v2 release also requires deployment smoke tests for Telegram, Redis, Gemini, recovery, and Render health/readiness. See `docs/RELEASE_GATE.md`.
