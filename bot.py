@@ -19,7 +19,7 @@ from core.ai import AIUnavailable, service as ai_service
 from core.chat import generate_reply as core_generate_reply
 from core.recovery import recover_deathgames
 from core.health import check as health_check
-from core.storage import storage
+from core.storage import Storage, storage
 
 log = logging.getLogger("midnight.entrypoint")
 
@@ -102,6 +102,15 @@ async def _legacy_setwallet(uid: int, value: int):
         return current
 
 
+async def _ready_probe():
+    """Run readiness in its own event loop/client; never share AsyncClient loops."""
+    probe = Storage()
+    try:
+        return await health_check(probe)
+    finally:
+        await probe.close()
+
+
 class _HealthHandler(BaseHTTPRequestHandler):
     """Cheap liveness endpoint plus dependency-aware readiness endpoint."""
     def _send(self, status: int, payload: dict[str, object]):
@@ -120,7 +129,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/ready":
             try:
-                result = asyncio.run(health_check())
+                result = asyncio.run(_ready_probe())
                 payload = result.as_dict()
                 self._send(200 if result.status == "ok" else 503, payload)
             except Exception:
