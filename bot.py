@@ -17,8 +17,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import legacy_bot
 from core.ai import AIUnavailable, service as ai_service
 from core.chat import generate_reply as core_generate_reply
-from core.health import check as health_check
 from core.recovery import recover_deathgames
+from core.health import check as health_check
 from core.storage import storage
 
 log = logging.getLogger("midnight.entrypoint")
@@ -143,21 +143,21 @@ def _start_health_server():
     return server
 
 
+# Preserve the legacy startup sequence (economy/chat/marriage/death-game loads)
+# and add the new durable recovery step after it completes.
+_legacy_post_init = legacy_bot._post_init
+
+
 async def _post_init(application):
-    """Run durable migrations/recovery after PTB has initialized the bot."""
     try:
         await storage.start()
+        await _legacy_post_init(application)
         recovered = await recover_deathgames(application, legacy_bot)
         if recovered:
             log.info("Recovered %d pending death-game timer(s)", recovered)
     except Exception:
-        log.exception("Startup recovery failed; live commands will continue")
-
-
-async def _post_shutdown(application):
-    """Close shared network clients cleanly on Render shutdown/redeploy."""
-    await ai_service.close()
-    await storage.close()
+        log.exception("Startup initialization/recovery failed")
+        raise
 
 
 # Inject the new core into the old runtime. This is intentionally explicit so
@@ -170,6 +170,7 @@ legacy_bot._addcoins = _legacy_addcoins
 legacy_bot._wallet = _legacy_wallet
 legacy_bot._setwallet = _legacy_setwallet
 legacy_bot._start_dummy_server = _start_health_server
+legacy_bot._post_init = _post_init
 # Remove the second Gemini SDK/client from handlers/chat without changing its
 # public function signature. The next migration pass can then delete that
 # legacy implementation entirely.
@@ -177,8 +178,4 @@ legacy_bot.chat.generate_reply = core_generate_reply
 
 
 if __name__ == "__main__":
-    # legacy_bot builds the Telegram Application itself, so expose lifecycle
-    # hooks through its builder before entering polling.
-    legacy_bot._MIDNIGHT_POST_INIT = _post_init
-    legacy_bot._MIDNIGHT_POST_SHUTDOWN = _post_shutdown
     legacy_bot.main()
