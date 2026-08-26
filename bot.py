@@ -1963,7 +1963,7 @@ async def _generate_bond_for_chat(chat_id, start, end, cycle_id, announce=False,
     return True
 
 def _oracle_cycle_start(now=None):
-    """Return the start of the current Midnight Oracle bond cycle."""
+    """Return the current Midnight Oracle cycle start at 06:30 IST."""
     if now is None:
         now = datetime.now(ORACLE_TZ)
 
@@ -1972,12 +1972,19 @@ def _oracle_cycle_start(now=None):
     else:
         now = now.astimezone(ORACLE_TZ)
 
-    return now.replace(
-        hour=0,
-        minute=0,
+    # Today's 06:30 boundary
+    start = now.replace(
+        hour=6,
+        minute=30,
         second=0,
         microsecond=0,
     )
+
+    # Before today's 06:30, we're still in yesterday's cycle.
+    if now < start:
+        start -= timedelta(days=1)
+
+    return start
 
 
 async def _ensure_bond_cycle(chat_id, bot=None):
