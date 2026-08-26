@@ -23,10 +23,14 @@ class RuntimeSmokeTests(unittest.TestCase):
         import handlers.storage
         import handlers.timecapsule
 
+    def test_chat_compatibility_surface(self):
+        import handlers.chat as chat
+        for name in ("generate_reply", "send_text_with_gif", "send_mood_gif", "get_gif_url", "send_random_gif", "send_random_sticker", "gif_reply", "sticker_reply", "maybe_react_to_message"):
+            self.assertTrue(callable(getattr(chat, name)))
+
     def test_production_entrypoint_activates_v2_engine(self):
         import bot
         import handlers.deathgames_v2 as v2
-
         self.assertIs(bot.legacy_bot.deathgames, v2)
         for name in ("survive", "revive", "deathstatus", "roulette", "deathgame", "joingame", "startround", "kill", "vote", "endgame"):
             self.assertTrue(callable(getattr(v2, name)))
