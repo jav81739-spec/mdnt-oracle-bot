@@ -22,6 +22,7 @@ from core.autonomy import install as install_autonomy
 from core.cricket_v2 import install as install_cricket_v2
 from core.deathgames_v2_install import install as install_deathgames_v2
 from core.v2_features import install as install_v2_features
+from core.v2_help import install as install_v2_help
 from core.v2_social2 import install as install_v2_social
 from core.vc_player import install as install_vc_player, player as vc_player
 from handlers import deathgames_v2
@@ -118,10 +119,10 @@ async def _post_init(application):
         await storage.start(); await _legacy_post_init(application)
         await deathgames_v2.load_from_storage(); recovered = await recover_deathgames(application, legacy_bot)
         install_autonomy(application); install_cricket_v2(application); install_deathgames_v2(application)
-        install_v2_features(application); install_v2_social(application); install_vc_player(application)
+        install_v2_features(application); install_v2_social(application); install_v2_help(application); install_vc_player(application)
         await vc_player.start(); await _publish_v2_command_menu(application)
         if recovered: log.info("Recovered %d death-game record(s)", recovered)
-        log.info("Midnight V2 autonomous, cricket, social, death-game and VC layers online")
+        log.info("Midnight V2 autonomous, cricket, social, death-game, help and VC layers online")
     except Exception:
         log.exception("Startup initialization/recovery failed"); raise
 
