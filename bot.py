@@ -16,7 +16,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import legacy_bot
 from core.ai import AIUnavailable, service as ai_service
+from core.chat import generate_reply as core_generate_reply
 from core.health import check as health_check
+from core.recovery import recover_deathgames
 from core.storage import storage
 
 log = logging.getLogger("midnight.entrypoint")
@@ -29,7 +31,7 @@ class _AIResponse:
 
 
 async def _generate_gemini(prompt: str):
-    """Route every legacy AI generation call through the single async GenAI service."""
+    """Route every legacy AI generation call through the single async AI service."""
     try:
         return _AIResponse(await ai_service.generate(prompt, timeout=25.0))
     except AIUnavailable as exc:
@@ -141,6 +143,23 @@ def _start_health_server():
     return server
 
 
+async def _post_init(application):
+    """Run durable migrations/recovery after PTB has initialized the bot."""
+    try:
+        await storage.start()
+        recovered = await recover_deathgames(application, legacy_bot)
+        if recovered:
+            log.info("Recovered %d pending death-game timer(s)", recovered)
+    except Exception:
+        log.exception("Startup recovery failed; live commands will continue")
+
+
+async def _post_shutdown(application):
+    """Close shared network clients cleanly on Render shutdown/redeploy."""
+    await ai_service.close()
+    await storage.close()
+
+
 # Inject the new core into the old runtime. This is intentionally explicit so
 # every remaining legacy call can be audited and migrated one subsystem at a time.
 legacy_bot.html = html
@@ -151,7 +170,15 @@ legacy_bot._addcoins = _legacy_addcoins
 legacy_bot._wallet = _legacy_wallet
 legacy_bot._setwallet = _legacy_setwallet
 legacy_bot._start_dummy_server = _start_health_server
+# Remove the second Gemini SDK/client from handlers/chat without changing its
+# public function signature. The next migration pass can then delete that
+# legacy implementation entirely.
+legacy_bot.chat.generate_reply = core_generate_reply
 
 
 if __name__ == "__main__":
+    # legacy_bot builds the Telegram Application itself, so expose lifecycle
+    # hooks through its builder before entering polling.
+    legacy_bot._MIDNIGHT_POST_INIT = _post_init
+    legacy_bot._MIDNIGHT_POST_SHUTDOWN = _post_shutdown
     legacy_bot.main()
