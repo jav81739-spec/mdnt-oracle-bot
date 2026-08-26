@@ -1,8 +1,8 @@
 """Central Gemini gateway for Midnight Oracle.
 
 Uses Google's HTTPS generateContent endpoint directly so the Telegram runtime
-can keep its supported httpx dependency range while all AI calls still pass
-through one service boundary.
+can keep its supported httpx dependency range while all AI calls pass through
+one service boundary.
 """
 from __future__ import annotations
 
@@ -33,7 +33,12 @@ class AIService:
         if self._client is None:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self.timeout, connect=min(5.0, self.timeout)),
-                headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key},
+                headers={
+                    "Content-Type": "application/json",
+                    # Keep the API key in the request header rather than the URL,
+                    # preventing accidental leakage through proxy/access logs.
+                    "x-goog-api-key": self.api_key,
+                },
             )
         return self._client
 
@@ -56,15 +61,8 @@ class AIService:
 
         for attempt in range(self.retries + 1):
             try:
-                response = await client.post(
-                    url,
-                    params={"key": self.api_key},
-                    json=payload,
-                    timeout=request_timeout,
-                )
+                response = await client.post(url, json=payload, timeout=request_timeout)
                 if response.status_code >= 400:
-                    # Retry rate limits and transient 5xx failures; fail fast on
-                    # malformed requests or authentication errors.
                     if response.status_code != 429 and response.status_code < 500:
                         raise AIUnavailable(f"Gemini API returned HTTP {response.status_code}")
                     response.raise_for_status()
