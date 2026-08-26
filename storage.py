@@ -1,8 +1,8 @@
-"""Compatibility facade used by the legacy bot.py.
+"""Compatibility facade used by the legacy runtime.
 
-The old entrypoint dynamically imports a top-level ``storage`` module and
-expects a Redis-like object. This adapter makes the new core storage layer the
-single backend without requiring a second Redis client.
+The staged rebuild keeps the old Redis-like surface temporarily, but every
+operation is backed by the single core storage engine. This file is deliberately
+small: new code should import ``core.storage.storage`` directly.
 """
 from core.storage import storage
 
@@ -41,10 +41,10 @@ class RedisCompat:
         return []
 
     async def lpush(self, key, *values):
-        return 0
+        return await storage.lpush(key, *values)
 
     async def lrange(self, key, start, end):
-        return []
+        return await storage.lrange(key, start, end)
 
 
 redis_client = RedisCompat()
