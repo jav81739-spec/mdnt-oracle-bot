@@ -1962,12 +1962,32 @@ async def _generate_bond_for_chat(chat_id, start, end, cycle_id, announce=False,
                     pass
     return True
 
+def _oracle_cycle_start(now=None):
+    """Return the start of the current Midnight Oracle bond cycle."""
+    if now is None:
+        now = datetime.now(ORACLE_TZ)
+
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=ORACLE_TZ)
+    else:
+        now = now.astimezone(ORACLE_TZ)
+
+    return now.replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+
+
 async def _ensure_bond_cycle(chat_id, bot=None):
     now = datetime.now(ORACLE_TZ)
     start = _oracle_cycle_start(now)
     end = start + timedelta(hours=ORACLE_CYCLE_HOURS)
     cycle_id = start.strftime("%Y%m%d%H%M")
+
     raw = await _rget(f"bond:{chat_id}")
+
     if raw:
         try:
             data = json.loads(raw)
@@ -1975,22 +1995,72 @@ async def _ensure_bond_cycle(chat_id, bot=None):
                 return True
         except Exception:
             pass
+
     # If a previous cycle exists, reveal it exactly once before replacing it.
     previous_cycle = await _rget(f"bond_cycle:{chat_id}")
+
     if previous_cycle and previous_cycle != cycle_id:
-        already = await _rget(f"bond_revealed:{chat_id}:{previous_cycle}")
+        already = await _rget(
+            f"bond_revealed:{chat_id}:{previous_cycle}"
+        )
+
         if not already and raw and bot:
             try:
                 old = json.loads(raw)
-                lines = [f"{html.escape(p['an'])} × {html.escape(p['bn'])}" for p in old.get("pairs", [])]
+
+                lines = [
+                    f"{html.escape(p['an'])} × {html.escape(p['bn'])}"
+                    for p in old.get("pairs", [])
+                ]
+
                 if lines:
-                    reveal_payload = {"cycle": previous_cycle, "pairs": old.get("pairs", []), "revealed_at": datetime.now(ORACLE_TZ).isoformat()}
-                    await bot.send_message(chat_id, "✦ <b>MIDNIGHT BOND — REVEALED</b>\n\n" + "\n".join(lines) + "\n\n<i>The 24-hour bond is complete.</i>", parse_mode="HTML")
-                    await _rsetex(f"bond_reveal_latest:{chat_id}", 3 * 86400, json.dumps(reveal_payload, ensure_ascii=False))
-                await _rsetex(f"bond_revealed:{chat_id}:{previous_cycle}", 3 * 86400, "1")
+                    reveal_payload = {
+                        "cycle": previous_cycle,
+                        "pairs": old.get("pairs", []),
+                        "revealed_at": datetime.now(
+                            ORACLE_TZ
+                        ).isoformat(),
+                    }
+
+                    await bot.send_message(
+                        chat_id,
+                        "✦ <b>MIDNIGHT BOND — REVEALED</b>\n\n"
+                        + "\n".join(lines)
+                        + "\n\n"
+                        "<i>The 24-hour bond is complete.</i>",
+                        parse_mode="HTML",
+                    )
+
+                    await _rsetex(
+                        f"bond_reveal_latest:{chat_id}",
+                        3 * 86400,
+                        json.dumps(
+                            reveal_payload,
+                            ensure_ascii=False,
+                        ),
+                    )
+
+                await _rsetex(
+                    f"bond_revealed:{chat_id}:{previous_cycle}",
+                    3 * 86400,
+                    "1",
+                )
+
             except Exception as e:
-                logger.warning("Bond rollover reveal failed for %s: %s", chat_id, e)
-    return await _generate_bond_for_chat(chat_id, start, end, cycle_id, announce=False, bot=bot)
+                logger.warning(
+                    "Bond rollover reveal failed for %s: %s",
+                    chat_id,
+                    e,
+                )
+
+    return await _generate_bond_for_chat(
+        chat_id,
+        start,
+        end,
+        cycle_id,
+        announce=False,
+        bot=bot,
+    )
 
 async def _midnight_bond_loop(app):
     """Crash/restart-safe scheduler. Fixed boundary is always derived from the clock."""
