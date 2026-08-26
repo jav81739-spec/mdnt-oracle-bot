@@ -20,6 +20,7 @@ from core.utility import check_afk_mentions as core_check_afk_mentions
 from core.utility import set_afk as core_set_afk
 from core.autonomy import install as install_autonomy
 from core.cricket_v2 import install as install_cricket_v2
+from core.deathgames_v2_install import install as install_deathgames_v2
 from core.v2_features import install as install_v2_features
 from core.v2_social2 import install as install_v2_social
 from core.vc_player import install as install_vc_player, player as vc_player
@@ -45,8 +46,7 @@ async def _legacy_addcoins(uid: int, amount: int):
     if amount == 0: return await _legacy_coins(uid)
     async with storage.lock(f"legacy-economy:{uid}", ttl=10, wait=2.0) as acquired:
         if not acquired: return await _legacy_coins(uid)
-        current = await _legacy_coins(uid)
-        delta = -min(current, abs(amount)) if amount < 0 else amount
+        current = await _legacy_coins(uid); delta = -min(current, abs(amount)) if amount < 0 else amount
         return await storage.incrby(f"coins:{uid}", delta) if delta else current
 
 async def _legacy_setcoins(uid: int, value: int):
@@ -101,17 +101,13 @@ _legacy_post_init = legacy_bot._post_init
 
 async def _publish_v2_command_menu(application):
     commands = [
-        BotCommand("help", "Open the Midnight V2 command deck"),
-        BotCommand("hug", "Send a Midnight hug"), BotCommand("kiss", "Send a Midnight kiss"),
-        BotCommand("pat", "Pat someone"), BotCommand("kick", "Playfully kick someone"),
-        BotCommand("bond", "Test a Midnight pairing"), BotCommand("oraclepair", "Let the Oracle choose a pair"),
+        BotCommand("help", "Open the Midnight V2 command deck"), BotCommand("hug", "Send a Midnight hug"), BotCommand("kiss", "Send a Midnight kiss"),
+        BotCommand("pat", "Pat someone"), BotCommand("kick", "Playfully kick someone"), BotCommand("bond", "Test a Midnight pairing"), BotCommand("oraclepair", "Let the Oracle choose a pair"),
         BotCommand("cricket", "Play solo Midnight Cricket"), BotCommand("cricketduel", "Challenge someone to Cricket"),
-        BotCommand("deathgame", "Open a Midnight Death Game"), BotCommand("survive", "Risk a survival run"),
-        BotCommand("revive", "Return from a survival death"), BotCommand("deathstatus", "Check survival status"),
-        BotCommand("midnightplay", "Search and play a song in VC"), BotCommand("nowplaying", "Show the current VC track"),
-        BotCommand("stopmusic", "Stop Midnight Radio"), BotCommand("pausemusic", "Pause Midnight Radio"), BotCommand("resumemusic", "Resume Midnight Radio"),
-        BotCommand("mprofile", "Open your Midnight identity"), BotCommand("achievements", "View your Midnight marks"),
-        BotCommand("midnightevent", "Open a Midnight world event"), BotCommand("upgradhelp", "Read the V2 upgrade guide"),
+        BotCommand("deathgame", "Open a Midnight Death Game"), BotCommand("joingame", "Join the Death Game"), BotCommand("startround", "Start the Death Game round"),
+        BotCommand("survive", "Risk a survival run"), BotCommand("revive", "Return from a survival death"), BotCommand("deathstatus", "Check survival status"), BotCommand("roulette", "Play Death Roulette"),
+        BotCommand("midnightplay", "Search and play a song in VC"), BotCommand("nowplaying", "Show the current VC track"), BotCommand("stopmusic", "Stop Midnight Radio"), BotCommand("pausemusic", "Pause Midnight Radio"), BotCommand("resumemusic", "Resume Midnight Radio"),
+        BotCommand("mprofile", "Open your Midnight identity"), BotCommand("achievements", "View your Midnight marks"), BotCommand("midnightevent", "Open a Midnight world event"), BotCommand("upgradhelp", "Read the V2 upgrade guide"),
     ]
     try:
         await application.bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats()); await application.bot.set_my_commands(commands)
@@ -121,12 +117,9 @@ async def _post_init(application):
     try:
         await storage.start(); await _legacy_post_init(application)
         await deathgames_v2.load_from_storage(); recovered = await recover_deathgames(application, legacy_bot)
-        install_autonomy(application)
-        install_cricket_v2(application)
-        install_v2_features(application)
-        install_v2_social(application)
-        install_vc_player(application); await vc_player.start()
-        await _publish_v2_command_menu(application)
+        install_autonomy(application); install_cricket_v2(application); install_deathgames_v2(application)
+        install_v2_features(application); install_v2_social(application); install_vc_player(application)
+        await vc_player.start(); await _publish_v2_command_menu(application)
         if recovered: log.info("Recovered %d death-game record(s)", recovered)
         log.info("Midnight V2 autonomous, cricket, social, death-game and VC layers online")
     except Exception:
