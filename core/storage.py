@@ -1,12 +1,13 @@
 """Midnight Oracle storage engine.
 
 One async storage abstraction for Render + Upstash REST. It provides bounded
-retries, timeouts, JSON-safe values, atomic increments, short-lived locks, and
-a process-local fallback when no external database is configured.
+retries, timeouts, JSON-safe values, atomic increments, short-lived locks, key
+scanning, and a process-local fallback when no external database is configured.
 """
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import json
 import logging
 import os
@@ -164,6 +165,38 @@ class Storage:
             log.exception("INCRBY failed for key=%s", key)
             raise
 
+    async def scan(self, pattern: str = "*", count: int = 100) -> list[str]:
+        """Return matching keys without using the blocking Redis KEYS command."""
+        count = max(1, min(int(count), 500))
+        if not self.configured:
+            async with self._local_lock:
+                now = time.time()
+                for key, expiry in list(self._local_expiry.items()):
+                    if expiry <= now:
+                        self._local.pop(key, None)
+                        self._local_expiry.pop(key, None)
+                keys = set(self._local) | set(self._local_lists)
+                return sorted(k for k in keys if fnmatch.fnmatchcase(k, pattern))
+
+        found: list[str] = []
+        cursor = "0"
+        try:
+            while True:
+                result = await self._request(
+                    "POST", "/", json=["SCAN", cursor, "MATCH", pattern, "COUNT", count]
+                )
+                if not isinstance(result, list) or len(result) != 2:
+                    raise StorageError("invalid SCAN response")
+                cursor = str(result[0])
+                keys = result[1] or []
+                found.extend(str(k) for k in keys)
+                if cursor == "0":
+                    break
+            return found
+        except StorageError:
+            log.exception("SCAN failed for pattern=%s", pattern)
+            return []
+
     async def lpush(self, key: str, *values: Any) -> int:
         if not values:
             return 0
@@ -213,6 +246,21 @@ class Storage:
         except StorageError:
             return -1
 
+    async def _release_lock(self, key: str, token: str) -> None:
+        """Delete only our lock token; never perform GET-then-DEL."""
+        if not self.configured:
+            async with self._local_lock:
+                if self._local.get(key) == token:
+                    self._local.pop(key, None)
+                    self._local_expiry.pop(key, None)
+            return
+        script = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
+        try:
+            await self._request("POST", "/", json=["EVAL", script, "1", key, token])
+        except StorageError:
+            # TTL is intentionally the final safety net.
+            log.warning("Could not release lock %s cleanly; TTL will expire it", key)
+
     @asynccontextmanager
     async def lock(self, name: str, ttl: int = 15, wait: float = 3.0) -> AsyncIterator[bool]:
         key = f"lock:{name}"
@@ -228,11 +276,7 @@ class Storage:
             yield acquired
         finally:
             if acquired:
-                # Best-effort release. TTL remains the safety net if a worker
-                # disappears; the token is unique per lock acquisition.
-                current = await self.get(key, None)
-                if current == token:
-                    await self.delete(key)
+                await self._release_lock(key, token)
 
 
 storage = Storage()
