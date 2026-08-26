@@ -75,7 +75,7 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _register(chat_id, user.id, user.first_name)
     key = f"economy:daily:{chat_id}:{user.id}"
     today = datetime.date.today().isoformat()
-    async with storage.lock(f"economy-daily:{chat_id}:{user.id}") as acquired:
+    async with storage.lock(f"economy-daily-claim:{chat_id}:{user.id}") as acquired:
         if not acquired:
             await update.message.reply_text("⏳ Midnight is processing your claim — try again in a moment.")
             return
@@ -112,40 +112,36 @@ async def rob(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _register(chat_id, robber.id, robber.first_name)
     await _register(chat_id, victim.id, victim.first_name)
     scope = _scope(chat_id)
-    async with storage.lock(f"economy:{scope}:{min(robber.id, victim.id)}") as first_lock:
-        if not first_lock:
+    async with storage.lock(f"economy-rob:{chat_id}:{min(robber.id, victim.id)}:{max(robber.id, victim.id)}") as acquired:
+        if not acquired:
             await update.message.reply_text("⏳ Economy is busy — try again.")
             return
-        async with storage.lock(f"economy:{scope}:{max(robber.id, victim.id)}") as second_lock:
-            if not second_lock:
-                await update.message.reply_text("⏳ Economy is busy — try again.")
+        victim_balance = await economy.balance(victim.id, scope)
+        if victim_balance < 20:
+            await update.message.reply_text(f"{victim.first_name} is too broke to rob 💀")
+            return
+        if random.random() < ROB_SUCCESS_CHANCE:
+            stolen = max(1, int(victim_balance * ROB_STEAL_PERCENT))
+            try:
+                await economy.transfer(victim.id, robber.id, stolen, "rob", scope)
+            except EconomyError:
+                await update.message.reply_text("⏳ The heist hit a concurrency snag — try again.")
                 return
-            victim_balance = await economy.balance(victim.id, scope)
-            if victim_balance < 20:
-                await update.message.reply_text(f"{victim.first_name} is too broke to rob 💀")
-                return
-            if random.random() < ROB_SUCCESS_CHANCE:
-                stolen = max(1, int(victim_balance * ROB_STEAL_PERCENT))
-                try:
-                    await economy.transfer(victim.id, robber.id, stolen, "rob", scope)
-                except EconomyError:
-                    await update.message.reply_text("⏳ The heist hit a concurrency snag — try again.")
-                    return
-                await update.message.reply_text(
-                    f"🥷 {mention(robber.id, robber.first_name)} successfully robbed "
-                    f"{stolen} coins from {mention(victim.id, victim.first_name)}!",
-                    parse_mode="Markdown",
-                )
-            else:
-                try:
-                    await economy.remove(robber.id, ROB_FAIL_PENALTY, "rob-fine", scope)
-                except EconomyError:
-                    pass
-                await update.message.reply_text(
-                    f"🚨 {mention(robber.id, robber.first_name)} got caught robbing "
-                    f"{mention(victim.id, victim.first_name)} and paid a {ROB_FAIL_PENALTY} coin fine!",
-                    parse_mode="Markdown",
-                )
+            await update.message.reply_text(
+                f"🥷 {mention(robber.id, robber.first_name)} successfully robbed "
+                f"{stolen} coins from {mention(victim.id, victim.first_name)}!",
+                parse_mode="Markdown",
+            )
+        else:
+            try:
+                await economy.remove(robber.id, ROB_FAIL_PENALTY, "rob-fine", scope)
+            except EconomyError:
+                pass
+            await update.message.reply_text(
+                f"🚨 {mention(robber.id, robber.first_name)} got caught robbing "
+                f"{mention(victim.id, victim.first_name)} and paid a {ROB_FAIL_PENALTY} coin fine!",
+                parse_mode="Markdown",
+            )
 
 
 async def gamble(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -164,7 +160,7 @@ async def gamble(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Enter a positive amount")
         return
     scope = _scope(chat_id)
-    async with storage.lock(f"economy:{scope}:{user.id}") as acquired:
+    async with storage.lock(f"economy-gamble:{chat_id}:{user.id}") as acquired:
         if not acquired:
             await update.message.reply_text("⏳ Economy is busy — try again.")
             return
@@ -174,11 +170,11 @@ async def gamble(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         try:
             if random.random() < 0.5:
-                await economy.add(user.id, amount, "gamble-win", scope)
-                await update.message.reply_text(f"🎰 You won! +{amount} coins. Balance: {balance_now + amount}")
+                result = await economy.add(user.id, amount, "gamble-win", scope)
+                await update.message.reply_text(f"🎰 You won! +{amount} coins. Balance: {result.balance}")
             else:
-                await economy.remove(user.id, amount, "gamble-loss", scope)
-                await update.message.reply_text(f"💸 You lost {amount} coins. Balance: {balance_now - amount}")
+                result = await economy.remove(user.id, amount, "gamble-loss", scope)
+                await update.message.reply_text(f"💸 You lost {amount} coins. Balance: {result.balance}")
         except EconomyError:
             await update.message.reply_text("⏳ The gamble couldn't be committed safely. Try again.")
 
