@@ -1,60 +1,93 @@
-"""Midnight AI service using Google's current async GenAI client."""
+"""Central Gemini gateway for Midnight Oracle.
+
+Uses Google's HTTPS generateContent endpoint directly so the Telegram runtime
+can keep its supported httpx dependency range while all AI calls still pass
+through one service boundary.
+"""
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
+from dataclasses import dataclass
 
-from google import genai
-
-log = logging.getLogger("midnight.ai")
+import httpx
 
 
 class AIUnavailable(RuntimeError):
-    pass
+    """Raised when Gemini cannot produce a response within the retry budget."""
 
 
+@dataclass
 class AIService:
-    def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
-        self.model = model or os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
-        self._client: genai.Client | None = None
-        self._lock = asyncio.Lock()
+    api_key: str = ""
+    model: str = ""
+    timeout: float = 25.0
+    retries: int = 2
 
-    def configured(self) -> bool:
-        return bool(self.api_key)
+    def __post_init__(self) -> None:
+        self.api_key = self.api_key or os.getenv("GEMINI_API_KEY", "")
+        self.model = self.model or os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
+        self._client: httpx.AsyncClient | None = None
 
-    async def _get_client(self) -> genai.Client:
-        if not self.api_key:
-            raise AIUnavailable("GEMINI_API_KEY is not configured")
+    async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
-            async with self._lock:
-                if self._client is None:
-                    self._client = genai.Client(api_key=self.api_key)
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(self.timeout, connect=min(5.0, self.timeout)),
+                headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key},
+            )
         return self._client
 
-    async def generate(self, prompt: str, *, system_instruction: str | None = None, timeout: float = 20.0) -> str:
-        if not prompt.strip():
-            raise ValueError("prompt must not be empty")
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+    async def generate(self, prompt: str, *, timeout: float | None = None) -> str:
+        if not self.api_key:
+            raise AIUnavailable("GEMINI_API_KEY is not configured")
+        if not prompt or not prompt.strip():
+            raise AIUnavailable("empty AI prompt")
+
         client = await self._get_client()
-        config = {"system_instruction": system_instruction} if system_instruction else None
-        try:
-            async def call():
-                return await client.aio.models.generate_content(
-                    model=self.model,
-                    contents=prompt,
-                    config=config,
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        payload = {"contents": [{"role": "user", "parts": [{"text": prompt[:12000]}]}]}
+        request_timeout = timeout or self.timeout
+        last: Exception | None = None
+
+        for attempt in range(self.retries + 1):
+            try:
+                response = await client.post(
+                    url,
+                    params={"key": self.api_key},
+                    json=payload,
+                    timeout=request_timeout,
                 )
-            response = await asyncio.wait_for(call(), timeout=timeout)
-            text = getattr(response, "text", None)
-            if not text:
-                raise AIUnavailable("Gemini returned an empty response")
-            return text.strip()
-        except asyncio.TimeoutError as exc:
-            raise AIUnavailable("Gemini request timed out") from exc
-        except Exception as exc:
-            log.warning("AI generation failed: %s", type(exc).__name__)
-            raise AIUnavailable("Gemini request failed") from exc
+                if response.status_code >= 400:
+                    # Retry rate limits and transient 5xx failures; fail fast on
+                    # malformed requests or authentication errors.
+                    if response.status_code != 429 and response.status_code < 500:
+                        raise AIUnavailable(f"Gemini API returned HTTP {response.status_code}")
+                    response.raise_for_status()
+                data = response.json()
+                text = self._extract_text(data)
+                if not text:
+                    raise AIUnavailable("Gemini returned no text candidate")
+                return text.strip()
+            except (httpx.HTTPError, ValueError, AIUnavailable) as exc:
+                last = exc
+                if attempt >= self.retries:
+                    break
+                await asyncio.sleep(0.25 * (2 ** attempt))
+
+        raise AIUnavailable("Gemini request failed after retries") from last
+
+    @staticmethod
+    def _extract_text(data: dict) -> str:
+        candidates = data.get("candidates") or []
+        if not candidates:
+            return ""
+        parts = ((candidates[0] or {}).get("content") or {}).get("parts") or []
+        return "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict))
 
 
 service = AIService()
