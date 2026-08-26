@@ -1855,25 +1855,58 @@ _BOND_LOOP_SECONDS = max(15, int(os.getenv("MIDNIGHT_BOND_LOOP_SECONDS", "30")))
 _BOND_MEMBER_TTL = 7 * 24 * 3600
 
 async def _bond_members(chat_id):
-    """Return persistent recent members, falling back to in-memory activity."""
+    """Return persistent bond members, with in-memory fallback."""
     raw = await _rget(f"bond_members:{chat_id}")
+
     members = []
+
     if raw:
         try:
-            members = json.loads(raw) or []
-        except Exception:
-            members = []
+            decoded = json.loads(raw)
+            if isinstance(decoded, list):
+                members = decoded
+        except Exception as e:
+            logger.warning(
+                "BOND MEMBERS JSON ERROR | chat=%s | error=%s",
+                chat_id,
+                e,
+            )
+
+    # Fall back to recent in-memory activity.
     if not members:
-        members = [{"id": uid, "name": name} for uid, name in _recent_members.get(chat_id, [])]
-    clean, seen = [], set()
+        recent = _recent_members.get(chat_id, [])
+
+        members = [
+            {"id": uid, "name": name}
+            for uid, name in recent
+        ]
+
+    clean = []
+    seen = set()
+
     for m in members:
         try:
             uid = int(m.get("id"))
-            name = str(m.get("name") or "Unknown").strip()[:80]
+            name = str(
+                m.get("name") or "Unknown"
+            ).strip()[:80]
         except Exception:
             continue
+
         if uid > 0 and uid not in seen:
-            seen.add(uid); clean.append({"id": uid, "name": name})
+            seen.add(uid)
+            clean.append({
+                "id": uid,
+                "name": name,
+            })
+
+    logger.info(
+        "BOND MEMBERS | chat=%s | persistent=%s | eligible=%s",
+        chat_id,
+        bool(raw),
+        len(clean),
+    )
+
     return clean
 
 async def _remember_bond_member(chat_id, uid, name):
