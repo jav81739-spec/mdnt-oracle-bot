@@ -1,9 +1,4 @@
-"""Midnight Oracle production entrypoint.
-
-This is the stable bridge during the staged rebuild. The existing feature engine
-remains intact in ``legacy_bot.py`` while core services are injected here so the
-migration can happen incrementally without changing the live command surface.
-"""
+"""Midnight Oracle production entrypoint."""
 from __future__ import annotations
 
 import asyncio
@@ -20,18 +15,17 @@ from core.chat import generate_reply as core_generate_reply
 from core.recovery import recover_deathgames
 from core.health import check as health_check
 from core.storage import Storage, storage
+from handlers import deathgames_v2
 
 log = logging.getLogger("midnight.entrypoint")
 
 
 class _AIResponse:
-    """Compatibility response matching the legacy Gemini client's ``.text`` API."""
     def __init__(self, text: str) -> None:
         self.text = text
 
 
 async def _generate_gemini(prompt: str):
-    """Route every legacy AI generation call through the single async AI service."""
     try:
         return _AIResponse(await ai_service.generate(prompt, timeout=25.0))
     except AIUnavailable as exc:
@@ -48,37 +42,26 @@ async def _legacy_coins(uid: int) -> int:
 
 
 async def _legacy_addcoins(uid: int, amount: int):
-    """Atomic compatibility balance mutation on the existing coins:<uid> keys."""
-    uid = int(uid)
-    amount = int(amount)
+    uid, amount = int(uid), int(amount)
     if amount == 0:
         return await _legacy_coins(uid)
-
     async with storage.lock(f"legacy-economy:{uid}", ttl=10, wait=2.0) as acquired:
         if not acquired:
             log.warning("Economy lock busy for uid=%s", uid)
             return await _legacy_coins(uid)
         current = await _legacy_coins(uid)
-        if amount < 0:
-            delta = -min(current, abs(amount))
-        else:
-            delta = amount
-        if delta:
-            return await storage.incrby(f"coins:{uid}", delta)
-        return current
+        delta = -min(current, abs(amount)) if amount < 0 else amount
+        return await storage.incrby(f"coins:{uid}", delta) if delta else current
 
 
 async def _legacy_setcoins(uid: int, value: int):
-    uid = int(uid)
-    target = max(0, int(value))
+    uid, target = int(uid), max(0, int(value))
     async with storage.lock(f"legacy-economy:{uid}", ttl=10, wait=2.0) as acquired:
         if not acquired:
             return await _legacy_coins(uid)
         current = await _legacy_coins(uid)
         delta = target - current
-        if delta:
-            return await storage.incrby(f"coins:{uid}", delta)
-        return current
+        return await storage.incrby(f"coins:{uid}", delta) if delta else current
 
 
 async def _legacy_wallet(uid: int) -> int:
@@ -90,20 +73,16 @@ async def _legacy_wallet(uid: int) -> int:
 
 
 async def _legacy_setwallet(uid: int, value: int):
-    uid = int(uid)
-    target = max(0, int(value))
+    uid, target = int(uid), max(0, int(value))
     async with storage.lock(f"legacy-wallet:{uid}", ttl=10, wait=2.0) as acquired:
         if not acquired:
             return await _legacy_wallet(uid)
         current = await _legacy_wallet(uid)
         delta = target - current
-        if delta:
-            return await storage.incrby(f"wallet:{uid}", delta)
-        return current
+        return await storage.incrby(f"wallet:{uid}", delta) if delta else current
 
 
 async def _ready_probe():
-    """Run readiness in its own event loop/client; never share AsyncClient loops."""
     probe = Storage()
     try:
         return await health_check(probe)
@@ -112,7 +91,6 @@ async def _ready_probe():
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
-    """Cheap liveness endpoint plus dependency-aware readiness endpoint."""
     def _send(self, status: int, payload: dict[str, object]):
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
@@ -130,9 +108,9 @@ class _HealthHandler(BaseHTTPRequestHandler):
         if self.path == "/ready":
             try:
                 result = asyncio.run(_ready_probe())
-                payload = result.as_dict()
-                self._send(200 if result.status == "ok" else 503, payload)
+                self._send(200 if result.status == "ok" else 503, result.as_dict())
             except Exception:
+                log.exception("Readiness probe failed")
                 self._send(503, {"status": "degraded", "storage": "error", "bot": "unknown"})
             return
         self._send(404, {"status": "not_found"})
@@ -152,8 +130,10 @@ def _start_health_server():
     return server
 
 
-# Preserve the legacy startup sequence (economy/chat/marriage/death-game loads)
-# and add the new durable recovery step after it completes.
+# Activate the durable second-generation death-game engine before the legacy
+# runtime registers command handlers. The old module remains in the tree as a
+# rollback reference until this branch is proven stable by CI.
+legacy_bot.deathgames = deathgames_v2
 _legacy_post_init = legacy_bot._post_init
 
 
@@ -161,16 +141,15 @@ async def _post_init(application):
     try:
         await storage.start()
         await _legacy_post_init(application)
+        await deathgames_v2.load_from_storage()
         recovered = await recover_deathgames(application, legacy_bot)
         if recovered:
-            log.info("Recovered %d pending death-game timer(s)", recovered)
+            log.info("Recovered %d legacy death-game record(s)", recovered)
     except Exception:
         log.exception("Startup initialization/recovery failed")
         raise
 
 
-# Inject the new core into the old runtime. This is intentionally explicit so
-# every remaining legacy call can be audited and migrated one subsystem at a time.
 legacy_bot.html = html
 legacy_bot._generate_gemini = _generate_gemini
 legacy_bot._coins = _legacy_coins
@@ -180,9 +159,6 @@ legacy_bot._wallet = _legacy_wallet
 legacy_bot._setwallet = _legacy_setwallet
 legacy_bot._start_dummy_server = _start_health_server
 legacy_bot._post_init = _post_init
-# Remove the second Gemini SDK/client from handlers/chat without changing its
-# public function signature. The next migration pass can then delete that
-# legacy implementation entirely.
 legacy_bot.chat.generate_reply = core_generate_reply
 
 
