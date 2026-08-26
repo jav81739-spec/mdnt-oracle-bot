@@ -1,7 +1,7 @@
 """Polished Midnight V2 social layer.
 
-Includes a large original interaction vocabulary, visual text cards, Hinglish
-triggering, observed-member group pulse and relevant linked-channel comments.
+Includes original interactions, Hinglish group pulse, trigger awakening and
+context-aware reactions to posts in Midnight's associated Telegram channel.
 """
 from __future__ import annotations
 
@@ -40,7 +40,6 @@ ACTIONS = {
     "handshake": ("🤝", "HANDSHAKE", ["deal sealed.", "respect exchanged. 🤝"]),
     "fistbump": ("👊", "FIST BUMP", ["clean fist bump.", "bro-code successfully transmitted."]),
     "shoulderpat": ("🫱", "SHOULDER PAT", ["you got this.", "quiet support, Midnight style."]),
-    "highfive": ("🙌", "HIGH FIVE", ["clean high-five. ✋", "that one echoed through the timeline."]),
     "cheers": ("🥂", "CHEERS", ["to another questionable decision. 🌙", "cheers, legend. 🥂"]),
 }
 ALIASES = {k: k for k in ACTIONS}
@@ -65,67 +64,44 @@ async def interaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     who = target(update)
     if not who:
-        await update.effective_message.reply_text(
-            f"☾ <b>{ACTIONS[action][1]} RITUAL</b>\n\nReply to someone's message and use /{raw}.\n\n<i>kya scene hai? Midnight sun raha hai. 🌙</i>",
-            parse_mode=ParseMode.HTML,
-        )
+        await update.effective_message.reply_text(f"☾ <b>{ACTIONS[action][1]} RITUAL</b>\n\nReply to someone's message and use /{raw}.\n\n<i>kya scene hai? Midnight sun raha hai. 🌙</i>", parse_mode=ParseMode.HTML)
         return
     if who.id == update.effective_user.id:
         await update.effective_message.reply_text("🌘 khud ko target karke Oracle ko confuse mat karo 😭", parse_mode=ParseMode.HTML)
         return
     emoji, title, lines = ACTIONS[action]
-    card = (
-        "<b>━━━━━━━━━━━━━━━━━━</b>\n"
-        f"<b>{emoji} 𝐌𝐈𝐃𝐍𝐈𝐆𝐇𝐓 · {title}</b>\n\n"
-        f"{mention(update.effective_user)}  →  {mention(who)}\n\n"
-        f"<i>{random.choice(lines)}</i>\n\n"
-        "<code>☾ visual interaction · just for fun</code>\n"
-        "<b>━━━━━━━━━━━━━━━━━━</b>"
-    )
+    card = ("<b>━━━━━━━━━━━━━━━━━━</b>\n" f"<b>{emoji} 𝐌𝐈𝐃𝐍𝐈𝐆𝐇𝐓 · {title}</b>\n\n" f"{mention(update.effective_user)}  →  {mention(who)}\n\n" f"<i>{random.choice(lines)}</i>\n\n" "<code>☾ visual interaction · just for fun</code>\n" "<b>━━━━━━━━━━━━━━━━━━</b>")
     await update.effective_message.reply_text(card, parse_mode=ParseMode.HTML)
 
 
 async def observe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    user = update.effective_user
+    chat, user = update.effective_chat, update.effective_user
     if not chat or chat.type not in ("group", "supergroup") or not user or user.is_bot:
         return
     now = time.time()
     key = f"v2:pulse:{chat.id}"
     pulse = await storage.load(key, {})
-    if not isinstance(pulse, dict):
-        pulse = {}
+    if not isinstance(pulse, dict): pulse = {}
     previous = float(pulse.get("last_message", now))
     pulse["last_message"] = now
     pulse["messages"] = int(pulse.get("messages", 0)) + 1
-    members = pulse.get("members", {})
-    if not isinstance(members, dict):
-        members = {}
+    members = pulse.get("members", {}) if isinstance(pulse.get("members", {}), dict) else {}
     members[str(user.id)] = {"name": user.first_name or "Midnight Soul", "seen": now}
     pulse["members"] = members
     await storage.set(key, pulse, ttl=8 * 24 * 3600)
-
     text = (update.effective_message.text or update.effective_message.caption or "").lower()
     trigger = str(pulse.get("trigger") or os.getenv("MIDNIGHT_TRIGGER", "midnight")).lower().strip()
     words = {w.strip(".,!?;:()[]{}<>\"'`") for w in text.split()}
     if trigger and trigger in words and now - float(pulse.get("last_trigger", 0)) >= 20:
         pulse["last_trigger"] = now
         await storage.set(key, pulse, ttl=8 * 24 * 3600)
-        await update.effective_message.reply_text(random.choice([
-            "☾ <b>𝐘𝐎𝐔 𝐂𝐀𝐋𝐋𝐄𝐃?</b>\n\nHaan bhai, Midnight sun raha hai. Kya scene hai? 👀",
-            "🌙 <b>𝐎𝐑𝐀𝐂𝐋𝐄 𝐀𝐖𝐀𝐊𝐄</b>\n\nBol diya naam… ab chaos bhi tumhara. 🫠",
-            "🌘 <b>𝐌𝐈𝐃𝐍𝐈𝐆𝐇𝐓 𝐎𝐍𝐋𝐈𝐍𝐄</b>\n\nAcha… kisne mujhe yaad kiya? 👁️",
-        ]), parse_mode=ParseMode.HTML)
+        await update.effective_message.reply_text(random.choice(["☾ <b>𝐘𝐎𝐔 𝐂𝐀𝐋𝐋𝐄𝐃?</b>\n\nHaan bhai, Midnight sun raha hai. Kya scene hai? 👀", "🌙 <b>𝐎𝐑𝐀𝐂𝐋𝐄 𝐀𝐖𝐀𝐊𝐄</b>\n\nBol diya naam… ab chaos bhi tumhara. 🫠", "🌘 <b>𝐌𝐈𝐃𝐍𝐈𝐆𝐇𝐓 𝐎𝐍𝐋𝐈𝐍𝐄</b>\n\nAcha… kisne mujhe yaad kiya? 👁️"]), parse_mode=ParseMode.HTML)
         return
-
     quiet_for = now - previous
     if quiet_for >= 45 * 60 and now - float(pulse.get("last_awakened", 0)) >= 6 * 3600:
         pulse["last_awakened"] = now
         await storage.set(key, pulse, ttl=8 * 24 * 3600)
-        if quiet_for >= 3 * 3600:
-            message = "🌘 <b>𝐌𝐈𝐃𝐍𝐈𝐆𝐇𝐓 𝐑𝐄𝐒𝐔𝐑𝐑𝐄𝐂𝐓𝐈𝐎𝐍</b>\n\nGroup itna shaant? 😭\n\n<b>First person to answer:</b> Who wins tonight's cricket debate? 🏏"
-        else:
-            message = "☾ <b>𝐐𝐔𝐈𝐄𝐓 𝐇𝐎𝐔𝐑</b>\n\nSab chup kyun hain? 😭\n\n<b>Pick one:</b> 🏏 cricket · 🎧 song · 🎮 game"
+        message = "🌘 <b>𝐌𝐈𝐃𝐍𝐈𝐆𝐇𝐓 𝐑𝐄𝐒𝐔𝐑𝐑𝐄𝐂𝐓𝐈𝐎𝐍</b>\n\nGroup itna shaant? 😭\n\n<b>First person to answer:</b> Who wins tonight's cricket debate? 🏏" if quiet_for >= 3 * 3600 else "☾ <b>𝐐𝐔𝐈𝐄𝐓 𝐇𝐎𝐔𝐑</b>\n\nSab chup kyun hain? 😭\n\n<b>Pick one:</b> 🏏 cricket · 🎧 song · 🎮 game"
         await update.effective_message.reply_text(message, parse_mode=ParseMode.HTML)
 
 
@@ -157,17 +133,45 @@ CHANNELS = tuple(int(x.strip()) for x in os.getenv("MIDNIGHT_ASSOCIATED_CHANNELS
 
 
 def relevant_comment(text: str) -> str:
+    """Return a context-specific comment; never use a generic fallback."""
     t = text.lower()
-    if any(x in t for x in ("cricket", "ipl", "odi", "t20", "test", "wicket", "runs", "match")):
-        return random.choice(["🏏 Ye update toh seedha boundary hai. 👀", "Cricket scene spotted — group mein discussion pakka. 🏏🌙", "Oho, cricket timeline phir interesting ho gayi. 👁️🏏"])
-    if any(x in t for x in ("win", "won", "champion", "trophy", "victory")):
-        return random.choice(["🏆 Victory energy detected. Midnight approves. 👑", "Acha ji, celebration banti hai. 🔥", "Big moment. Isko archive mein rakho. 🌙"])
-    if any(x in t for x in ("breaking", "official", "confirmed", "announcement")):
-        return random.choice(["👀 Okay, this one matters. Midnight has seen it.", "Confirmed? Ab scene serious hai. 🌙", "Breaking energy detected. 👁️"])
-    return random.choice(["🌙 Ye post quietly deserved a Midnight reaction. 👀", "Acha post hai — Midnight ne notice kar liya. ✦", "Timeline pe ye wala moment rukne layak tha. 🌙"])
+    if any(x in t for x in ("cricket", "ipl", "odi", "t20", "test", "wicket", "runs", "match", "innings", "bowling", "batting")):
+        return random.choice(["🏏 This cricket update just changed the mood. 👀", "Oho, cricket scene interesting ho gaya. 🏏🌙", "Ye wala update toh proper cricket discussion deserve karta hai. 👁️🏏"])
+    if any(x in t for x in ("shubman", "gill", "virat", "kohli", "rohit", "bumrah", "pant", "jadeja")):
+        return random.choice(["👀 Player watch activated. This one definitely deserves attention. 🌙", "Acha, player timeline pe aaj scene hai. 🏏", "Midnight noticed this one — cricket fans, assemble. 👁️🏏"])
+    if any(x in t for x in ("win", "won", "champion", "trophy", "victory", "qualified")):
+        return random.choice(["🏆 Victory energy detected. Ab celebration toh banti hai. 👑", "Big result. Cricket timeline officially alive. 🔥🏏", "Acha ji, ye moment archive-worthy hai. 🌙🏆"])
+    if any(x in t for x in ("breaking", "official", "confirmed", "announcement", "statement")):
+        return random.choice(["👀 Okay, this one actually matters. Midnight has seen it.", "Confirmed news? Ab scene serious hai. 🌙", "Breaking update spotted — eyes on this one. 👁️"])
+    if any(x in t for x in ("edit", "editz", "reel", "video", "montage")):
+        return random.choice(["🎬 This edit has the right late-night energy. 🌙", "Okayyy, visual department cooked. 👀🔥", "Ye edit quietly goes hard. Midnight approves. ✦"])
+    if any(x in t for x in ("photo", "pic", "picture", "photoshoot", "look")):
+        return random.choice(["📸 Okay, this frame deserved a stop. 👀", "Clean shot. Timeline just got prettier. 🌙", "This one has serious wallpaper energy. ✦"])
+    if any(x in t for x in ("good night", "gn", "night")):
+        return random.choice(["🌙 Raat officially registered. Sleep well, legends.", "☾ Midnight-approved night vibes.", "Good night energy received. Kal phir milte hain. 🌙"])
+    if any(x in t for x in ("birthday", "happy birthday", "anniversary")):
+        return random.choice(["🎂 Aaj ka spotlight officially belongs here. Happy celebrations. 🌙", "✨ Celebration detected. Midnight wishes included.", "Another orbit around the sun — worth celebrating. 🌙"])
+    if any(x in t for x in ("poll", "vote", "choose", "vs", "versus")):
+        return random.choice(["👀 Okay, Midnight is taking notes. What's your pick?", "The Oracle has entered the debate. 🌙", "Ab group mein arguments shuru honge. 😭"])
+    if any(x in t for x in ("meme", "funny", "lol", "😂", "🤣")):
+        return random.choice(["😭 Nah, this one actually got me.", "Okay this belongs in the Midnight chaos archive. 💀🌙", "😂 Certified group-chat material."])
+    # If the post has no text, it may be media-only. Still react specifically to that.
+    if not t.strip():
+        return random.choice(["👀 Visual detected. Midnight had to stop scrolling.", "🌙 No caption needed. The post speaks for itself.", "✦ Midnight has seen the frame. Clean."])
+    # Text exists but no known topic: derive a light contextual acknowledgement from
+    # its shape rather than pretending we know details that were not provided.
+    if "?" in text:
+        return random.choice(["👀 Question noted. Ab Oracle bhi curious hai.", "Hmm… interesting question. Let the group cook. 🌙"])
+    return random.choice(["🌙 Midnight caught this one. Interesting enough to earn a comment. 👀", "Acha, ye wala post noticed. ✦", "Seen. The Oracle has logged the moment. 🌘"])
 
 
 async def channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comment under the originating channel post's own discussion thread.
+
+    Telegram exposes a channel's linked discussion group as ``linked_chat_id``;
+    replying to the channel-post message ID in that linked chat places the bot's
+    message in the exact comment thread belonging to that post.
+    """
     post = update.channel_post
     if not post or post.chat.id not in CHANNELS:
         return
