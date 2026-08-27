@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  workflows: write
 
 jobs:
   core:
@@ -61,21 +60,10 @@ jobs:
 
           bot.write_text(s)
 
-          workflow = Path('.github/workflows/core-tests.yml')
-          w = workflow.read_text()
-          start = '      # ONE_TIME_POLLING_HARDENING_START\n'
-          end = '      # ONE_TIME_POLLING_HARDENING_END\n'
-          if start in w:
-              a = w.index(start)
-              b = w.index(end, a) + len(end)
-              w = w[:a] + w[b:] + '\n'
-              workflow.write_text(w)
-              changed = True
-
           if changed:
               subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], check=True)
               subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
-              subprocess.run(['git', 'add', 'bot.py', 'core/error_handling.py', '.github/workflows/core-tests.yml'], check=True)
+              subprocess.run(['git', 'add', 'bot.py', 'core/error_handling.py'], check=True)
               subprocess.run(['git', 'commit', '-m', 'fix: harden Telegram conflict ownership'], check=True)
               subprocess.run(['git', 'push', 'origin', 'HEAD:rebuild/core-engine-v2'], check=True)
 
