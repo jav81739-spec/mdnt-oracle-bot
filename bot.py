@@ -203,6 +203,23 @@ async def _post_init(application):
 
 legacy_bot.html = html; legacy_bot._generate_gemini = _generate_gemini; legacy_bot._coins = _legacy_coins; legacy_bot._setcoins = _legacy_setcoins; legacy_bot._addcoins = _legacy_addcoins; legacy_bot._wallet = _legacy_wallet; legacy_bot._setwallet = _legacy_setwallet; legacy_bot._start_dummy_server = _start_health_server; legacy_bot._post_init = _post_init; legacy_bot.chat.generate_reply = core_generate_reply; legacy_bot.utility.set_afk = core_set_afk; legacy_bot.utility.check_afk_mentions = core_check_afk_mentions
 
+def _run_legacy_polling():
+    """Run PTB polling with an explicit loop, including after PTB closes a loop."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        legacy_bot.main()
+    finally:
+        # python-telegram-bot's run_polling() owns and may close its loop.
+        # Never leave MainThread without a current event loop for the next retry.
+        try:
+            current = asyncio.get_event_loop()
+        except RuntimeError:
+            current = None
+        if current is loop and not loop.is_closed():
+            asyncio.set_event_loop(None)
+            loop.close()
+
 if __name__ == "__main__":
     log.info("PROCESS starting pid=%s python=%s", os.getpid(), os.sys.version.split()[0])
     lease_token = asyncio.run(_acquire_polling_lease())
@@ -210,7 +227,7 @@ if __name__ == "__main__":
     try:
         while True:
             try:
-                legacy_bot.main()
+                _run_legacy_polling()
                 break
             except Conflict:
                 log.warning("TELEGRAM_CONFLICT another getUpdates poller is still active; waiting 10s before retry")
