@@ -1,7 +1,6 @@
 """Midnight Oracle production entrypoint."""
 from __future__ import annotations
 
-import atexit
 import asyncio
 import html
 import json
@@ -11,12 +10,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import legacy_bot
-from telegram import (
-    BotCommand,
-    BotCommandScopeDefault,
-    BotCommandScopeAllGroupChats,
-    BotCommandScopeAllChatAdministrators,
-)
+from telegram import BotCommand, BotCommandScopeDefault, BotCommandScopeAllGroupChats, BotCommandScopeAllChatAdministrators
 from core.ai import AIUnavailable, service as ai_service
 from core.chat import generate_reply as core_generate_reply
 from core.recovery import recover_deathgames
@@ -33,7 +27,6 @@ from core.v2_social2 import install as install_v2_social
 from core.v2_autonomous import install as install_v2_autonomous
 from core.midnight_social_intelligence import install as install_social_intelligence
 from core.v2_bond_signal import install as install_bond_signal
-from core.telegram_singleton import TelegramPollerLease
 from core.vc_player import install as install_vc_player, player as vc_player
 from handlers import deathgames_v2
 
@@ -111,98 +104,44 @@ legacy_bot.deathgames = deathgames_v2
 _legacy_post_init = legacy_bot._post_init
 
 _V2_COMMANDS = [
-    BotCommand("cricketduel", "Challenge someone to Midnight Cricket"),
-    BotCommand("midnightplay", "Search and play a song in VC"),
-    BotCommand("nowplaying", "Show the current VC track"),
-    BotCommand("stopmusic", "Stop Midnight Radio"),
-    BotCommand("pausemusic", "Pause Midnight Radio"),
-    BotCommand("resumemusic", "Resume Midnight Radio"),
-    BotCommand("mprofile", "Open your Midnight identity"),
-    BotCommand("achievements", "View your Midnight marks"),
-    BotCommand("midnightevent", "Open a Midnight world event"),
-    BotCommand("upgradhelp", "Read the V2 upgrade guide"),
-    BotCommand("settrigger", "Set Midnight's group wake word"),
-    BotCommand("triggerinfo", "Show the group's Midnight wake word"),
-    BotCommand("grouporacle", "Read Midnight's lightweight room activity"),
-    BotCommand("bond", "Let Midnight choose a bond automatically"),
-    BotCommand("signal", "Separate signal from noise in a message"),
+    BotCommand("cricketduel", "Challenge someone to Midnight Cricket"), BotCommand("midnightplay", "Search and play a song in VC"),
+    BotCommand("nowplaying", "Show the current VC track"), BotCommand("stopmusic", "Stop Midnight Radio"), BotCommand("pausemusic", "Pause Midnight Radio"), BotCommand("resumemusic", "Resume Midnight Radio"),
+    BotCommand("mprofile", "Open your Midnight identity"), BotCommand("achievements", "View your Midnight marks"), BotCommand("midnightevent", "Open a Midnight world event"), BotCommand("upgradhelp", "Read the V2 upgrade guide"),
+    BotCommand("settrigger", "Set Midnight's group wake word"), BotCommand("triggerinfo", "Show the group's Midnight wake word"), BotCommand("grouporacle", "Read Midnight's lightweight room activity"),
+    BotCommand("bond", "Let Midnight choose a bond automatically"), BotCommand("signal", "Separate signal from noise in a message"),
 ]
-
-_PRIVATE_PREFERRED = {
-    "start", "help", "chat", "persona", "balance", "daily", "wallet", "deposit",
-    "withdraw", "setpass", "changepass", "recover", "crush", "clearcrush", "bestie",
-    "afk", "remind", "id", "info", "profile", "inventory", "settings", "mprofile",
-    "achievements", "upgradhelp",
-}
-
-_ADMIN_PREFERRED = {
-    "ban", "kick", "mute", "unmute", "warn", "warnings", "clearwarns", "pin", "unpin",
-    "purge", "setrules", "lock", "unlock", "setwelcome", "setgoodbye", "invite",
-    "cwin", "cplay", "oraclehour", "broadcast", "announce",
-}
+_PRIVATE_PREFERRED = {"start","help","chat","persona","balance","daily","wallet","deposit","withdraw","setpass","changepass","recover","crush","clearcrush","bestie","afk","remind","id","info","profile","inventory","settings","mprofile","achievements","upgradhelp"}
+_ADMIN_PREFERRED = {"ban","kick","mute","unmute","warn","warnings","clearwarns","pin","unpin","purge","setrules","lock","unlock","setwelcome","setgoodbye","invite","cwin","cplay","oraclehour","broadcast","announce"}
 
 def _dedupe(commands):
-    out = []
-    seen = set()
+    out, seen = [], set()
     for cmd in commands:
-        name = cmd.command
-        if name in seen: continue
-        seen.add(name); out.append(cmd)
+        if cmd.command in seen: continue
+        seen.add(cmd.command); out.append(cmd)
     return out
 
-def _command_registry():
-    return _dedupe(list(getattr(legacy_bot, "BOT_COMMANDS", [])) + _V2_COMMANDS)
-
-def _take(commands, names, limit=100):
-    preferred = [c for c in commands if c.command in names]
-    rest = [c for c in commands if c.command not in names]
-    return _dedupe(preferred + rest)[:limit]
+def _command_registry(): return _dedupe(list(getattr(legacy_bot, "BOT_COMMANDS", [])) + _V2_COMMANDS)
+def _take(commands, names, limit=100): return _dedupe([c for c in commands if c.command in names] + [c for c in commands if c.command not in names])[:limit]
 
 async def _publish_v2_command_menu(application):
-    """Publish deterministic, scoped menus without stale/default collisions."""
-    commands = _command_registry()
-    private_commands = _take(commands, _PRIVATE_PREFERRED)
-    group_commands = commands[:100]
-    admin_commands = _take(_dedupe(group_commands + [c for c in commands if c.command in _ADMIN_PREFERRED]), _ADMIN_PREFERRED)
-    await application.bot.set_my_commands([], scope=BotCommandScopeDefault())
-    await application.bot.set_my_commands([], scope=BotCommandScopeAllGroupChats())
-    await application.bot.set_my_commands([], scope=BotCommandScopeAllChatAdministrators())
-    await application.bot.set_my_commands(private_commands, scope=BotCommandScopeDefault())
-    await application.bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
-    await application.bot.set_my_commands(admin_commands, scope=BotCommandScopeAllChatAdministrators())
-    log.info("Command menus published: registry=%d private=%d group=%d admin=%d", len(commands), len(private_commands), len(group_commands), len(admin_commands))
+    commands = _command_registry(); private_commands = _take(commands, _PRIVATE_PREFERRED); group_commands = commands[:100]; admin_commands = _take(_dedupe(group_commands + [c for c in commands if c.command in _ADMIN_PREFERRED]), _ADMIN_PREFERRED)
+    await application.bot.set_my_commands([], scope=BotCommandScopeDefault()); await application.bot.set_my_commands([], scope=BotCommandScopeAllGroupChats()); await application.bot.set_my_commands([], scope=BotCommandScopeAllChatAdministrators())
+    await application.bot.set_my_commands(private_commands, scope=BotCommandScopeDefault()); await application.bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats()); await application.bot.set_my_commands(admin_commands, scope=BotCommandScopeAllChatAdministrators())
+    log.info("COMMAND_MENU registry=%d private=%d group=%d admin=%d", len(commands), len(private_commands), len(group_commands), len(admin_commands))
 
 async def _post_init(application):
     try:
-        await storage.start(); await _legacy_post_init(application)
-        await deathgames_v2.load_from_storage(); recovered = await recover_deathgames(application, legacy_bot)
-        install_autonomy(application); install_cricket_v2(application); install_deathgames_v2(application)
-        install_v2_features(application); install_v2_social(application); install_v2_help(application); install_v2_autonomous(application)
-        install_social_intelligence(application); install_bond_signal(application)
-        install_vc_player(application)
+        log.info("STARTUP service=midnight-oracle engine=v2 render_service=%s instance=%s", os.getenv("RENDER_SERVICE_ID","unknown"), os.getenv("RENDER_INSTANCE_ID","unknown"))
+        await storage.start(); await _legacy_post_init(application); await deathgames_v2.load_from_storage(); recovered = await recover_deathgames(application, legacy_bot)
+        install_autonomy(application); install_cricket_v2(application); install_deathgames_v2(application); install_v2_features(application); install_v2_social(application); install_v2_help(application); install_v2_autonomous(application); install_social_intelligence(application); install_bond_signal(application); install_vc_player(application)
         await vc_player.start(); await _publish_v2_command_menu(application)
-        if recovered: log.info("Recovered %d death-game record(s)", recovered)
-        log.info("Midnight V2 autonomous, cricket, social-intelligence, bond/signal, death-game, help and VC layers online")
+        if recovered: log.info("RECOVERY recovered_deathgames=%d", recovered)
+        log.info("READY handlers=installed polling=starting")
     except Exception:
-        log.exception("Startup initialization/recovery failed"); raise
+        log.exception("STARTUP_FAILED"); raise
 
-legacy_bot.html = html
-legacy_bot._generate_gemini = _generate_gemini
-legacy_bot._coins = _legacy_coins
-legacy_bot._setcoins = _legacy_setcoins
-legacy_bot._addcoins = _legacy_addcoins
-legacy_bot._wallet = _legacy_wallet
-legacy_bot._setwallet = _legacy_setwallet
-legacy_bot._start_dummy_server = _start_health_server
-legacy_bot._post_init = _post_init
-legacy_bot.chat.generate_reply = core_generate_reply
-legacy_bot.utility.set_afk = core_set_afk
-legacy_bot.utility.check_afk_mentions = core_check_afk_mentions
+legacy_bot.html = html; legacy_bot._generate_gemini = _generate_gemini; legacy_bot._coins = _legacy_coins; legacy_bot._setcoins = _legacy_setcoins; legacy_bot._addcoins = _legacy_addcoins; legacy_bot._wallet = _legacy_wallet; legacy_bot._setwallet = _legacy_setwallet; legacy_bot._start_dummy_server = _start_health_server; legacy_bot._post_init = _post_init; legacy_bot.chat.generate_reply = core_generate_reply; legacy_bot.utility.set_afk = core_set_afk; legacy_bot.utility.check_afk_mentions = core_check_afk_mentions
 
 if __name__ == "__main__":
-    _poller_lease = TelegramPollerLease(ttl=120)
-    if not _poller_lease.start():
-        log.error("Another Midnight instance already owns Telegram polling; exiting cleanly")
-        raise SystemExit(0)
-    atexit.register(_poller_lease.release)
+    log.info("PROCESS starting pid=%s python=%s", os.getpid(), os.sys.version.split()[0])
     legacy_bot.main()
