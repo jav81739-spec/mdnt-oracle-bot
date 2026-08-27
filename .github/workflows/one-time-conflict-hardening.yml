@@ -1,5 +1,7 @@
 name: One-time Telegram conflict hardening
 
+# Triggered once to apply the production conflict fix.
+
 on:
   push:
     branches: [rebuild/core-engine-v2]
