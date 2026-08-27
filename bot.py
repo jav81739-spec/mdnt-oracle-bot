@@ -3,13 +3,11 @@ from __future__ import annotations
 
 import atexit
 import asyncio
-import hashlib
 import html
 import json
 import logging
 import os
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import legacy_bot
@@ -35,6 +33,7 @@ from core.v2_social2 import install as install_v2_social
 from core.v2_autonomous import install as install_v2_autonomous
 from core.midnight_social_intelligence import install as install_social_intelligence
 from core.v2_bond_signal import install as install_bond_signal
+from core.telegram_singleton import TelegramPollerLease
 from core.vc_player import install as install_vc_player, player as vc_player
 from handlers import deathgames_v2
 
@@ -107,100 +106,6 @@ class _HealthHandler(BaseHTTPRequestHandler):
 def _start_health_server():
     port = int(os.getenv("PORT", "10000")); server = HTTPServer(("0.0.0.0", port), _HealthHandler)
     threading.Thread(target=server.serve_forever, daemon=True, name="midnight-health").start(); return server
-
-# ---------------------------------------------------------------------------
-# Telegram polling singleton guard.
-# Render can briefly overlap old/new processes during a deploy. Telegram only
-# permits one getUpdates consumer per bot token, so use the shared Redis store
-# to elect exactly one polling owner. This guard is independent of bot logic.
-# ---------------------------------------------------------------------------
-_SINGLETON_KEY = "midnight:v2:telegram-poller"
-_SINGLETON_TTL = 120
-_SINGLETON_TOKEN = hashlib.sha256((os.getenv("BOT_TOKEN") or "").encode()).hexdigest()[:24]
-_singleton_owner = f"{os.getenv('RENDER_INSTANCE_ID') or os.getenv('RENDER_SERVICE_ID') or os.getpid()}:{time.time_ns()}"
-_singleton_redis = None
-_singleton_stop = threading.Event()
-_singleton_heartbeat = None
-
-
-def _singleton_client():
-    global _singleton_redis
-    if _singleton_redis is not None:
-        return _singleton_redis
-    try:
-        import redis
-        url = os.getenv("REDIS_URL") or os.getenv("KV_URL") or os.getenv("UPSTASH_REDIS_REST_URL") or ""
-        password = os.getenv("REDIS_PASSWORD") or os.getenv("UPSTASH_REDIS_REST_TOKEN") or ""
-        if url.startswith("redis://") or url.startswith("rediss://"):
-            _singleton_redis = redis.Redis.from_url(url, decode_responses=True, socket_timeout=3)
-        elif url.startswith("https://"):
-            host = url[len("https://"):].rstrip("/")
-            _singleton_redis = redis.Redis(host=host, port=6379, password=password, ssl=True, decode_responses=True, socket_timeout=3)
-        else:
-            _singleton_redis = redis.Redis(host="localhost", port=6379, decode_responses=True, socket_timeout=3)
-        return _singleton_redis
-    except Exception as exc:
-        log.warning("Singleton guard unavailable: %s", exc)
-        return None
-
-
-def _acquire_singleton() -> bool:
-    client = _singleton_client()
-    if client is None:
-        # Do not silently create a false sense of safety when Redis is absent.
-        # Render should still run one instance; the log makes the limitation explicit.
-        log.warning("Telegram singleton guard is unavailable; relying on deployment single-instance configuration")
-        return True
-    try:
-        acquired = bool(client.set(f"{_SINGLETON_KEY}:{_SINGLETON_TOKEN}", _singleton_owner, nx=True, ex=_SINGLETON_TTL))
-        if acquired:
-            log.info("Telegram polling singleton acquired")
-        else:
-            current = client.get(f"{_SINGLETON_KEY}:{_SINGLETON_TOKEN}")
-            log.error("Telegram polling singleton already owned by another instance (%s); refusing to start a second poller", current or "unknown")
-        return acquired
-    except Exception as exc:
-        log.warning("Singleton acquire failed: %s; relying on deployment single-instance configuration", exc)
-        return True
-
-
-def _renew_singleton():
-    client = _singleton_client()
-    key = f"{_SINGLETON_KEY}:{_SINGLETON_TOKEN}"
-    while not _singleton_stop.wait(30):
-        if client is None:
-            continue
-        try:
-            if client.get(key) != _singleton_owner:
-                log.error("Telegram polling singleton ownership was lost; stopping this process")
-                _singleton_stop.set()
-                return
-            client.expire(key, _SINGLETON_TTL)
-        except Exception as exc:
-            log.warning("Singleton heartbeat failed: %s", exc)
-
-
-def _release_singleton():
-    _singleton_stop.set()
-    client = _singleton_client()
-    if client is None:
-        return
-    key = f"{_SINGLETON_KEY}:{_SINGLETON_TOKEN}"
-    try:
-        if client.get(key) == _singleton_owner:
-            client.delete(key)
-    except Exception:
-        pass
-
-
-def _start_singleton_guard() -> bool:
-    global _singleton_heartbeat
-    if not _acquire_singleton():
-        return False
-    atexit.register(_release_singleton)
-    _singleton_heartbeat = threading.Thread(target=_renew_singleton, daemon=True, name="midnight-poller-guard")
-    _singleton_heartbeat.start()
-    return True
 
 legacy_bot.deathgames = deathgames_v2
 _legacy_post_init = legacy_bot._post_init
@@ -295,6 +200,9 @@ legacy_bot.utility.set_afk = core_set_afk
 legacy_bot.utility.check_afk_mentions = core_check_afk_mentions
 
 if __name__ == "__main__":
-    if not _start_singleton_guard():
+    _poller_lease = TelegramPollerLease(ttl=120)
+    if not _poller_lease.start():
+        log.error("Another Midnight instance already owns Telegram polling; exiting cleanly")
         raise SystemExit(0)
+    atexit.register(_poller_lease.release)
     legacy_bot.main()
