@@ -1,7 +1,5 @@
 name: One-time Telegram conflict hardening
 
-# Triggered once to apply the production conflict fix.
-
 on:
   push:
     branches: [rebuild/core-engine-v2]
@@ -19,48 +17,67 @@ jobs:
           ref: rebuild/core-engine-v2
           fetch-depth: 0
 
-      - name: Patch polling ownership and explicit error handler installation
+      - name: Apply final polling ownership fix
         shell: python
         run: |
           from pathlib import Path
           p = Path('bot.py')
           s = p.read_text()
 
-          old = 'from core.owner_tools import install as install_owner_tools, publish_owner_menu\n'
-          new = old + 'from core.error_handling import install_error_handler\n'
-          if 'from core.error_handling import install_error_handler' not in s:
-              if old not in s:
-                  raise SystemExit('owner_tools import anchor not found')
-              s = s.replace(old, new, 1)
-
-          old = '_POLLING_LEASE_TAKEOVER_AFTER = 120\n_POLLING_LEASE_TTL = 90\n'
-          new = '_POLLING_LEASE_TAKEOVER_AFTER = 75\n_POLLING_LEASE_TTL = 90\n'
-          if old in s:
-              s = s.replace(old, new, 1)
-
-          old = 'while not stop_event.wait(30):\n'
-          new = 'while not stop_event.wait(5):\n'
+          old = '''        elapsed = time.monotonic() - started
+        if elapsed >= _POLLING_LEASE_TAKEOVER_AFTER:
+            replaced = await storage.eval(
+                "if redis.call('exists',KEYS[1]) == 1 then redis.call('set',KEYS[1],ARGV[1],'EX',ARGV[2]) return 1 else return 0 end",
+                [lease_key],
+                [token, str(_POLLING_LEASE_TTL)],
+            )
+            if int(replaced or 0) == 1:
+                log.warning("POLLING_LEASE takeover after %ss; previous poller will self-terminate on renewal", int(elapsed))
+                return token
+'''
           if old not in s:
-              raise SystemExit('lease renewal interval anchor not found')
+              raise SystemExit('forced takeover block not found')
+          s = s.replace(old, '', 1)
+
+          old = '''    # Render can overlap old/new instances during deploys. At this point the
+    # old instance should have received shutdown; atomically take over the
+    # lease and let the old renewal loop notice ownership loss and exit.
+    lease_key = _polling_lease_key()
+    if await storage.set(lease_key, token, ttl=_POLLING_LEASE_TTL):
+        log.warning("POLLING_LEASE takeover after %ss; old instance will self-terminate", _POLLING_LEASE_WAIT)
+        await asyncio.sleep(5)
+        return token
+    raise RuntimeError("Unable to acquire Midnight Telegram polling lease")
+'''
+          new = '''    raise RuntimeError("Unable to acquire Midnight Telegram polling lease; another poller still owns it")
+'''
+          if old not in s:
+              raise SystemExit('deadline takeover block not found')
           s = s.replace(old, new, 1)
 
-          old = '        await storage.start()\n        await _legacy_post_init(application)\n'
-          new = '        await storage.start()\n        install_error_handler(application)\n        await _legacy_post_init(application)\n'
+          old = '''            except Conflict:
+                log.warning("TELEGRAM_CONFLICT another getUpdates poller is still active; waiting 10s before retry")
+                time.sleep(10)
+'''
+          new = '''            except Conflict:
+                log.error("TELEGRAM_CONFLICT another getUpdates poller owns this bot token; stopping this process")
+                break
+'''
           if old not in s:
-              raise SystemExit('post_init anchor not found')
+              raise SystemExit('Conflict retry block not found')
           s = s.replace(old, new, 1)
 
           p.write_text(s)
 
-      - name: Verify
-        run: python -m py_compile bot.py core/error_handling.py
+      - name: Verify production entrypoint
+        run: python -m py_compile bot.py
 
-      - name: Commit patch and remove one-time workflow
+      - name: Commit and remove one-time workflow
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bot.py
           git rm .github/workflows/one-time-conflict-hardening.yml
-          git add bot.py core/error_handling.py
           git commit -m 'fix: harden Telegram conflict ownership'
           git push origin HEAD:rebuild/core-engine-v2
