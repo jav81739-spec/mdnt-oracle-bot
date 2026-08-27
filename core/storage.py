@@ -33,6 +33,7 @@ class Storage:
         self.timeout = max(1.0, float(timeout))
         self.retries = max(0, int(retries))
         self._client: httpx.AsyncClient | None = None
+        self._client_loop: asyncio.AbstractEventLoop | None = None
         self._local: dict[str, Any] = {}
         self._local_expiry: dict[str, float] = {}
         self._local_lists: dict[str, list[str]] = {}
@@ -44,18 +45,52 @@ class Storage:
         return bool(self.url and self.token)
 
     async def start(self) -> None:
-        if self._client is None and self.configured:
+        """Ensure the HTTP client belongs to the currently running event loop.
+
+        httpx/anyio transports are event-loop sensitive. Midnight intentionally
+        has a few short-lived asyncio boundaries (health probes, lease cleanup,
+        and the legacy PTB runner), so reusing an AsyncClient created by a
+        previous/closed loop can produce ``Event loop is closed`` during TLS
+        connection cleanup. A client is therefore never reused across loops.
+        """
+        if not self.configured:
+            self._closed = False
+            return
+
+        loop = asyncio.get_running_loop()
+        if self._client is not None and self._client_loop is not loop:
+            # The previous loop may already be closed. Calling aclose() here
+            # would itself schedule work on that dead loop, which is the exact
+            # failure we are preventing. Drop the stale transport instead.
+            self._client = None
+            self._client_loop = None
+            log.debug("Storage HTTP client recreated for a new event loop")
+
+        if self._client is None:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self.timeout, connect=min(4.0, self.timeout)),
                 headers={"Authorization": f"Bearer {self.token}"},
             )
+            self._client_loop = loop
         self._closed = False
 
     async def close(self) -> None:
         self._closed = True
-        client, self._client = self._client, None
+        client, client_loop = self._client, self._client_loop
+        self._client = None
+        self._client_loop = None
         if client is not None:
-            await client.aclose()
+            current = asyncio.get_running_loop()
+            if client_loop is current:
+                try:
+                    await client.aclose()
+                except RuntimeError:
+                    # Never let transport shutdown mask the real bot shutdown.
+                    log.debug("Storage HTTP client was already closing/closed", exc_info=True)
+            else:
+                # Do not call aclose() on a transport owned by another loop.
+                # That loop may be closed already.
+                log.debug("Discarding Storage HTTP client owned by another event loop")
 
     async def _request(self, method: str, path: str = "/", **kwargs: Any) -> Any:
         if not self.configured:
