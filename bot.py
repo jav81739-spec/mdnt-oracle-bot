@@ -1,7 +1,6 @@
 """Midnight Oracle production entrypoint."""
 from __future__ import annotations
 
-import asyncio
 import html
 import json
 import logging
@@ -82,12 +81,21 @@ async def _legacy_setwallet(uid: int, value: int):
         return await storage.incrby(f"wallet:{uid}", delta) if delta else current
 
 
-async def _ready_probe():
-    probe = Storage()
-    try:
-        return await health_check(probe)
-    finally:
-        await probe.close()
+# The HTTP health server runs in its own thread. It must never create or drive
+# an asyncio loop from a request handler. Readiness is an explicit state that
+# the bot event loop updates after storage + recovery have completed.
+_ready_state = {"status": "starting", "storage": "starting", "bot": "starting"}
+_ready_lock = threading.Lock()
+
+
+def _set_ready_state(*, status: str, storage_status: str, bot: str) -> None:
+    with _ready_lock:
+        _ready_state.update({"status": status, "storage": storage_status, "bot": bot})
+
+
+def _get_ready_state() -> dict[str, str]:
+    with _ready_lock:
+        return dict(_ready_state)
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
@@ -106,12 +114,8 @@ class _HealthHandler(BaseHTTPRequestHandler):
             self._send(200, {"status": "ok", "service": "midnight-oracle"})
             return
         if self.path == "/ready":
-            try:
-                result = asyncio.run(_ready_probe())
-                self._send(200 if result.status == "ok" else 503, result.as_dict())
-            except Exception:
-                log.exception("Readiness probe failed")
-                self._send(503, {"status": "degraded", "storage": "error", "bot": "unknown"})
+            state = _get_ready_state()
+            self._send(200 if state["status"] == "ok" else 503, state)
             return
         self._send(404, {"status": "not_found"})
 
@@ -138,14 +142,18 @@ _legacy_post_init = legacy_bot._post_init
 
 
 async def _post_init(application):
+    _set_ready_state(status="starting", storage_status="starting", bot="starting")
     try:
         await storage.start()
+        _set_ready_state(status="starting", storage_status="ok", bot="starting")
         await _legacy_post_init(application)
         await deathgames_v2.load_from_storage()
         recovered = await recover_deathgames(application, legacy_bot)
         if recovered:
             log.info("Recovered %d legacy death-game record(s)", recovered)
+        _set_ready_state(status="ok", storage_status="ok", bot="ready")
     except Exception:
+        _set_ready_state(status="degraded", storage_status="error", bot="startup_failed")
         log.exception("Startup initialization/recovery failed")
         raise
 
