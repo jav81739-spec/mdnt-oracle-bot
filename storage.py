@@ -36,18 +36,8 @@ class RedisCompat:
         return await storage.incrby(key, amount)
 
     async def keys(self, pattern="*"):
-        """Transitional compatibility for legacy commands.
-
-        KEYS is intentionally not used by new code because it can become
-        expensive on large Redis datasets. Existing legacy commands still need
-        this surface, so they use the real Redis command rather than silently
-        returning an empty list as the previous adapter did.
-        """
-        if not storage.configured:
-            async with storage._local_lock:
-                return [key for key in storage._local if _glob_match(key, pattern)]
-        result = await storage._request("POST", "/", json=["KEYS", pattern])
-        return list(result or [])
+        """Compatibility name backed by SCAN, never Redis KEYS."""
+        return await storage.scan(pattern)
 
     async def lpush(self, key, *values):
         return await storage.lpush(key, *values)
@@ -57,7 +47,7 @@ class RedisCompat:
 
 
 def _glob_match(value: str, pattern: str) -> bool:
-    """Small glob matcher for the local compatibility fallback."""
+    """Small glob matcher retained for callers importing this helper."""
     import fnmatch
     return fnmatch.fnmatchcase(value, pattern)
 
