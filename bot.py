@@ -159,7 +159,7 @@ async def _acquire_polling_lease():
         return None
     token = f"{os.getenv('RENDER_SERVICE_ID', 'local')}:{os.getenv('RENDER_INSTANCE_ID', 'unknown')}:{os.getpid()}:{uuid.uuid4().hex}"
     started = time.monotonic()
-    deadline = started + max(_POLLING_LEASE_WAIT, _POLLING_LEASE_TAKEOVER_AFTER + _POLLING_LEASE_TTL)
+    deadline = started + _POLLING_LEASE_WAIT
     while time.monotonic() < deadline:
         lease_key = _polling_lease_key()
         if await storage.setnx(lease_key, token, ttl=_POLLING_LEASE_TTL):
