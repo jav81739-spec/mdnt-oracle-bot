@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import re
 import time
-from collections import Counter
 from dataclasses import dataclass
 
 from telegram import Update
@@ -85,14 +84,14 @@ async def _snapshot(chat_id: int) -> list[MemberSnapshot]:
 
 
 async def group_oracle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show Midnight's current lightweight understanding of the room."""
+    """Show Midnight's lightweight understanding of the room."""
     chat = update.effective_chat
     if not chat or chat.type == "private":
         await update.effective_message.reply_text("🌙 Group Oracle works inside a group chat.")
         return
     people = await _snapshot(chat.id)
     active = sorted(people, key=lambda p: (p.messages, p.seen), reverse=True)
-    lines = [f"<b>☾ MIDNIGHT ROOM · { _safe_name(chat.title or 'Unknown') }</b>", "", f"Souls noticed: <b>{len(active)}</b>"]
+    lines = [f"<b>☾ MIDNIGHT ROOM · {_safe_name(chat.title or 'Unknown')}</b>", "", f"Souls noticed: <b>{len(active)}</b>"]
     if active:
         lines.append("\n<b>Most present lately</b>")
         for p in active[:8]:
@@ -110,7 +109,7 @@ async def set_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not word or len(word) > 32 or not re.fullmatch(r"[\w-]+", word, re.UNICODE):
         await update.effective_message.reply_text("Usage: /settrigger <word>\nExample: /settrigger midnight")
         return
-    await storage.set(_key(chat.id, TRIGGER_KEY), word, ttl=0)
+    await storage.set(_key(chat.id, TRIGGER_KEY), word)
     await update.effective_message.reply_text(f"🌙 Trigger armed: <b>{_safe_name(word)}</b>\nSay it naturally and I'll know you're calling Midnight.", parse_mode="HTML")
 
 
