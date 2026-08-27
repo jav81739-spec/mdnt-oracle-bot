@@ -43,3 +43,7 @@ Required deployment secrets are documented in `docs/PRODUCTION_READINESS.md`. Ne
 ## Release rule
 
 A green test suite is necessary, not sufficient. The v2 release also requires deployment smoke tests for Telegram, Redis, Gemini, recovery, and Render health/readiness. See `docs/RELEASE_GATE.md`.
+
+## Final runtime verification
+
+The production entrypoint includes a token-scoped polling lease helper; deployment verification must confirm the real Render startup path acquires that lease without a `NameError`, timeout, or Telegram polling conflict.
