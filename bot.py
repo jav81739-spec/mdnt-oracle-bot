@@ -9,6 +9,7 @@ import os
 import threading
 import time
 import uuid
+import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from telegram.error import Conflict
@@ -152,7 +153,8 @@ async def _acquire_polling_lease():
     started = time.monotonic()
     deadline = started + max(_POLLING_LEASE_WAIT, _POLLING_LEASE_TAKEOVER_AFTER + _POLLING_LEASE_TTL)
     while time.monotonic() < deadline:
-        if await storage.setnx(_POLLING_LEASE_KEY, token, ttl=_POLLING_LEASE_TTL):
+        lease_key = _polling_lease_key()
+        if await storage.setnx(lease_key, token, ttl=_POLLING_LEASE_TTL):
             log.info("POLLING_LEASE acquired instance=%s ttl=%ss", os.getenv("RENDER_INSTANCE_ID", "unknown"), _POLLING_LEASE_TTL)
             return token
         elapsed = time.monotonic() - started
@@ -168,13 +170,21 @@ async def _acquire_polling_lease():
         remaining = max(0, int(deadline - time.monotonic()))
         log.warning("POLLING_LEASE busy; waiting for current Telegram poller (%ss remaining)", remaining)
         await asyncio.sleep(3)
-    raise RuntimeError("Timed out waiting for the existing Midnight Telegram poller to release its lease")
+    # Render can overlap old/new instances during deploys. At this point the
+    # old instance should have received shutdown; atomically take over the
+    # lease and let the old renewal loop notice ownership loss and exit.
+    lease_key = _polling_lease_key()
+    if await storage.set(lease_key, token, ttl=_POLLING_LEASE_TTL):
+        log.warning("POLLING_LEASE takeover after %ss; old instance will self-terminate", _POLLING_LEASE_WAIT)
+        await asyncio.sleep(5)
+        return token
+    raise RuntimeError("Unable to acquire Midnight Telegram polling lease")
 
 async def _release_polling_lease(token: str | None):
     if not token or not storage.configured:
         return
     try:
-        await storage.eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end", [_POLLING_LEASE_KEY], [token])
+        await storage.eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end", [_polling_lease_key()], [token])
         log.info("POLLING_LEASE released")
     except Exception:
         log.exception("POLLING_LEASE release failed; TTL safety net remains")
@@ -183,7 +193,7 @@ async def _renew_polling_lease_once(token: str):
     lease_store = Storage()
     try:
         await lease_store.start()
-        return await lease_store.eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('expire',KEYS[1],ARGV[2]) else return 0 end", [_POLLING_LEASE_KEY], [token, str(_POLLING_LEASE_TTL)])
+        return await lease_store.eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('expire',KEYS[1],ARGV[2]) else return 0 end", [_polling_lease_key()], [token, str(_POLLING_LEASE_TTL)])
     finally:
         await lease_store.close()
 
