@@ -11,6 +11,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+from telegram.error import Conflict
 import legacy_bot
 from telegram import BotCommand, BotCommandScopeDefault, BotCommandScopeAllGroupChats, BotCommandScopeAllChatAdministrators
 from core.ai import AIUnavailable, service as ai_service
@@ -38,6 +39,7 @@ log = logging.getLogger("midnight.entrypoint")
 _POLLING_LEASE_KEY = "midnight:telegram:polling-lease:v2"
 _POLLING_LEASE_TTL = 90
 _POLLING_LEASE_WAIT = 150
+_health_server = None
 
 class _AIResponse:
     def __init__(self, text: str) -> None: self.text = text
@@ -104,16 +106,14 @@ class _HealthHandler(BaseHTTPRequestHandler):
     def log_message(self, *_args): return
 
 def _start_health_server():
-    port = int(os.getenv("PORT", "10000")); server = HTTPServer(("0.0.0.0", port), _HealthHandler)
-    threading.Thread(target=server.serve_forever, daemon=True, name="midnight-health").start(); return server
+    global _health_server
+    if _health_server is not None:
+        return _health_server
+    port = int(os.getenv("PORT", "10000")); _health_server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    threading.Thread(target=_health_server.serve_forever, daemon=True, name="midnight-health").start(); return _health_server
 
 async def _acquire_polling_lease():
-    """Allow exactly one Render instance to call Telegram getUpdates.
-
-    Render intentionally overlaps old and new instances during a deploy. A
-    short Redis lease prevents both instances from polling at the same time,
-    while allowing the replacement instance to wait for the old one to exit.
-    """
+    """Allow exactly one Render instance to call Telegram getUpdates."""
     if not storage.configured:
         log.warning("POLLING_LEASE disabled: persistent storage is not configured")
         return None
@@ -132,10 +132,7 @@ async def _release_polling_lease(token: str | None):
     if not token or not storage.configured:
         return
     try:
-        await storage.eval(
-            "if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end",
-            [_POLLING_LEASE_KEY], [token],
-        )
+        await storage.eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end", [_POLLING_LEASE_KEY], [token])
         log.info("POLLING_LEASE released")
     except Exception:
         log.exception("POLLING_LEASE release failed; TTL safety net remains")
@@ -143,16 +140,13 @@ async def _release_polling_lease(token: str | None):
 
 def _start_polling_lease_renewal(token: str | None):
     if not token or not storage.configured:
-        return None, None
+        return None
     stop_event = threading.Event()
     def _renew_loop():
         failures = 0
         while not stop_event.wait(30):
             try:
-                result = asyncio.run(storage.eval(
-                    "if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('expire',KEYS[1],ARGV[2]) else return 0 end",
-                    [_POLLING_LEASE_KEY], [token, str(_POLLING_LEASE_TTL)],
-                ))
+                result = asyncio.run(storage.eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('expire',KEYS[1],ARGV[2]) else return 0 end", [_POLLING_LEASE_KEY], [token, str(_POLLING_LEASE_TTL)]))
                 if int(result or 0) != 1:
                     log.error("POLLING_LEASE lost; terminating this poller to prevent Telegram Conflict")
                     os._exit(75)
@@ -163,9 +157,8 @@ def _start_polling_lease_renewal(token: str | None):
                 if failures >= 3:
                     log.error("POLLING_LEASE renewal failed repeatedly; terminating this poller")
                     os._exit(75)
-    thread = threading.Thread(target=_renew_loop, daemon=True, name="midnight-polling-lease")
-    thread.start()
-    return stop_event, thread
+    threading.Thread(target=_renew_loop, daemon=True, name="midnight-polling-lease").start()
+    return stop_event
 
 legacy_bot.deathgames = deathgames_v2
 _legacy_post_init = legacy_bot._post_init
@@ -213,10 +206,15 @@ legacy_bot.html = html; legacy_bot._generate_gemini = _generate_gemini; legacy_b
 if __name__ == "__main__":
     log.info("PROCESS starting pid=%s python=%s", os.getpid(), os.sys.version.split()[0])
     lease_token = asyncio.run(_acquire_polling_lease())
-    renew_stop = renew_thread = None
+    renew_stop = _start_polling_lease_renewal(lease_token)
     try:
-        renew_stop, renew_thread = _start_polling_lease_renewal(lease_token)
-        legacy_bot.main()
+        while True:
+            try:
+                legacy_bot.main()
+                break
+            except Conflict:
+                log.warning("TELEGRAM_CONFLICT another getUpdates poller is still active; waiting 10s before retry")
+                time.sleep(10)
     finally:
         if renew_stop is not None:
             renew_stop.set()
