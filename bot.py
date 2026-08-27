@@ -28,7 +28,7 @@ from core.v2_autonomous import install as install_v2_autonomous
 from core.midnight_social_intelligence import install as install_social_intelligence
 from core.v2_bond_signal import install as install_bond_signal
 from core.vc_player import install as install_vc_player, player as vc_player
-from core.owner_tools import install as install_owner_tools
+from core.owner_tools import install as install_owner_tools, publish_owner_menu
 from handlers import deathgames_v2
 
 log = logging.getLogger("midnight.entrypoint")
@@ -128,7 +128,8 @@ async def _publish_v2_command_menu(application):
     commands = _command_registry(); private_commands = _take(commands, _PRIVATE_PREFERRED); group_commands = commands[:100]; admin_commands = _take(_dedupe(group_commands + [c for c in commands if c.command in _ADMIN_PREFERRED]), _ADMIN_PREFERRED)
     await application.bot.set_my_commands([], scope=BotCommandScopeDefault()); await application.bot.set_my_commands([], scope=BotCommandScopeAllGroupChats()); await application.bot.set_my_commands([], scope=BotCommandScopeAllChatAdministrators())
     await application.bot.set_my_commands(private_commands, scope=BotCommandScopeDefault()); await application.bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats()); await application.bot.set_my_commands(admin_commands, scope=BotCommandScopeAllChatAdministrators())
-    log.info("COMMAND_MENU registry=%d private=%d group=%d admin=%d", len(commands), len(private_commands), len(group_commands), len(admin_commands))
+    await publish_owner_menu(application)
+    log.info("COMMAND_MENU registry=%d private=%d group=%d admin=%d owner_controls=private", len(commands), len(private_commands), len(group_commands), len(admin_commands))
 
 async def _post_init(application):
     try:
