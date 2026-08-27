@@ -28,6 +28,7 @@ from core.v2_autonomous import install as install_v2_autonomous
 from core.midnight_social_intelligence import install as install_social_intelligence
 from core.v2_bond_signal import install as install_bond_signal
 from core.vc_player import install as install_vc_player, player as vc_player
+from core.owner_tools import install as install_owner_tools
 from handlers import deathgames_v2
 
 log = logging.getLogger("midnight.entrypoint")
@@ -111,7 +112,7 @@ _V2_COMMANDS = [
     BotCommand("bond", "Let Midnight choose a bond automatically"), BotCommand("signal", "Separate signal from noise in a message"),
 ]
 _PRIVATE_PREFERRED = {"start","help","chat","persona","balance","daily","wallet","deposit","withdraw","setpass","changepass","recover","crush","clearcrush","bestie","afk","remind","id","info","profile","inventory","settings","mprofile","achievements","upgradhelp"}
-_ADMIN_PREFERRED = {"ban","kick","mute","unmute","warn","warnings","clearwarns","pin","unpin","purge","setrules","lock","unlock","setwelcome","setgoodbye","invite","cwin","cplay","oraclehour","broadcast","announce"}
+_ADMIN_PREFERRED = {"ban","kick","mute","unmute","warn","warnings","clearwarns","pin","unpin","purge","setrules","lock","unlock","setwelcome","setgoodbye","invite","cwin","cplay","oraclehour"}
 
 def _dedupe(commands):
     out, seen = [], set()
@@ -133,7 +134,7 @@ async def _post_init(application):
     try:
         log.info("STARTUP service=midnight-oracle engine=v2 render_service=%s instance=%s", os.getenv("RENDER_SERVICE_ID","unknown"), os.getenv("RENDER_INSTANCE_ID","unknown"))
         await storage.start(); await _legacy_post_init(application); await deathgames_v2.load_from_storage(); recovered = await recover_deathgames(application, legacy_bot)
-        install_autonomy(application); install_cricket_v2(application); install_deathgames_v2(application); install_v2_features(application); install_v2_social(application); install_v2_help(application); install_v2_autonomous(application); install_social_intelligence(application); install_bond_signal(application); install_vc_player(application)
+        install_autonomy(application); install_cricket_v2(application); install_deathgames_v2(application); install_v2_features(application); install_v2_social(application); install_v2_help(application); install_v2_autonomous(application); install_social_intelligence(application); install_bond_signal(application); install_vc_player(application); install_owner_tools(application)
         await vc_player.start(); await _publish_v2_command_menu(application)
         if recovered: log.info("RECOVERY recovered_deathgames=%d", recovered)
         log.info("READY handlers=installed polling=starting")
