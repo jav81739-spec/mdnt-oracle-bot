@@ -10,8 +10,8 @@ import os
 import re
 from typing import Any
 
-from telegram import Update
-from telegram.ext import ChatMemberHandler, CommandHandler, ContextTypes, MessageHandler, TypeHandler, filters
+from telegram import BotCommand, BotCommandScopeChat, Update
+from telegram.ext import ChatMemberHandler, CommandHandler, ContextTypes, TypeHandler
 
 from .storage import storage
 
@@ -57,18 +57,12 @@ async def _remember_chat(chat, *, active: bool = True) -> None:
 
 
 async def remember_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Observe every Telegram update before normal handlers consume it.
-
-    This is deliberately a TypeHandler rather than relying on a particular
-    message filter, so command updates, group messages, channel posts and
-    membership updates all have a chance to register their chat.
-    """
+    """Observe every Telegram update without interfering with normal handlers."""
     try:
         chat = update.effective_chat
         if chat is not None:
             await _remember_chat(chat, active=True)
     except Exception:
-        # Discovery must never be allowed to break normal bot operation.
         return
 
 
@@ -84,9 +78,7 @@ async def remember_membership(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def _authorized_or_silent(update: Update) -> bool:
     owner = _owner_id()
     user = update.effective_user
-    if owner is None or user is None or int(user.id) != owner:
-        return False
-    return True
+    return owner is not None and user is not None and int(user.id) == owner
 
 
 def _broadcast_text(message) -> str:
@@ -94,8 +86,6 @@ def _broadcast_text(message) -> str:
     match = _COMMAND_RE.match(raw)
     if not match:
         return ""
-    # Slice the original message instead of using context.args. This preserves
-    # internal spaces, newlines, tabs and Unicode exactly as Telegram supplied.
     return raw[match.end() :].lstrip(" ")
 
 
@@ -112,7 +102,6 @@ async def _active_targets() -> list[dict[str, Any]]:
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized_or_silent(update):
         return
-
     message = update.effective_message
     if message is None:
         return
@@ -146,16 +135,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception as exc:
             failed += 1
             error = str(exc).lower()
-            if any(
-                token in error
-                for token in (
-                    "chat not found",
-                    "bot was kicked",
-                    "forbidden",
-                    "deactivated",
-                    "have no rights",
-                )
-            ):
+            if any(token in error for token in ("chat not found", "bot was kicked", "forbidden", "deactivated", "have no rights")):
                 stale.append(_key(chat_id))
 
     for key in stale:
@@ -173,7 +153,6 @@ async def network_map(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     entries = await _active_targets()
     entries.sort(key=lambda item: (str(item.get("type")), str(item.get("title", "")).casefold()))
-
     groups = [x for x in entries if x.get("type") in {"group", "supergroup"}]
     channels = [x for x in entries if x.get("type") == "channel"]
 
@@ -181,23 +160,35 @@ async def network_map(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     for label, items in (("GROUPS", groups), ("CHANNELS", channels)):
         lines.append(f"<b>{label} · {len(items)}</b>")
         for item in items:
-            title = (
-                str(item.get("title") or "Untitled")
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-            )
+            title = str(item.get("title") or "Untitled").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             username = str(item.get("username") or "").lstrip("@")
             link = f"https://t.me/{username}" if username else None
             lines.append(f"• {title}" + (f" — {link}" if link else " — private link"))
         lines.append("")
-
     lines.append(f"<b>TOTAL · {len(entries)}</b>")
+
     await update.effective_message.reply_text(
         "\n".join(lines),
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
+
+
+async def publish_owner_menu(application) -> None:
+    """Publish the private controls only to the configured owner chat."""
+    owner = _owner_id()
+    if owner is None:
+        return
+    commands = [
+        BotCommand("broadcast", "Send a private Midnight broadcast"),
+        BotCommand("announce", "Send a private Midnight announcement"),
+        BotCommand("midnightmap", "View Midnight's private network map"),
+    ]
+    try:
+        await application.bot.set_my_commands(commands, scope=BotCommandScopeChat(chat_id=owner))
+    except Exception:
+        # A command-menu failure must never prevent the bot from starting.
+        return
 
 
 def _remove_public_broadcast_handlers(application) -> None:
@@ -214,15 +205,10 @@ def _remove_public_broadcast_handlers(application) -> None:
 
 def install(application) -> None:
     _remove_public_broadcast_handlers(application)
-
-    # Highest-priority passive observer: this fixes the old zero-target problem
-    # for chats that were already present before the bot restarted/deployed.
     application.add_handler(TypeHandler(Update, remember_update), group=-1000)
     application.add_handler(
         ChatMemberHandler(remember_membership, ChatMemberHandler.MY_CHAT_MEMBER),
         group=-999,
     )
-
-    # Deliberately hidden from the normal command menus.
     application.add_handler(CommandHandler(["broadcast", "announce"], broadcast), group=-80)
     application.add_handler(CommandHandler("midnightmap", network_map), group=-79)
