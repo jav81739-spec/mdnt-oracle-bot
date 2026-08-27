@@ -34,12 +34,13 @@ from core.midnight_social_intelligence import install as install_social_intellig
 from core.v2_bond_signal import install as install_bond_signal
 from core.vc_player import install as install_vc_player, player as vc_player
 from core.owner_tools import install as install_owner_tools, publish_owner_menu
+from core.error_handling import install_error_handler
 from core.sticker_reactions import install as install_sticker_reactions
 from handlers import deathgames_v2
 
 log = logging.getLogger("midnight.entrypoint")
 _POLLING_LEASE_KEY = "midnight:telegram:polling-lease:v3"
-_POLLING_LEASE_TAKEOVER_AFTER = 120
+_POLLING_LEASE_TAKEOVER_AFTER = 75
 _POLLING_LEASE_TTL = 90
 _POLLING_LEASE_WAIT = 150
 _health_server = None
@@ -211,7 +212,7 @@ def _start_polling_lease_renewal(token: str | None):
     stop_event = threading.Event()
     def _renew_loop():
         failures = 0
-        while not stop_event.wait(30):
+        while not stop_event.wait(5):
             try:
                 result = asyncio.run(_renew_polling_lease_once(token))
                 if int(result or 0) != 1:
@@ -289,6 +290,7 @@ async def _post_init(application):
     try:
         log.info("STARTUP service=midnight-oracle engine=v2 render_service=%s instance=%s", os.getenv("RENDER_SERVICE_ID", "unknown"), os.getenv("RENDER_INSTANCE_ID", "unknown"))
         await storage.start()
+        install_error_handler(application)
         await _legacy_post_init(application)
         await deathgames_v2.load_from_storage()
         recovered = await recover_deathgames(application, legacy_bot)
