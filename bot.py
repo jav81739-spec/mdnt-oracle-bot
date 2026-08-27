@@ -106,9 +106,6 @@ def _start_health_server():
 legacy_bot.deathgames = deathgames_v2
 _legacy_post_init = legacy_bot._post_init
 
-# Telegram has a hard 100-command limit per scope. Build every menu from the
-# authoritative legacy registry, then append V2-only commands and deduplicate.
-# This avoids the old tiny hand-written V2 menu overwriting the real registry.
 _V2_COMMANDS = [
     BotCommand("cricketduel", "Challenge someone to Midnight Cricket"),
     BotCommand("midnightplay", "Search and play a song in VC"),
@@ -122,9 +119,6 @@ _V2_COMMANDS = [
     BotCommand("upgradhelp", "Read the V2 upgrade guide"),
 ]
 
-# Commands which are intentionally private/owner-facing and should not crowd
-# the normal group menu. The handlers still exist; this only controls Telegram's
-# suggestion menu.
 _PRIVATE_PREFERRED = {
     "start", "help", "chat", "persona", "balance", "daily", "wallet", "deposit",
     "withdraw", "setpass", "changepass", "recover", "crush", "clearcrush", "bestie",
@@ -160,20 +154,14 @@ def _take(commands, names, limit=100):
 async def _publish_v2_command_menu(application):
     """Publish deterministic, scoped menus without stale/default collisions."""
     commands = _command_registry()
-
-    # Private chats get personal/utility commands first, then the remaining
-    # registered commands up to Telegram's 100-command scope limit.
     private_commands = _take(commands, _PRIVATE_PREFERRED)
-
-    # Groups get the full registry first. If the registry ever exceeds 100,
-    # the oldest/least-prioritized tail is the only part Telegram cannot show.
     group_commands = commands[:100]
 
-    # Admins need the normal group deck as well as moderation/owner tools.
-    admin_commands = _take(commands, _ADMIN_PREFERRED)
+    # Admins receive the same group deck plus admin tools. Telegram's admin
+    # scope overrides the generic group scope, so omitting the group deck here
+    # would make ordinary group commands disappear for administrators.
+    admin_commands = _take(_dedupe(group_commands + [c for c in commands if c.command in _ADMIN_PREFERRED]), _ADMIN_PREFERRED)
 
-    # Explicitly replace the default, group and administrator scopes. This is
-    # important because an earlier deployment may have stored stale menus.
     await application.bot.set_my_commands([], scope=BotCommandScopeDefault())
     await application.bot.set_my_commands([], scope=BotCommandScopeAllGroupChats())
     await application.bot.set_my_commands([], scope=BotCommandScopeAllChatAdministrators())
