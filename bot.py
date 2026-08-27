@@ -354,8 +354,8 @@ if __name__ == "__main__":
                 _run_legacy_polling()
                 break
             except Conflict:
-                log.warning("TELEGRAM_CONFLICT another getUpdates poller is still active; waiting 10s before retry")
-                time.sleep(10)
+                log.error("TELEGRAM_CONFLICT another getUpdates poller owns this bot token; stopping this process")
+                break
     finally:
         if renew_stop is not None:
             renew_stop.set()
