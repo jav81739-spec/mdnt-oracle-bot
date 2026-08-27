@@ -8,7 +8,7 @@ import time
 
 from telegram import Update
 from telegram.constants import ParseMode
-from telegram.ext import CommandHandler, ContextTypes
+from telegram.ext import ApplicationHandlerStop, CommandHandler, ContextTypes
 
 from .storage import storage
 
@@ -55,9 +55,6 @@ async def bond(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     members = await _recent_members(chat.id)
-    # The command user is always eligible. This fixes the common two-person
-    # group case where the old implementation excluded the caller and then
-    # incorrectly demanded two other members.
     if not any(int(m["user_id"]) == int(me.id) for m in members):
         members.append({"user_id": int(me.id), "name": me.first_name or "Midnight Soul", "seen": time.time()})
     if len(members) < 2:
@@ -119,6 +116,19 @@ async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await message.reply_text(_signal_text(text), parse_mode=ParseMode.HTML)
 
 
+async def _bond_once(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await bond(update, context)
+    raise ApplicationHandlerStop
+
+
+async def _signal_once(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await signal(update, context)
+    raise ApplicationHandlerStop
+
+
 def install(application):
-    application.add_handler(CommandHandler(["bond", "oraclepair"], bond), group=-90)
-    application.add_handler(CommandHandler(["signal", "signalcheck"], signal), group=-90)
+    # These commands also exist in the compatibility runtime. Stop processing
+    # the same update after V2 handles them, otherwise Telegram receives two
+    # replies (V2 + legacy handler in a later handler group).
+    application.add_handler(CommandHandler(["bond", "oraclepair"], _bond_once), group=-90)
+    application.add_handler(CommandHandler(["signal", "signalcheck"], _signal_once), group=-90)
