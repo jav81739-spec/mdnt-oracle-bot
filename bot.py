@@ -33,6 +33,7 @@ from core.midnight_social_intelligence import install as install_social_intellig
 from core.v2_bond_signal import install as install_bond_signal
 from core.vc_player import install as install_vc_player, player as vc_player
 from core.owner_tools import install as install_owner_tools, publish_owner_menu
+from core.sticker_reactions import install as install_sticker_reactions
 from handlers import deathgames_v2
 
 log = logging.getLogger("midnight.entrypoint")
@@ -196,8 +197,6 @@ def _start_polling_lease_renewal(token: str | None):
     threading.Thread(target=_renew_loop, daemon=True, name="midnight-polling-lease").start()
     return stop_event
 
-# Keep every existing legacy handler, command and feature. Only normalize the
-# PTB polling option so legacy_bot.main() cannot close the shared loop.
 _original_run_polling = Application.run_polling
 def _run_polling_preserve_loop(self, *args, **kwargs):
     kwargs["close_loop"] = False
@@ -264,6 +263,7 @@ async def _post_init(application):
         await deathgames_v2.load_from_storage()
         recovered = await recover_deathgames(application, legacy_bot)
         install_autonomy(application)
+        install_sticker_reactions(application)
         install_cricket_v2(application)
         install_deathgames_v2(application)
         install_v2_features(application)
@@ -297,7 +297,7 @@ legacy_bot.utility.set_afk = core_set_afk
 legacy_bot.utility.check_afk_mentions = core_check_afk_mentions
 
 def _run_legacy_polling():
-    """Run the untouched legacy application on a loop we explicitly own."""
+    """Run the legacy application on an explicitly owned event loop."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
