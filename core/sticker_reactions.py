@@ -1,9 +1,4 @@
-"""Midnight sticker-to-sticker reaction engine.
-
-Replies to stickers with another sticker without requiring a reply to Midnight.
-When Telegram exposes the source sticker's set, Midnight prefers that same pack;
-otherwise it falls back to the real sticker IDs already present in the project.
-"""
+"""Midnight sticker-to-sticker reaction engine."""
 from __future__ import annotations
 
 import logging
@@ -25,8 +20,7 @@ async def sticker_to_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     incoming = message.sticker
-    # Prefer the same sticker pack. This makes a sticker conversation feel like
-    # an actual reaction rather than an unrelated random image.
+    # Prefer the same sticker pack so a sticker conversation feels coherent.
     try:
         set_name = getattr(incoming, "set_name", None)
         if set_name:
@@ -34,19 +28,19 @@ async def sticker_to_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE)
             stickers = list(getattr(sticker_set, "stickers", ()) or ())
             candidates = [s for s in stickers if s.file_id != incoming.file_id]
             if candidates:
-                chosen = random.choice(candidates)
-                await message.reply_sticker(chosen.file_id)
+                await message.reply_sticker(random.choice(candidates).file_id)
                 return
     except Exception as exc:
         log.debug("same-pack sticker lookup failed: %s", exc)
 
-    # Fallback preserves the user's existing configured sticker IDs.
-    stickers = getattr(legacy_chat, "SAMPLE_STICKERS", ())
-    if stickers:
-        try:
-            await message.reply_sticker(legacy_chat._pick_sticker(str(chat.id)))
-        except Exception as exc:
-            log.info("sticker fallback failed: %s", exc)
+    # The project already carries the user's configured sticker IDs. Use the
+    # existing picker directly; never call a helper that may not exist.
+    try:
+        sticker_id = legacy_chat._pick_sticker(str(chat.id))
+        if sticker_id:
+            await message.reply_sticker(sticker_id)
+    except Exception:
+        log.exception("configured sticker fallback failed")
 
 
 def install(application) -> None:
