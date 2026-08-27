@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from telegram import Update
 from telegram.error import Conflict, Forbidden, RetryAfter
 
@@ -9,11 +10,13 @@ log = logging.getLogger("midnight.telegram")
 
 
 async def handle_telegram_error(update: object, context) -> None:
-    """Catch handler exceptions so one bad update never becomes an unhandled error.
+    """Handle Telegram errors without allowing duplicate pollers to survive.
 
-    The handler deliberately avoids echoing exception details to users. Telegram
-    API errors are logged with useful context, while the update loop is allowed
-    to continue whenever python-telegram-bot can safely do so.
+    A Telegram ``Conflict`` is different from an ordinary update-handler error:
+    it means another process is calling getUpdates for the same bot token. The
+    safest recovery is to terminate this process immediately and let Render
+    restart it. Continuing to poll after a conflict can keep two instances
+    fighting indefinitely and defeats the Redis polling lease.
     """
     error = getattr(context, "error", None)
     update_id = getattr(update, "update_id", None)
@@ -25,10 +28,13 @@ async def handle_telegram_error(update: object, context) -> None:
     if isinstance(error, Conflict):
         log.error(
             "Telegram polling conflict update=%s chat=%s user=%s; "
-            "the process-level polling lease should prevent duplicate pollers",
+            "terminating this poller so Render can restart it cleanly",
             update_id, chat_id, user_id,
         )
-        return
+        # Do not retry getUpdates in-process. A conflicting poller must die so
+        # the remaining instance can own Telegram polling. Exit 75 is reserved
+        # here for a deliberate self-heal/restart and leaves Redis data intact.
+        os._exit(75)
 
     if isinstance(error, RetryAfter):
         log.warning(
