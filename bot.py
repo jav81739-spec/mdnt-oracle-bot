@@ -44,6 +44,14 @@ _POLLING_LEASE_TTL = 90
 _POLLING_LEASE_WAIT = 150
 _health_server = None
 
+def _polling_lease_key():
+    """Return a bot-token-scoped lease key without storing the raw token."""
+    bot_token = os.getenv("BOT_TOKEN", "").strip()
+    if not bot_token:
+        return _POLLING_LEASE_KEY
+    digest = hashlib.sha256(bot_token.encode("utf-8")).hexdigest()[:32]
+    return f"{_POLLING_LEASE_KEY}:{digest}"
+
 class _AIResponse:
     def __init__(self, text: str) -> None:
         self.text = text
@@ -161,7 +169,7 @@ async def _acquire_polling_lease():
         if elapsed >= _POLLING_LEASE_TAKEOVER_AFTER:
             replaced = await storage.eval(
                 "if redis.call('exists',KEYS[1]) == 1 then redis.call('set',KEYS[1],ARGV[1],'EX',ARGV[2]) return 1 else return 0 end",
-                [_POLLING_LEASE_KEY],
+                [lease_key],
                 [token, str(_POLLING_LEASE_TTL)],
             )
             if int(replaced or 0) == 1:
