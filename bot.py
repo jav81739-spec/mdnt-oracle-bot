@@ -40,9 +40,8 @@ from handlers import deathgames_v2
 
 log = logging.getLogger("midnight.entrypoint")
 _POLLING_LEASE_KEY = "midnight:telegram:polling-lease:v3"
-_POLLING_LEASE_TAKEOVER_AFTER = 75
 _POLLING_LEASE_TTL = 90
-_POLLING_LEASE_WAIT = 150
+_POLLING_LEASE_WAIT = 180
 _health_server = None
 
 def _polling_lease_key():
@@ -166,28 +165,12 @@ async def _acquire_polling_lease():
         if await storage.setnx(lease_key, token, ttl=_POLLING_LEASE_TTL):
             log.info("POLLING_LEASE acquired instance=%s ttl=%ss", os.getenv("RENDER_INSTANCE_ID", "unknown"), _POLLING_LEASE_TTL)
             return token
-        elapsed = time.monotonic() - started
-        if elapsed >= _POLLING_LEASE_TAKEOVER_AFTER:
-            replaced = await storage.eval(
-                "if redis.call('exists',KEYS[1]) == 1 then redis.call('set',KEYS[1],ARGV[1],'EX',ARGV[2]) return 1 else return 0 end",
-                [lease_key],
-                [token, str(_POLLING_LEASE_TTL)],
-            )
-            if int(replaced or 0) == 1:
-                log.warning("POLLING_LEASE takeover after %ss; previous poller will self-terminate on renewal", int(elapsed))
-                return token
         remaining = max(0, int(deadline - time.monotonic()))
         log.warning("POLLING_LEASE busy; waiting for current Telegram poller (%ss remaining)", remaining)
         await asyncio.sleep(3)
-    # Render can overlap old/new instances during deploys. At this point the
-    # old instance should have received shutdown; atomically take over the
-    # lease and let the old renewal loop notice ownership loss and exit.
-    lease_key = _polling_lease_key()
-    if await storage.set(lease_key, token, ttl=_POLLING_LEASE_TTL):
-        log.warning("POLLING_LEASE takeover after %ss; old instance will self-terminate", _POLLING_LEASE_WAIT)
-        await asyncio.sleep(5)
-        return token
-    raise RuntimeError("Unable to acquire Midnight Telegram polling lease")
+    raise RuntimeError(
+        "Timed out waiting for the existing Midnight Telegram poller to release its lease"
+    )
 
 async def _release_polling_lease(token: str | None):
     if not token or not storage.configured:
