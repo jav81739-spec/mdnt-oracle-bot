@@ -2,8 +2,8 @@
 
 No Gemini SDK is required. The service uses the public HTTPS endpoint through
 httpx, keeps secrets out of URLs/logs, bounds every request, and retries only
-transient failures. The model is configurable so a zero-budget deployment can
-use a free-tier model without code changes.
+transient failures. The model is configurable so deployments can switch models
+without code changes.
 """
 from __future__ import annotations
 
@@ -27,9 +27,8 @@ class AIService:
 
     def __post_init__(self) -> None:
         self.api_key = self.api_key or os.getenv("GEMINI_API_KEY", "")
-        # Cheap stable default; operators can choose gemini-3.7-flash or any
-        # currently supported model through GEMINI_MODEL.
-        self.model = self.model or os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+        # Current stable production default. Override with GEMINI_MODEL when needed.
+        self.model = self.model or os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
         self._client: httpx.AsyncClient | None = None
         self._client_lock = asyncio.Lock()
 
@@ -69,6 +68,7 @@ class AIService:
         last: Exception | None = None
 
         for attempt in range(self.retries + 1):
+            response = None
             try:
                 response = await client.post(url, json=payload, timeout=request_timeout)
                 if response.status_code == 429 or response.status_code >= 500:
@@ -82,7 +82,7 @@ class AIService:
                 return text.strip()
             except AIUnavailable as exc:
                 last = exc
-                if response.status_code < 500 and response.status_code != 429:
+                if response is not None and response.status_code < 500 and response.status_code != 429:
                     break
             except (httpx.HTTPError, ValueError) as exc:
                 last = exc
