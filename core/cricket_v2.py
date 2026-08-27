@@ -7,7 +7,7 @@ from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
+from telegram.ext import ApplicationHandlerStop, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from .storage import storage
 from handlers.chat import get_gif_url
@@ -58,10 +58,9 @@ async def _preview(bot, chat_id: int, result: int | str, caption: str = "") -> N
         gif_url = await get_gif_url(query)
         if gif_url:
             await bot.send_animation(chat_id=chat_id, animation=gif_url, caption=caption or fallback_caption, parse_mode=ParseMode.HTML)
-            return
     except Exception:
         # GIPHY is an enhancement. Never turn a GIF failure into a game failure.
-        pass
+        return
 
 
 async def cricket(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -72,11 +71,14 @@ async def cricket(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "commentary": "The crease is yours. Pick your shot.",
     }
     await storage.set(f"mc2:solo:{cid}:{uid}", state, ttl=1800)
+    # One Telegram reply for the command, not two separate introductory messages.
     await update.effective_message.reply_text(
-        "🏏 <b>Midnight Cricket</b>\n\nSix balls. One target. Make your shots count. 🌙",
+        "🏏 <b>Midnight Cricket</b>\n\n"
+        "Six balls. One target. Make your shots count. 🌙\n\n"
+        + _card(state),
         parse_mode=ParseMode.HTML,
+        reply_markup=_keyboard("solo"),
     )
-    await update.effective_message.reply_text(_card(state), parse_mode=ParseMode.HTML, reply_markup=_keyboard("solo"))
 
 
 async def cricketduel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -145,9 +147,6 @@ async def _duel(q, chat_id: int, uid: int, shot: str) -> None:
     if state.get("turn") != uid:
         await q.answer("Not your ball 😭", show_alert=True)
         return
-
-    # In innings 1, A bats. In innings 2, B bats. The non-batter never gets a
-    # shot callback, which fixes the old alternating-turn bug during the chase.
     batter_id = state["a"] if state["innings"] == 1 else state["b"]
     if uid != batter_id:
         await q.answer("You're fielding this ball 🌙", show_alert=True)
@@ -200,6 +199,11 @@ async def _duel(q, chat_id: int, uid: int, shot: str) -> None:
         await _preview(q.get_bot(), chat_id, "win")
 
 
+async def _cricket_once(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await cricket(update, context)
+    raise ApplicationHandlerStop
+
+
 async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     q = update.callback_query
     await q.answer()
@@ -216,6 +220,8 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def install(application) -> None:
-    application.add_handler(CommandHandler(["cricket", "cricketgame"], cricket), group=16)
+    # /cricket also exists in the compatibility runtime. Stop the same update
+    # after V2 handles it so Telegram receives exactly one command response.
+    application.add_handler(CommandHandler(["cricket", "cricketgame"], _cricket_once), group=16)
     application.add_handler(CommandHandler(["cricketduel", "cricketvs"], cricketduel), group=16)
     application.add_handler(CallbackQueryHandler(callback, pattern=r"^mc2:"), group=16)
