@@ -1,0 +1,54 @@
+name: Final polling lease fix
+
+on:
+  push:
+    branches:
+      - rebuild/core-engine-v2
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor == 'jav81739-spec'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: rebuild/core-engine-v2
+          fetch-depth: 0
+      - name: Patch lease takeover and token namespace
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('bot.py')
+          s = p.read_text()
+          s = s.replace('import uuid\n', 'import uuid\nimport hashlib\n')
+          s = s.replace('_POLLING_LEASE_KEY = "midnight:telegram:polling-lease:v2"\n_POLLING_LEASE_TTL = 90\n_POLLING_LEASE_WAIT = 150\n', '''_POLLING_LEASE_TTL = 90\n_POLLING_LEASE_WAIT = 120\n\ndef _polling_lease_key():\n    # Namespace the lease by a one-way hash of the active bot token so a\n    # revoked token can never leave a stale lease blocking the replacement.\n    token = os.getenv("BOT_TOKEN", "").strip().encode("utf-8")\n    digest = hashlib.sha256(token).hexdigest()[:24] if token else "unconfigured"\n    return f"midnight:telegram:polling-lease:v3:{digest}"\n''')
+          s = s.replace('if await storage.setnx(_POLLING_LEASE_KEY, token, ttl=_POLLING_LEASE_TTL):', 'lease_key = _polling_lease_key()\n        if await storage.setnx(lease_key, token, ttl=_POLLING_LEASE_TTL):')
+          s = s.replace('await storage.eval("if redis.call(\'get\',KEYS[1]) == ARGV[1] then return redis.call(\'del\',KEYS[1]) else return 0 end", [_POLLING_LEASE_KEY], [token])', 'await storage.eval("if redis.call(\'get\',KEYS[1]) == ARGV[1] then return redis.call(\'del\',KEYS[1]) else return 0 end", [_polling_lease_key()], [token])')
+          s = s.replace('return await lease_store.eval("if redis.call(\'get\',KEYS[1]) == ARGV[1] then return redis.call(\'expire\',KEYS[1],ARGV[2]) else return 0 end", [_POLLING_LEASE_KEY], [token, str(_POLLING_LEASE_TTL)])', 'return await lease_store.eval("if redis.call(\'get\',KEYS[1]) == ARGV[1] then return redis.call(\'expire\',KEYS[1],ARGV[2]) else return 0 end", [_polling_lease_key()], [token, str(_POLLING_LEASE_TTL)])')
+          old = '    raise RuntimeError("Timed out waiting for the existing Midnight Telegram poller to release its lease")'
+          new = '''    # Render can overlap old/new instances during deploys. At this point the\n    # old instance should have received shutdown; atomically take over the\n    # lease and let the old renewal loop notice ownership loss and exit.\n    lease_key = _polling_lease_key()\n    if await storage.set(lease_key, token, ttl=_POLLING_LEASE_TTL):\n        log.warning("POLLING_LEASE takeover after %ss; old instance will self-terminate", _POLLING_LEASE_WAIT)\n        await asyncio.sleep(5)\n        return token\n    raise RuntimeError("Unable to acquire Midnight Telegram polling lease")'''
+          s = s.replace(old, new)
+          p.write_text(s)
+          PY
+          python -m py_compile bot.py
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bot.py
+          git diff --cached --quiet && exit 0
+          git commit -m 'Fix Render polling lease takeover and token isolation'
+          git push origin HEAD:rebuild/core-engine-v2
+      - name: Remove one-time workflow
+        if: success()
+        run: |
+          git fetch origin rebuild/core-engine-v2
+          git checkout rebuild/core-engine-v2
+          git rm .github/workflows/lease-final-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Remove one-time lease patch workflow'
+          git push origin HEAD:rebuild/core-engine-v2
