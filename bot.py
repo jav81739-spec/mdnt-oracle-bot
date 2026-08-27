@@ -10,7 +10,12 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import legacy_bot
-from telegram import BotCommand, BotCommandScopeAllGroupChats
+from telegram import (
+    BotCommand,
+    BotCommandScopeDefault,
+    BotCommandScopeAllGroupChats,
+    BotCommandScopeAllChatAdministrators,
+)
 from core.ai import AIUnavailable, service as ai_service
 from core.chat import generate_reply as core_generate_reply
 from core.recovery import recover_deathgames
@@ -101,19 +106,86 @@ def _start_health_server():
 legacy_bot.deathgames = deathgames_v2
 _legacy_post_init = legacy_bot._post_init
 
+# Telegram has a hard 100-command limit per scope. Build every menu from the
+# authoritative legacy registry, then append V2-only commands and deduplicate.
+# This avoids the old tiny hand-written V2 menu overwriting the real registry.
+_V2_COMMANDS = [
+    BotCommand("cricketduel", "Challenge someone to Midnight Cricket"),
+    BotCommand("midnightplay", "Search and play a song in VC"),
+    BotCommand("nowplaying", "Show the current VC track"),
+    BotCommand("stopmusic", "Stop Midnight Radio"),
+    BotCommand("pausemusic", "Pause Midnight Radio"),
+    BotCommand("resumemusic", "Resume Midnight Radio"),
+    BotCommand("mprofile", "Open your Midnight identity"),
+    BotCommand("achievements", "View your Midnight marks"),
+    BotCommand("midnightevent", "Open a Midnight world event"),
+    BotCommand("upgradhelp", "Read the V2 upgrade guide"),
+]
+
+# Commands which are intentionally private/owner-facing and should not crowd
+# the normal group menu. The handlers still exist; this only controls Telegram's
+# suggestion menu.
+_PRIVATE_PREFERRED = {
+    "start", "help", "chat", "persona", "balance", "daily", "wallet", "deposit",
+    "withdraw", "setpass", "changepass", "recover", "crush", "clearcrush", "bestie",
+    "afk", "remind", "id", "info", "profile", "inventory", "settings", "mprofile",
+    "achievements", "upgradhelp",
+}
+
+_ADMIN_PREFERRED = {
+    "ban", "kick", "mute", "unmute", "warn", "warnings", "clearwarns", "pin", "unpin",
+    "purge", "setrules", "lock", "unlock", "setwelcome", "setgoodbye", "invite",
+    "cwin", "cplay", "oraclehour", "broadcast", "announce",
+}
+
+def _dedupe(commands):
+    out = []
+    seen = set()
+    for cmd in commands:
+        name = cmd.command
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(cmd)
+    return out
+
+def _command_registry():
+    return _dedupe(list(getattr(legacy_bot, "BOT_COMMANDS", [])) + _V2_COMMANDS)
+
+def _take(commands, names, limit=100):
+    preferred = [c for c in commands if c.command in names]
+    rest = [c for c in commands if c.command not in names]
+    return _dedupe(preferred + rest)[:limit]
+
 async def _publish_v2_command_menu(application):
-    commands = [
-        BotCommand("help", "Open the Midnight V2 command deck"), BotCommand("hug", "Send a Midnight hug"), BotCommand("kiss", "Send a Midnight kiss"),
-        BotCommand("pat", "Pat someone"), BotCommand("kick", "Playfully kick someone"), BotCommand("bond", "Test a Midnight pairing"), BotCommand("oraclepair", "Let the Oracle choose a pair"),
-        BotCommand("cricket", "Play solo Midnight Cricket"), BotCommand("cricketduel", "Challenge someone to Cricket"),
-        BotCommand("deathgame", "Open a Midnight Death Game"), BotCommand("joingame", "Join the Death Game"), BotCommand("startround", "Start the Death Game round"),
-        BotCommand("survive", "Risk a survival run"), BotCommand("revive", "Return from a survival death"), BotCommand("deathstatus", "Check survival status"), BotCommand("roulette", "Play Death Roulette"),
-        BotCommand("midnightplay", "Search and play a song in VC"), BotCommand("nowplaying", "Show the current VC track"), BotCommand("stopmusic", "Stop Midnight Radio"), BotCommand("pausemusic", "Pause Midnight Radio"), BotCommand("resumemusic", "Resume Midnight Radio"),
-        BotCommand("mprofile", "Open your Midnight identity"), BotCommand("achievements", "View your Midnight marks"), BotCommand("midnightevent", "Open a Midnight world event"), BotCommand("upgradhelp", "Read the V2 upgrade guide"),
-    ]
-    try:
-        await application.bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats()); await application.bot.set_my_commands(commands)
-    except Exception: log.exception("Could not publish V2 command menu")
+    """Publish deterministic, scoped menus without stale/default collisions."""
+    commands = _command_registry()
+
+    # Private chats get personal/utility commands first, then the remaining
+    # registered commands up to Telegram's 100-command scope limit.
+    private_commands = _take(commands, _PRIVATE_PREFERRED)
+
+    # Groups get the full registry first. If the registry ever exceeds 100,
+    # the oldest/least-prioritized tail is the only part Telegram cannot show.
+    group_commands = commands[:100]
+
+    # Admins need the normal group deck as well as moderation/owner tools.
+    admin_commands = _take(commands, _ADMIN_PREFERRED)
+
+    # Explicitly replace the default, group and administrator scopes. This is
+    # important because an earlier deployment may have stored stale menus.
+    await application.bot.set_my_commands([], scope=BotCommandScopeDefault())
+    await application.bot.set_my_commands([], scope=BotCommandScopeAllGroupChats())
+    await application.bot.set_my_commands([], scope=BotCommandScopeAllChatAdministrators())
+
+    await application.bot.set_my_commands(private_commands, scope=BotCommandScopeDefault())
+    await application.bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
+    await application.bot.set_my_commands(admin_commands, scope=BotCommandScopeAllChatAdministrators())
+
+    log.info(
+        "Command menus published: registry=%d private=%d group=%d admin=%d",
+        len(commands), len(private_commands), len(group_commands), len(admin_commands),
+    )
 
 async def _post_init(application):
     try:
