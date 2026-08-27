@@ -59,7 +59,6 @@ async def _preview(bot, chat_id: int, result: int | str, caption: str = "") -> N
         if gif_url:
             await bot.send_animation(chat_id=chat_id, animation=gif_url, caption=caption or fallback_caption, parse_mode=ParseMode.HTML)
     except Exception:
-        # GIPHY is an enhancement. Never turn a GIF failure into a game failure.
         return
 
 
@@ -71,7 +70,6 @@ async def cricket(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "commentary": "The crease is yours. Pick your shot.",
     }
     await storage.set(f"mc2:solo:{cid}:{uid}", state, ttl=1800)
-    # One Telegram reply for the command, not two separate introductory messages.
     await update.effective_message.reply_text(
         "🏏 <b>Midnight Cricket</b>\n\n"
         "Six balls. One target. Make your shots count. 🌙\n\n"
@@ -206,22 +204,32 @@ async def _cricket_once(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     q = update.callback_query
+    if not q or not q.message or not q.from_user:
+        return
     await q.answer()
     parts = q.data.split(":", 2)
     if len(parts) != 3:
         return
     _, game, shot = parts
-    if shot not in SHOTS:
+    if shot not in SHOTS or game not in {"solo", "duel"}:
         return
-    if game == "solo":
-        await _solo(q, q.message.chat.id, q.from_user.id, shot)
-    elif game == "duel":
-        await _duel(q, q.message.chat.id, q.from_user.id, shot)
+
+    # Telegram can deliver two rapid taps as separate callback updates. The
+    # storage lock serializes actions for the same cricket message across
+    # processes/Render instances. A second tap gets no game mutation, so one
+    # ball can never become two balls and one action can never emit two replays.
+    lock_name = f"cricket-callback:{q.message.chat.id}:{q.message.message_id}"
+    async with storage.lock(lock_name, ttl=12, wait=0.0) as acquired:
+        if not acquired:
+            await q.answer("🌙 Already processing that shot…", show_alert=False)
+            return
+        if game == "solo":
+            await _solo(q, q.message.chat.id, q.from_user.id, shot)
+        else:
+            await _duel(q, q.message.chat.id, q.from_user.id, shot)
 
 
 def install(application) -> None:
-    # /cricket also exists in the compatibility runtime. Stop the same update
-    # after V2 handles it so Telegram receives exactly one command response.
     application.add_handler(CommandHandler(["cricket", "cricketgame"], _cricket_once), group=16)
     application.add_handler(CommandHandler(["cricketduel", "cricketvs"], cricketduel), group=16)
     application.add_handler(CallbackQueryHandler(callback, pattern=r"^mc2:"), group=16)
