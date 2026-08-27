@@ -1,9 +1,8 @@
 """Private owner controls for Midnight's network and broadcasts.
 
-The public bot never advertises these controls. Access is gated by a single
-owner id supplied through the deployment environment, while durable chat
-presence is recorded only for groups/channels where Midnight actually receives
-updates.
+These controls intentionally stay out of the public command menu. The owner
+can use them directly, while Midnight keeps a durable registry of chats it
+actually observes or is explicitly added to.
 """
 from __future__ import annotations
 
@@ -12,23 +11,25 @@ import re
 from typing import Any
 
 from telegram import Update
-from telegram.ext import ChatMemberHandler, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import ChatMemberHandler, CommandHandler, ContextTypes, MessageHandler, TypeHandler, filters
 
 from .storage import storage
 
 _CHAT_PREFIX = "midnight:chat:"
-_OWNER_ENV_KEYS = ("MIDNIGHT_OWNER_ID", "OWNER_TELEGRAM_ID")
+_OWNER_ENV_KEYS = ("OWNER_TELEGRAM_ID", "MIDNIGHT_OWNER_ID")
 _COMMAND_RE = re.compile(r"^/[A-Za-z0-9_]+(?:@[A-Za-z0-9_]+)?")
 
 
 def _owner_id() -> int | None:
+    """Use the existing owner setting; never require a second owner secret."""
     for key in _OWNER_ENV_KEYS:
         raw = os.getenv(key, "").strip()
-        if raw:
-            try:
-                return int(raw)
-            except ValueError:
-                return None
+        if not raw:
+            continue
+        try:
+            return int(raw)
+        except ValueError:
+            continue
     return None
 
 
@@ -36,30 +37,39 @@ def _key(chat_id: int) -> str:
     return f"{_CHAT_PREFIX}{int(chat_id)}"
 
 
-def _is_owner(update: Update) -> bool:
-    owner = _owner_id()
-    user = update.effective_user
-    return owner is not None and user is not None and int(user.id) == owner
-
-
 async def _remember_chat(chat, *, active: bool = True) -> None:
     if chat is None or chat.type not in {"group", "supergroup", "channel"}:
         return
-    previous = await storage.load(_key(chat.id), {})
+    key = _key(chat.id)
+    previous = await storage.load(key, {})
     if not isinstance(previous, dict):
         previous = {}
-    previous.update({
-        "id": int(chat.id),
-        "type": str(chat.type),
-        "title": str(getattr(chat, "title", None) or previous.get("title") or "Untitled"),
-        "username": getattr(chat, "username", None) or previous.get("username"),
-        "active": bool(active),
-    })
-    await storage.set(_key(chat.id), previous)
+    previous.update(
+        {
+            "id": int(chat.id),
+            "type": str(chat.type),
+            "title": str(getattr(chat, "title", None) or previous.get("title") or "Untitled"),
+            "username": getattr(chat, "username", None) or previous.get("username"),
+            "active": bool(active),
+        }
+    )
+    await storage.set(key, previous)
 
 
-async def remember_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _remember_chat(update.effective_chat, active=True)
+async def remember_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Observe every Telegram update before normal handlers consume it.
+
+    This is deliberately a TypeHandler rather than relying on a particular
+    message filter, so command updates, group messages, channel posts and
+    membership updates all have a chance to register their chat.
+    """
+    try:
+        chat = update.effective_chat
+        if chat is not None:
+            await _remember_chat(chat, active=True)
+    except Exception:
+        # Discovery must never be allowed to break normal bot operation.
+        return
 
 
 async def remember_membership(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -72,11 +82,9 @@ async def remember_membership(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def _authorized_or_silent(update: Update) -> bool:
-    if _owner_id() is None:
-        if update.effective_message:
-            await update.effective_message.reply_text("🌘 Owner controls are not configured.")
-        return False
-    if not _is_owner(update):
+    owner = _owner_id()
+    user = update.effective_user
+    if owner is None or user is None or int(user.id) != owner:
         return False
     return True
 
@@ -86,42 +94,69 @@ def _broadcast_text(message) -> str:
     match = _COMMAND_RE.match(raw)
     if not match:
         return ""
-    # Deliberately slice instead of using context.args: this preserves every
-    # space, newline, tab and Unicode character supplied after the command.
-    return raw[match.end():].lstrip(" ")
+    # Slice the original message instead of using context.args. This preserves
+    # internal spaces, newlines, tabs and Unicode exactly as Telegram supplied.
+    return raw[match.end() :].lstrip(" ")
+
+
+async def _active_targets() -> list[dict[str, Any]]:
+    keys = await storage.scan(f"{_CHAT_PREFIX}*", count=250)
+    targets: list[dict[str, Any]] = []
+    for key in keys:
+        item = await storage.load(key, {})
+        if isinstance(item, dict) and item.get("active") and item.get("id"):
+            targets.append(item)
+    return targets
 
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized_or_silent(update):
         return
+
     message = update.effective_message
-    reply = message.reply_to_message if message else None
-    text = _broadcast_text(message) if message else ""
+    if message is None:
+        return
+
+    reply = message.reply_to_message
+    text = _broadcast_text(message)
     if not text and reply is None:
         await message.reply_text("Usage: /broadcast <message> — or reply to a message with /broadcast")
         return
 
-    keys = await storage.scan(f"{_CHAT_PREFIX}*", count=250)
+    targets = await _active_targets()
     sent = failed = 0
     stale: list[str] = []
-    for key in keys:
-        target = await storage.load(key, {})
-        if not isinstance(target, dict) or not target.get("active"):
-            continue
-        chat_id = target.get("id")
-        if not chat_id:
-            continue
+
+    for target in targets:
+        chat_id = int(target["id"])
         try:
             if reply is not None and not text:
-                await context.bot.copy_message(chat_id=int(chat_id), from_chat_id=message.chat_id, message_id=reply.message_id)
+                await context.bot.copy_message(
+                    chat_id=chat_id,
+                    from_chat_id=message.chat_id,
+                    message_id=reply.message_id,
+                )
             else:
-                await context.bot.send_message(chat_id=int(chat_id), text=text, disable_web_page_preview=True)
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    disable_web_page_preview=True,
+                )
             sent += 1
         except Exception as exc:
             failed += 1
             error = str(exc).lower()
-            if any(token in error for token in ("chat not found", "bot was kicked", "forbidden", "deactivated")):
-                stale.append(key)
+            if any(
+                token in error
+                for token in (
+                    "chat not found",
+                    "bot was kicked",
+                    "forbidden",
+                    "deactivated",
+                    "have no rights",
+                )
+            ):
+                stale.append(_key(chat_id))
 
     for key in stale:
         target = await storage.load(key, {})
@@ -135,34 +170,38 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def network_map(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized_or_silent(update):
         return
-    keys = await storage.scan(f"{_CHAT_PREFIX}*", count=250)
-    entries: list[dict[str, Any]] = []
-    for key in keys:
-        item = await storage.load(key, {})
-        if isinstance(item, dict) and item.get("active"):
-            entries.append(item)
+
+    entries = await _active_targets()
     entries.sort(key=lambda item: (str(item.get("type")), str(item.get("title", "")).casefold()))
 
     groups = [x for x in entries if x.get("type") in {"group", "supergroup"}]
     channels = [x for x in entries if x.get("type") == "channel"]
+
     lines = ["🌙 <b>MIDNIGHT NETWORK</b>", ""]
     for label, items in (("GROUPS", groups), ("CHANNELS", channels)):
         lines.append(f"<b>{label} · {len(items)}</b>")
         for item in items:
-            title = str(item.get("title") or "Untitled").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            username = item.get("username")
+            title = (
+                str(item.get("title") or "Untitled")
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+            )
+            username = str(item.get("username") or "").lstrip("@")
             link = f"https://t.me/{username}" if username else None
             lines.append(f"• {title}" + (f" — {link}" if link else " — private link"))
         lines.append("")
+
     lines.append(f"<b>TOTAL · {len(entries)}</b>")
-    await message_or_reply(update, "\n".join(lines))
-
-
-async def message_or_reply(update: Update, text: str) -> None:
-    await update.effective_message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
+    await update.effective_message.reply_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
 
 
 def _remove_public_broadcast_handlers(application) -> None:
+    """Remove duplicate legacy broadcast registrations before adding ours."""
     for group, handlers in list(application.handlers.items()):
         kept = []
         for handler in handlers:
@@ -175,8 +214,15 @@ def _remove_public_broadcast_handlers(application) -> None:
 
 def install(application) -> None:
     _remove_public_broadcast_handlers(application)
-    application.add_handler(ChatMemberHandler(remember_membership, ChatMemberHandler.MY_CHAT_MEMBER), group=90)
-    application.add_handler(MessageHandler(filters.ALL, remember_message), group=99)
-    # Hidden from public command menus by design.
+
+    # Highest-priority passive observer: this fixes the old zero-target problem
+    # for chats that were already present before the bot restarted/deployed.
+    application.add_handler(TypeHandler(Update, remember_update), group=-1000)
+    application.add_handler(
+        ChatMemberHandler(remember_membership, ChatMemberHandler.MY_CHAT_MEMBER),
+        group=-999,
+    )
+
+    # Deliberately hidden from the normal command menus.
     application.add_handler(CommandHandler(["broadcast", "announce"], broadcast), group=-80)
     application.add_handler(CommandHandler("midnightmap", network_map), group=-79)
