@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import html
 import random
-import re
 import time
 
 from telegram import Update
@@ -82,10 +81,25 @@ async def bond(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def _autonomous_signal() -> str:
+    """Choose a signal mode without requiring text, arguments, or a reply."""
+    choices = [
+        ("🟣 <b>VIBE SIGNAL</b>", "Midnight picked up a social moment in the room. Read the atmosphere, not hidden facts."),
+        ("🔵 <b>MOMENT SIGNAL</b>", "Something in the room feels worth noticing. Midnight is flagging the moment, not inventing a story."),
+        ("🟡 <b>NOISE CHECK</b>", "No concrete signal was supplied, so Midnight is choosing observation over making up certainty."),
+        ("🌙 <b>NIGHT SIGNAL</b>", "The Oracle selected a quiet signal: stay curious, but don't mistake a vibe for proof."),
+    ]
+    title, reason = random.choice(choices)
+    return (
+        f"☾ <b>SIGNAL CHECK</b>\n\n{title}\n\n<i>{reason}</i>\n\n"
+        "<b>Midnight chose this signal automatically.</b> No menu, argument, or reply is required. 🌙"
+    )
+
+
 def _signal_text(raw: str) -> str:
     text = raw.strip()
     if not text:
-        return "☾ <b>SIGNAL</b>\n\nReply to a message or use <code>/signal your text</code>. Midnight will separate explicit signal from interpretation."
+        return _autonomous_signal()
     lower = text.lower()
     markers = []
     if any(x in lower for x in ("official", "confirmed", "announcement", "statement", "source", "reported")):
