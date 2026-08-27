@@ -37,7 +37,8 @@ from core.sticker_reactions import install as install_sticker_reactions
 from handlers import deathgames_v2
 
 log = logging.getLogger("midnight.entrypoint")
-_POLLING_LEASE_KEY = "midnight:telegram:polling-lease:v2"
+_POLLING_LEASE_KEY = "midnight:telegram:polling-lease:v3"
+_POLLING_LEASE_TAKEOVER_AFTER = 120
 _POLLING_LEASE_TTL = 90
 _POLLING_LEASE_WAIT = 150
 _health_server = None
@@ -148,11 +149,22 @@ async def _acquire_polling_lease():
         log.warning("POLLING_LEASE disabled: persistent storage is not configured")
         return None
     token = f"{os.getenv('RENDER_SERVICE_ID', 'local')}:{os.getenv('RENDER_INSTANCE_ID', 'unknown')}:{os.getpid()}:{uuid.uuid4().hex}"
-    deadline = time.monotonic() + _POLLING_LEASE_WAIT
+    started = time.monotonic()
+    deadline = started + max(_POLLING_LEASE_WAIT, _POLLING_LEASE_TAKEOVER_AFTER + _POLLING_LEASE_TTL)
     while time.monotonic() < deadline:
         if await storage.setnx(_POLLING_LEASE_KEY, token, ttl=_POLLING_LEASE_TTL):
             log.info("POLLING_LEASE acquired instance=%s ttl=%ss", os.getenv("RENDER_INSTANCE_ID", "unknown"), _POLLING_LEASE_TTL)
             return token
+        elapsed = time.monotonic() - started
+        if elapsed >= _POLLING_LEASE_TAKEOVER_AFTER:
+            replaced = await storage.eval(
+                "if redis.call('exists',KEYS[1]) == 1 then redis.call('set',KEYS[1],ARGV[1],'EX',ARGV[2]) return 1 else return 0 end",
+                [_POLLING_LEASE_KEY],
+                [token, str(_POLLING_LEASE_TTL)],
+            )
+            if int(replaced or 0) == 1:
+                log.warning("POLLING_LEASE takeover after %ss; previous poller will self-terminate on renewal", int(elapsed))
+                return token
         remaining = max(0, int(deadline - time.monotonic()))
         log.warning("POLLING_LEASE busy; waiting for current Telegram poller (%ss remaining)", remaining)
         await asyncio.sleep(3)
