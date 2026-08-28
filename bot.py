@@ -72,7 +72,13 @@ startup.init(_storage_client)
 
 # ── PTB Application ────────────────────────────────────────────────────────────
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ChatMemberHandler, filters
-from telegram import BotCommand, BotCommandScopeDefault, BotCommandScopeAllPrivateChats
+from telegram import (
+    BotCommand,
+    BotCommandScopeDefault,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeAllGroupChats,
+    BotCommandScopeAllChatAdministrators,
+)
 
 # ── Import legacy_bot for all handlers ────────────────────────────────────────
 #
@@ -236,7 +242,7 @@ def _shim_register(app: Application):
 # ── Set Telegram command menu ─────────────────────────────────────────────────
 
 async def _set_commands(app: Application):
-    """Register the current Midnight Oracle command menu in private chats."""
+    """Register the current Midnight Oracle command menu in private chats and groups."""
     commands = [
         BotCommand("start",       "🌙 Enter the Midnight Realm"),
         BotCommand("help",        "📖 See what Midnight Oracle can do"),
@@ -261,12 +267,18 @@ async def _set_commands(app: Application):
         BotCommand("vent",        "🫀 Anonymous vent"),
     ]
     try:
-        # Remove any older private-chat override (e.g. /broadcast, /announce,
-        # /midnightmap) so Telegram falls back to this current menu.
+        # Remove older scoped menus before installing the current one.
+        # This clears the stale private/group/admin menus seen after the upgrade.
         await app.bot.delete_my_commands(scope=BotCommandScopeAllPrivateChats())
+        await app.bot.delete_my_commands(scope=BotCommandScopeAllGroupChats())
+        await app.bot.delete_my_commands(scope=BotCommandScopeAllChatAdministrators())
+        await app.bot.delete_my_commands(scope=BotCommandScopeDefault())
+
         await app.bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
+        await app.bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats())
+        await app.bot.set_my_commands(commands, scope=BotCommandScopeAllChatAdministrators())
         await app.bot.set_my_commands(commands, scope=BotCommandScopeDefault())
-        log.info("Telegram command menu set (%d commands)", len(commands))
+        log.info("Telegram command menus set (%d commands) for private, group, admin and default scopes", len(commands))
     except Exception as exc:
         log.warning("Could not set command menu: %s", exc)
 
@@ -277,7 +289,6 @@ async def _post_init(app: Application):
     """Called by PTB after initialization — safe place for async setup."""
     await _set_commands(app)
 
-    # --- ADD THIS ---
     from handlers.social_engine import register_jobs, init_storage, track_member
     from handlers.presence_engine import register, silence_check
     from handlers.help_command import register as help_register
@@ -295,7 +306,12 @@ async def _post_init(app: Application):
     help_register(app)
 
     # Schedule daily silence check (2 AM)
-    app.job_queue.run_daily(silence_check, time=datetime.now(ORACLE_TZ).replace(hour=2,minute=0,second=0).timetz())# Run legacy_bot's own post_init if it has one
+    app.job_queue.run_daily(
+        silence_check,
+        time=datetime.now(ORACLE_TZ).replace(hour=2, minute=0, second=0).timetz(),
+    )
+
+    # Run legacy_bot's own post_init if it has one
     if hasattr(legacy_bot, "_post_init"):
         try:
             await legacy_bot._post_init(app)
