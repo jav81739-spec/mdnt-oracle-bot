@@ -61,13 +61,14 @@ except Exception as _e:
 import startup
 startup.init(_storage_client)
 
-from telegram.ext import Application, MessageHandler, filters
+from telegram.ext import Application, MessageHandler, CommandHandler, filters
 from telegram import (
     BotCommand,
     BotCommandScopeDefault,
     BotCommandScopeAllPrivateChats,
     BotCommandScopeAllGroupChats,
     BotCommandScopeAllChatAdministrators,
+    BotCommandScopeChat,
 )
 
 import legacy_bot
@@ -89,6 +90,34 @@ async def _chat_registry_middleware(update, context):
         await startup.register_chat(chat_id=chat.id, chat_type=chat.type, title=chat.title or "")
 
 
+def _registered_command_names(app: Application) -> set[str]:
+    names: set[str] = set()
+    for handlers in getattr(app, "handlers", {}).values():
+        for handler in handlers:
+            commands = getattr(handler, "commands", None)
+            if commands:
+                names.update(str(command).lower().lstrip("/") for command in commands)
+    return names
+
+
+def _register_aesthetic_handlers(app: Application):
+    """Register only the Oracle aesthetic handlers that actually exist."""
+    from handlers import aesthetic
+
+    commands = (
+        "aura", "identity", "oracle", "nightreport", "shadow", "element",
+        "vibecheck", "corecode", "universe", "ritual", "sigil", "duality", "glitch",
+    )
+    existing = _registered_command_names(app)
+    added = []
+    for command in commands:
+        callback = getattr(aesthetic, f"{command}_command", None)
+        if callback is not None and command not in existing:
+            app.add_handler(CommandHandler(command, callback))
+            added.append(command)
+    log.info("Oracle aesthetic handlers registered: %s", ", ".join(added) if added else "none (already registered or unavailable)")
+
+
 def build_application() -> Application:
     app = Application.builder().token(TOKEN).build()
     app.add_handler(MessageHandler(filters.ALL, _chat_registry_middleware), group=-999)
@@ -103,6 +132,8 @@ def build_application() -> Application:
         log.info("Handlers registered via legacy_bot._register_handlers()")
     else:
         _shim_register(app)
+
+    _register_aesthetic_handlers(app)
     return app
 
 
@@ -161,40 +192,70 @@ def _shim_register(app: Application):
             legacy_bot._start_dummy_server = original_dummy_server
 
 
+_COMMAND_DESCRIPTIONS = {
+    "start": "🌙 Enter the Midnight Realm",
+    "help": "📖 See what Midnight Oracle can do",
+    "oracle": "🔮 Your daily Oracle prophecy",
+    "aura": "🟣 Scan your aura",
+    "vibecheck": "✨ Vibe check",
+    "identity": "🃏 Your Oracle archetype",
+    "shadow": "🌑 Meet your shadow self",
+    "element": "🌌 Your cosmic element",
+    "corecode": "🔱 Your core words",
+    "universe": "🌌 Message from the universe",
+    "ritual": "🕯️ Today's ritual",
+    "duality": "☯️ Your duality",
+    "nightreport": "🌙 Tonight's night report",
+    "sigil": "🔱 Your personal sigil",
+    "glitch": "⚡ Oracle glitch",
+    "checkin": "🌙 Daily check-in & streak",
+    "streakcheck": "📊 Check your streak",
+    "coinboard": "🏆 Coin leaderboard",
+    "cgift": "💝 Gift coins to someone",
+    "rob": "🦹 Rob someone's coins",
+    "vent": "🫀 Anonymous vent",
+    "announce": "📢 Owner announcement",
+    "broadcast": "📣 Owner broadcast",
+    "midnightmap": "🗺️ Midnight Map",
+}
+
+_OWNER_COMMANDS = {"announce", "broadcast", "midnightmap"}
+
+
+def _commands_from_handlers(app: Application) -> list[str]:
+    names = _registered_command_names(app)
+    # Telegram accepts at most 100 commands per scope. Keep only real handlers.
+    return sorted(name for name in names if name and len(name) <= 32)[:100]
+
+
 async def _set_commands(app: Application):
-    commands = [
-        BotCommand("start", "🌙 Enter the Midnight Realm"),
-        BotCommand("help", "📖 See what Midnight Oracle can do"),
-        BotCommand("oracle", "🔮 Your daily Oracle prophecy"),
-        BotCommand("aura", "🟣 Scan your aura"),
-        BotCommand("vibecheck", "✨ Vibe check"),
-        BotCommand("identity", "🃏 Your Oracle archetype"),
-        BotCommand("shadow", "🌑 Meet your shadow self"),
-        BotCommand("element", "🌌 Your cosmic element"),
-        BotCommand("corecode", "🔱 Your core words"),
-        BotCommand("universe", "🌌 Message from the universe"),
-        BotCommand("ritual", "🕯️ Today's ritual"),
-        BotCommand("duality", "☯️ Your duality"),
-        BotCommand("nightreport", "🌙 Tonight's night report"),
-        BotCommand("sigil", "🔱 Your personal sigil"),
-        BotCommand("glitch", "⚡ Oracle glitch"),
-        BotCommand("checkin", "🌙 Daily check-in & streak"),
-        BotCommand("streakcheck", "📊 Check your streak"),
-        BotCommand("coinboard", "🏆 Coin leaderboard"),
-        BotCommand("cgift", "💝 Gift coins to someone"),
-        BotCommand("rob", "🦹 Rob someone's coins"),
-        BotCommand("vent", "🫀 Anonymous vent"),
-    ]
+    all_working = _commands_from_handlers(app)
+    public = [name for name in all_working if name not in _OWNER_COMMANDS]
+
+    def make_commands(names):
+        return [BotCommand(name, _COMMAND_DESCRIPTIONS.get(name, "Midnight Oracle command")) for name in names]
+
     try:
         await app.bot.delete_my_commands(scope=BotCommandScopeAllPrivateChats())
         await app.bot.delete_my_commands(scope=BotCommandScopeAllGroupChats())
         await app.bot.delete_my_commands(scope=BotCommandScopeAllChatAdministrators())
         await app.bot.delete_my_commands(scope=BotCommandScopeDefault())
-        await app.bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
-        await app.bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats())
-        await app.bot.set_my_commands(commands, scope=BotCommandScopeAllChatAdministrators())
-        await app.bot.set_my_commands(commands, scope=BotCommandScopeDefault())
-        log.info("Telegram command menus set (%d commands) for private, group, admin and default scopes", len(commands))
+
+        public_commands = make_commands(public)
+        await app.bot.set_my_commands(public_commands, scope=BotCommandScopeAllPrivateChats())
+        await app.bot.set_my_commands(public_commands, scope=BotCommandScopeAllGroupChats())
+        await app.bot.set_my_commands(public_commands, scope=BotCommandScopeAllChatAdministrators())
+        await app.bot.set_my_commands(public_commands, scope=BotCommandScopeDefault())
+
+        if OWNER_ID:
+            owner_commands = make_commands([name for name in all_working if name in _OWNER_COMMANDS])
+            if owner_commands:
+                await app.bot.set_my_commands(
+                    public_commands + owner_commands,
+                    scope=BotCommandScopeChat(chat_id=OWNER_ID),
+                )
+
+        log.info("Telegram command menus set from live handlers: %d public, %d owner-only", len(public_commands), len([x for x in all_working if x in _OWNER_COMMANDS]))
     except Exception as exc:
         log.warning("Could not set command menu: %s", exc)
 
