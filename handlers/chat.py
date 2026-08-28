@@ -71,12 +71,9 @@ async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if now-_last_reply_time.get(chat_id,0.0)<COOLDOWN_SECONDS: return
     _last_reply_time[chat_id]=now; persona=chat_persona.get(chat_id,DEFAULT_PERSONA); history=chat_history.setdefault(chat_id,[]); history.append({"role":"user","text":message.text[:1000]}); del history[:-MAX_HISTORY]
     try:
-        # Bound simultaneous provider requests across busy groups.
         async with _ai_slots:
             reply_text=await generate_reply(message.text,persona,history)
     except AIUnavailable as exc:
-        # Never expose provider/quota failures to Telegram users. Keep the Oracle
-        # conversational with a local response when AI is temporarily unavailable.
         log.info("AI unavailable for chat=%s: %s",chat_id,exc)
         reply_text = _local_fallback(message.text)
     except Exception:
