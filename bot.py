@@ -1,13 +1,18 @@
 """
-bot.py — Midnight Oracle | One canonical entrypoint.
+bot.py — Arden | One canonical entrypoint.
 
 This is the ONLY file Render should run: python bot.py
 
 Architecture:
   bot.py
     └── startup.py      (lease, health, shutdown, chat registry)
-    └── legacy_bot.py   (all handlers, Gemini, GIPHY, stickers, Baka/Nova)
+    └── legacy_bot.py   (all handlers, Gemini, GIPHY, stickers)
     └── storage.py      (Redis compat facade → core/storage)
+
+Public brand: Arden
+Internal compatibility identifiers intentionally remain unchanged so existing
+stored data, environment variables, feature keys, and legacy handlers are not
+broken by the rebrand.
 """
 
 from __future__ import annotations
@@ -27,10 +32,13 @@ logging.basicConfig(
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
     level=logging.INFO,
 )
-log = logging.getLogger("midnight.bot")
+log = logging.getLogger("arden.bot")
 
 from dotenv import load_dotenv
 load_dotenv()
+
+BOT_NAME = "Arden"
+BOT_TAGLINE = "She doesn't announce herself. You notice."
 
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 if not TOKEN:
@@ -68,6 +76,19 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from telegram import BotCommand
 
 import legacy_bot
+
+# Keep legacy feature names and storage compatibility, but make the AI identify
+# publicly as Arden. The replacement is deliberately narrow: it does not touch
+# commands, Redis keys, environment variables, or feature identifiers.
+if hasattr(legacy_bot, "ORACLE_SYSTEM_PROMPT"):
+    legacy_bot.ORACLE_SYSTEM_PROMPT = (
+        legacy_bot.ORACLE_SYSTEM_PROMPT
+        .replace("Midnight Oracle", "Arden")
+        .replace("the Oracle", "Arden")
+        .replace("the oracle", "Arden")
+        .replace("You ARE the Oracle", "You ARE Arden")
+        .replace("You are the Oracle", "You are Arden")
+    )
 
 if hasattr(legacy_bot, "GEMINI_MODEL"):
     current = legacy_bot.GEMINI_MODEL
@@ -190,29 +211,29 @@ def _shim_register(app: Application):
 
 async def _set_commands(app: Application):
     commands = [
-        BotCommand("oracle", "🔮 Your daily Oracle prophecy"),
+        BotCommand("oracle", "🔮 Get a reading"),
         BotCommand("aura", "🟣 Scan your aura"),
-        BotCommand("vibecheck", "✨ Vibe check"),
-        BotCommand("identity", "🃏 Your Oracle archetype"),
-        BotCommand("shadow", "🌑 Meet your shadow self"),
-        BotCommand("element", "🌌 Your cosmic element"),
+        BotCommand("vibecheck", "✨ Check your vibe"),
+        BotCommand("identity", "🃏 Your archetype"),
+        BotCommand("shadow", "🌑 Meet your shadow"),
+        BotCommand("element", "🌌 Your element"),
         BotCommand("corecode", "🔱 Your core words"),
-        BotCommand("universe", "🌌 Message from the universe"),
+        BotCommand("universe", "🌌 A message for you"),
         BotCommand("ritual", "🕯️ Today's ritual"),
-        BotCommand("duality", "☯️ Your duality"),
-        BotCommand("nightreport", "🌙 Tonight's night report"),
+        BotCommand("duality", "☯️ Your two sides"),
+        BotCommand("nightreport", "🌙 Tonight's report"),
         BotCommand("sigil", "🔱 Your personal sigil"),
-        BotCommand("glitch", "⚡ Oracle glitch"),
+        BotCommand("glitch", "⚡ A system reading"),
         BotCommand("checkin", "🌙 Daily check-in & streak"),
         BotCommand("streakcheck", "📊 Check your streak"),
         BotCommand("coinboard", "🏆 Coin leaderboard"),
-        BotCommand("cgift", "💝 Gift coins to someone"),
+        BotCommand("cgift", "💝 Gift coins"),
         BotCommand("rob", "🦹 Rob someone's coins"),
         BotCommand("vent", "🫀 Anonymous vent"),
     ]
     try:
         await app.bot.set_my_commands(commands)
-        log.info("Telegram command menu set (%d commands)", len(commands))
+        log.info("Telegram command menu set (%d public commands)", len(commands))
     except Exception as exc:
         log.warning("Could not set command menu: %s", exc)
 
@@ -242,13 +263,13 @@ async def _post_init(app: Application):
         except Exception as exc:
             log.warning("legacy_bot._post_init failed: %s", exc)
 
-    log.info("Post-init complete — Midnight Oracle is ready")
+    log.info("Post-init complete — Arden is ready")
 
 
 def main():
     app = build_application()
     app.post_init = _post_init
-    log.info("Midnight Oracle starting — instance %s", startup._INSTANCE_ID)
+    log.info("Arden starting — instance %s", startup._INSTANCE_ID)
     asyncio.run(startup.run(app, storage_client=_storage_client))
 
 
