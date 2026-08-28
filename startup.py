@@ -249,16 +249,15 @@ class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path in ("/", "/health", "/healthz"):
             status = "shutting_down" if _shutting_down else "ok"
-            code   = 503 if _shutting_down else 200
-            body   = json.dumps(
+            code = 503 if _shutting_down else 200
+            body = json.dumps(
                 {"status": status, "instance": _INSTANCE_ID}
             ).encode()
             self._respond(code, body, "application/json")
         elif self.path == "/ready":
-            # Simple readiness: is the bot app initialized and not shutting down?
             ready = (_app is not None) and (not _shutting_down)
-            code  = 200 if ready else 503
-            body  = json.dumps({"ready": ready}).encode()
+            code = 200 if ready else 503
+            body = json.dumps({"ready": ready}).encode()
             self._respond(code, body, "application/json")
         else:
             self._respond(404, b'{"status":"not_found"}', "application/json")
@@ -267,7 +266,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
         self.do_GET()
 
     def log_message(self, *_):
-        return  # silence access logs
+        return
 
 
 class _ReuseHTTPServer(HTTPServer):
@@ -303,7 +302,7 @@ def _install_signal_handlers(loop: asyncio.AbstractEventLoop):
         )
 
     signal.signal(signal.SIGTERM, _handle_signal)
-    signal.signal(signal.SIGINT,  _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
 
 
 async def _graceful_shutdown():
@@ -377,7 +376,7 @@ async def run(application, storage_client=None):
         )
 
     _storage = storage_client
-    _app     = application
+    _app = application
 
     loop = asyncio.get_running_loop()
     _install_signal_handlers(loop)
@@ -397,6 +396,8 @@ async def run(application, storage_client=None):
 
     try:
         await application.initialize()
+        if application.post_init is not None:
+            await application.post_init(application)
         await application.start()
         await application.updater.start_polling(
             drop_pending_updates=True,
