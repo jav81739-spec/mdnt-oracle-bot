@@ -1,1 +1,0 @@
-Temporary checkpoint removed; command registry changes are contained in bot.py.
