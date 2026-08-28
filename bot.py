@@ -1,174 +1,291 @@
-"""Midnight Oracle production entrypoint."""
+"""
+bot.py — Midnight Oracle | One canonical entrypoint.
+
+This is the ONLY file Render should run: python bot.py
+Delete bot2.py, bot3.py, bot_1.py — they are dead duplicates.
+
+Architecture:
+  bot.py
+    └── startup.py      (lease, health, shutdown, chat registry)
+    └── legacy_bot.py   (all handlers, Gemini, GIPHY, stickers, Baka/Nova)
+    └── storage.py      (Redis compat facade → core/storage)
+"""
+
 from __future__ import annotations
 
-import html
-import json
+import asyncio
 import logging
 import os
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import sys
 
+# ── PATH ──────────────────────────────────────────────────────────────────────
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+# ── Logging (must come first) ──────────────────────────────────────────────────
+logging.basicConfig(
+    format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+    level=logging.INFO,
+)
+log = logging.getLogger("midnight.bot")
+
+# ── Env ────────────────────────────────────────────────────────────────────────
+from dotenv import load_dotenv
+load_dotenv()
+
+TOKEN = os.getenv("BOT_TOKEN", "").strip()
+if not TOKEN:
+    log.critical("BOT_TOKEN is not set. Add it to .env or Render environment.")
+    sys.exit(1)
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+if not GEMINI_API_KEY:
+    log.warning("GEMINI_API_KEY not set — AI replies will use fallback responses.")
+
+GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID", "0") or "0")
+if GROUP_CHAT_ID == 0:
+    log.warning(
+        "GROUP_CHAT_ID not set — scheduled/broadcast group messages will be skipped. "
+        "Use /id in your group to get the ID."
+    )
+
+OWNER_ID = int(os.getenv("OWNER_ID", "0") or "0")
+if OWNER_ID == 0:
+    log.warning("OWNER_ID not set — owner-only commands will be unavailable.")
+
+# ── Storage ────────────────────────────────────────────────────────────────────
+try:
+    from storage import redis_client as _storage_client
+    log.info("Storage: using storage.RedisCompat → core.storage")
+except Exception as _e:
+    log.warning("storage.py import failed (%s) — storage features disabled", _e)
+    _storage_client = None
+
+# ── Startup manager ────────────────────────────────────────────────────────────
+import startup
+startup.init(_storage_client)
+
+# ── PTB Application ────────────────────────────────────────────────────────────
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ChatMemberHandler, filters
+from telegram import BotCommand
+
+# ── Import legacy_bot for all handlers ────────────────────────────────────────
+#
+# legacy_bot.py contains ALL the actual bot logic: handlers, Gemini, GIPHY,
+# stickers, Baka/Nova, economy, games, moderation, etc.
+# We import it and wire its handlers into the Application below.
+# We do NOT call legacy_bot.main() — startup.py owns the lifecycle.
+#
 import legacy_bot
-from core.ai import AIUnavailable, service as ai_service
-from core.chat import generate_reply as core_generate_reply
-from core.recovery import recover_deathgames
-from core.health import check as health_check
-from core.storage import Storage, storage
-from handlers import deathgames_v2
 
-log = logging.getLogger("midnight.entrypoint")
+# Fix: override Gemini model default in legacy_bot if it has the wrong one
+if hasattr(legacy_bot, "GEMINI_MODEL"):
+    current = legacy_bot.GEMINI_MODEL
+    bad_models = {"gemini-3.7-flash", "gemini-3.5-flash-lite"}
+    if current in bad_models:
+        good = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        log.warning("Fixing wrong GEMINI_MODEL '%s' → '%s'", current, good)
+        legacy_bot.GEMINI_MODEL = good
+
+# Fix: inject GROUP_CHAT_ID guard into legacy_bot
+if hasattr(legacy_bot, "GROUP_CHAT_ID") and legacy_bot.GROUP_CHAT_ID == 0:
+    legacy_bot.GROUP_CHAT_ID = GROUP_CHAT_ID
 
 
-class _AIResponse:
-    def __init__(self, text: str) -> None:
-        self.text = text
+# ── Chat registry middleware ───────────────────────────────────────────────────
+# Auto-discover every group/channel the bot is active in.
+
+async def _chat_registry_middleware(update, context):
+    """Called on every update — registers the chat so broadcast works."""
+    chat = getattr(update, "effective_chat", None)
+    if chat and chat.type in ("group", "supergroup", "channel"):
+        await startup.register_chat(
+            chat_id=chat.id,
+            chat_type=chat.type,
+            title=chat.title or "",
+        )
 
 
-async def _generate_gemini(prompt: str):
+# ── Build Application ─────────────────────────────────────────────────────────
+
+def build_application() -> Application:
+    app = (
+        Application.builder()
+        .token(TOKEN)
+        .build()
+    )
+
+    # Chat registry middleware runs on all updates
+    app.add_handler(
+        MessageHandler(filters.ALL, _chat_registry_middleware),
+        group=-999,  # very high priority, runs before all handlers
+    )
+
+    # Register all handlers from legacy_bot
+    # legacy_bot.register_handlers(app) if it has that function,
+    # otherwise call legacy_bot's own handler registration.
+    if hasattr(legacy_bot, "register_handlers"):
+        legacy_bot.register_handlers(app)
+        log.info("Handlers registered via legacy_bot.register_handlers()")
+    elif hasattr(legacy_bot, "_register_handlers"):
+        legacy_bot._register_handlers(app)
+        log.info("Handlers registered via legacy_bot._register_handlers()")
+    else:
+        # legacy_bot uses its own main() to register — extract what we need
+        log.warning(
+            "legacy_bot has no register_handlers() — "
+            "attempting to pull handlers via legacy_bot.main() shim"
+        )
+        _shim_register(app)
+
+    return app
+
+
+def _shim_register(app: Application):
+    """
+    Fallback: legacy_bot.main() creates its own Application internally.
+    We extract the handlers it would register and add them to our app instead.
+    This avoids legacy_bot starting its own conflicting polling loop.
+    """
+    # The handlers legacy_bot registers are known from reading legacy_bot.py.
+    # We wire them manually here so startup.py owns the lifecycle.
+
+    from handlers import (
+        chat, games, moderation, utility, aesthetic,
+        friendship, fun, matchmaking, stats,
+        events, economy, timecapsule, marriage,
+    )
     try:
-        return _AIResponse(await ai_service.generate(prompt, timeout=25.0))
-    except AIUnavailable as exc:
-        log.warning("AI unavailable: %s", exc)
-        return None
+        from handlers import deathgames_v2 as deathgames
+    except ImportError:
+        from handlers import deathgames
+
+    from telegram.ext import CommandHandler, MessageHandler, CallbackQueryHandler, ChatMemberHandler, filters
+
+    # ── Oracle / AI ────────────────────────────────────────────────────────
+    app.add_handler(CommandHandler("oracle",      legacy_bot.oracle_new_command))
+    app.add_handler(CommandHandler("aura",        legacy_bot.aura_command))
+    app.add_handler(CommandHandler("identity",    legacy_bot.identity_command))
+    app.add_handler(CommandHandler("vibecheck",   legacy_bot.vibecheck_command))
+    app.add_handler(CommandHandler("shadow",      legacy_bot.shadow_command))
+    app.add_handler(CommandHandler("element",     legacy_bot.element_command))
+    app.add_handler(CommandHandler("corecode",    legacy_bot.corecode_command))
+    app.add_handler(CommandHandler("universe",    legacy_bot.universe_command))
+    app.add_handler(CommandHandler("ritual",      legacy_bot.ritual_command))
+    app.add_handler(CommandHandler("duality",     legacy_bot.duality_command))
+    app.add_handler(CommandHandler("glitch",      legacy_bot.glitch_command))
+    app.add_handler(CommandHandler("nightreport", legacy_bot.nightreport_command))
+    app.add_handler(CommandHandler("sigil",       legacy_bot.sigil_command))
+
+    # ── Engagement ─────────────────────────────────────────────────────────
+    app.add_handler(CommandHandler("checkin",     legacy_bot.checkin_command))
+    app.add_handler(CommandHandler("streakcheck", legacy_bot.streakcheck_command))
+    app.add_handler(CommandHandler("vent",        legacy_bot.vent_command))
+    app.add_handler(CommandHandler("cgift",       legacy_bot.cgift_command))
+    app.add_handler(CommandHandler("rob",         legacy_bot.eng_rob_command))
+    app.add_handler(CommandHandler("coinboard",   legacy_bot.coinboard_command))
+
+    # ── Handlers from handler modules ──────────────────────────────────────
+    if hasattr(chat, "register"):         chat.register(app)
+    if hasattr(games, "register"):        games.register(app)
+    if hasattr(moderation, "register"):   moderation.register(app)
+    if hasattr(utility, "register"):      utility.register(app)
+    if hasattr(aesthetic, "register"):    aesthetic.register(app)
+    if hasattr(friendship, "register"):   friendship.register(app)
+    if hasattr(fun, "register"):          fun.register(app)
+    if hasattr(matchmaking, "register"):  matchmaking.register(app)
+    if hasattr(stats, "register"):        stats.register(app)
+    if hasattr(events, "register"):       events.register(app)
+    if hasattr(economy, "register"):      economy.register(app)
+    if hasattr(timecapsule, "register"):  timecapsule.register(app)
+    if hasattr(marriage, "register"):     marriage.register(app)
+    if hasattr(deathgames, "register"):   deathgames.register(app)
+
+    # ── AI message handler (catch-all, lowest priority) ────────────────────
+    if hasattr(legacy_bot, "handle_ai_message"):
+        app.add_handler(
+            MessageHandler(
+                filters.TEXT & ~filters.COMMAND,
+                legacy_bot.handle_ai_message,
+            ),
+            group=10,
+        )
+
+    # ── Channel post handler ────────────────────────────────────────────────
+    if hasattr(legacy_bot, "handle_channel_post"):
+        app.add_handler(
+            MessageHandler(filters.IS_AUTOMATIC_FORWARD, legacy_bot.handle_channel_post)
+        )
+
+    # ── Sticker handler ────────────────────────────────────────────────────
+    if hasattr(legacy_bot, "handle_sticker"):
+        app.add_handler(
+            MessageHandler(filters.Sticker.ALL, legacy_bot.handle_sticker)
+        )
+
+    log.info("Handlers registered via shim (legacy_bot internals)")
 
 
-async def _legacy_coins(uid: int) -> int:
-    value = await storage.get(f"coins:{int(uid)}", "0")
+# ── Set Telegram command menu ─────────────────────────────────────────────────
+
+async def _set_commands(app: Application):
+    """Register the command menu that appears in Telegram."""
+    commands = [
+        BotCommand("oracle",      "🔮 Your daily Oracle prophecy"),
+        BotCommand("aura",        "🟣 Scan your aura"),
+        BotCommand("vibecheck",   "✨ Vibe check"),
+        BotCommand("identity",    "🃏 Your Oracle archetype"),
+        BotCommand("shadow",      "🌑 Meet your shadow self"),
+        BotCommand("element",     "🌌 Your cosmic element"),
+        BotCommand("corecode",    "🔱 Your core words"),
+        BotCommand("universe",    "🌌 Message from the universe"),
+        BotCommand("ritual",      "🕯️ Today's ritual"),
+        BotCommand("duality",     "☯️ Your duality"),
+        BotCommand("nightreport", "🌙 Tonight's night report"),
+        BotCommand("sigil",       "🔱 Your personal sigil"),
+        BotCommand("glitch",      "⚡ Oracle glitch"),
+        BotCommand("checkin",     "🌙 Daily check-in & streak"),
+        BotCommand("streakcheck", "📊 Check your streak"),
+        BotCommand("coinboard",   "🏆 Coin leaderboard"),
+        BotCommand("cgift",       "💝 Gift coins to someone"),
+        BotCommand("rob",         "🦹 Rob someone's coins"),
+        BotCommand("vent",        "🫀 Anonymous vent"),
+    ]
     try:
-        return max(0, int(value or 0))
-    except (TypeError, ValueError):
-        return 0
+        await app.bot.set_my_commands(commands)
+        log.info("Telegram command menu set (%d commands)", len(commands))
+    except Exception as exc:
+        log.warning("Could not set command menu: %s", exc)
 
 
-async def _legacy_addcoins(uid: int, amount: int):
-    uid, amount = int(uid), int(amount)
-    if amount == 0:
-        return await _legacy_coins(uid)
-    async with storage.lock(f"legacy-economy:{uid}", ttl=10, wait=2.0) as acquired:
-        if not acquired:
-            log.warning("Economy lock busy for uid=%s", uid)
-            return await _legacy_coins(uid)
-        current = await _legacy_coins(uid)
-        delta = -min(current, abs(amount)) if amount < 0 else amount
-        return await storage.incrby(f"coins:{uid}", delta) if delta else current
+# ── Post-init hook ────────────────────────────────────────────────────────────
+
+async def _post_init(app: Application):
+    """Called by PTB after initialization — safe place for async setup."""
+    await _set_commands(app)
+
+    # Run legacy_bot's own post_init if it has one
+    if hasattr(legacy_bot, "_post_init"):
+        try:
+            await legacy_bot._post_init(app)
+        except Exception as exc:
+            log.warning("legacy_bot._post_init failed: %s", exc)
+
+    log.info("Post-init complete — Midnight Oracle is ready")
 
 
-async def _legacy_setcoins(uid: int, value: int):
-    uid, target = int(uid), max(0, int(value))
-    async with storage.lock(f"legacy-economy:{uid}", ttl=10, wait=2.0) as acquired:
-        if not acquired:
-            return await _legacy_coins(uid)
-        current = await _legacy_coins(uid)
-        delta = target - current
-        return await storage.incrby(f"coins:{uid}", delta) if delta else current
+# ── Entry point ───────────────────────────────────────────────────────────────
 
+def main():
+    app = build_application()
 
-async def _legacy_wallet(uid: int) -> int:
-    value = await storage.get(f"wallet:{int(uid)}", "0")
-    try:
-        return max(0, int(value or 0))
-    except (TypeError, ValueError):
-        return 0
+    # Attach post_init hook
+    app.post_init = _post_init
 
-
-async def _legacy_setwallet(uid: int, value: int):
-    uid, target = int(uid), max(0, int(value))
-    async with storage.lock(f"legacy-wallet:{uid}", ttl=10, wait=2.0) as acquired:
-        if not acquired:
-            return await _legacy_wallet(uid)
-        current = await _legacy_wallet(uid)
-        delta = target - current
-        return await storage.incrby(f"wallet:{uid}", delta) if delta else current
-
-
-# The HTTP health server runs in its own thread. It must never create or drive
-# an asyncio loop from a request handler. Readiness is an explicit state that
-# the bot event loop updates after storage + recovery have completed.
-_ready_state = {"status": "starting", "storage": "starting", "bot": "starting"}
-_ready_lock = threading.Lock()
-
-
-def _set_ready_state(*, status: str, storage_status: str, bot: str) -> None:
-    with _ready_lock:
-        _ready_state.update({"status": status, "storage": storage_status, "bot": bot})
-
-
-def _get_ready_state() -> dict[str, str]:
-    with _ready_lock:
-        return dict(_ready_state)
-
-
-class _HealthHandler(BaseHTTPRequestHandler):
-    def _send(self, status: int, payload: dict[str, object]):
-        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(body)
-
-    def do_GET(self):
-        if self.path in ("/", "/health", "/healthz"):
-            self._send(200, {"status": "ok", "service": "midnight-oracle"})
-            return
-        if self.path == "/ready":
-            state = _get_ready_state()
-            self._send(200 if state["status"] == "ok" else 503, state)
-            return
-        self._send(404, {"status": "not_found"})
-
-    def do_HEAD(self):
-        self.do_GET()
-
-    def log_message(self, *_args):
-        return
-
-
-def _start_health_server():
-    port = int(os.getenv("PORT", "10000"))
-    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
-    threading.Thread(target=server.serve_forever, daemon=True, name="midnight-health").start()
-    log.info("Midnight health server listening on 0.0.0.0:%s", port)
-    return server
-
-
-# Activate the durable second-generation death-game engine before the legacy
-# runtime registers command handlers. The old module remains in the tree as a
-# rollback reference until this branch is proven stable by CI.
-legacy_bot.deathgames = deathgames_v2
-_legacy_post_init = legacy_bot._post_init
-
-
-async def _post_init(application):
-    _set_ready_state(status="starting", storage_status="starting", bot="starting")
-    try:
-        await storage.start()
-        _set_ready_state(status="starting", storage_status="ok", bot="starting")
-        await _legacy_post_init(application)
-        await deathgames_v2.load_from_storage()
-        recovered = await recover_deathgames(application, legacy_bot)
-        if recovered:
-            log.info("Recovered %d legacy death-game record(s)", recovered)
-        _set_ready_state(status="ok", storage_status="ok", bot="ready")
-    except Exception:
-        _set_ready_state(status="degraded", storage_status="error", bot="startup_failed")
-        log.exception("Startup initialization/recovery failed")
-        raise
-
-
-legacy_bot.html = html
-legacy_bot._generate_gemini = _generate_gemini
-legacy_bot._coins = _legacy_coins
-legacy_bot._setcoins = _legacy_setcoins
-legacy_bot._addcoins = _legacy_addcoins
-legacy_bot._wallet = _legacy_wallet
-legacy_bot._setwallet = _legacy_setwallet
-legacy_bot._start_dummy_server = _start_health_server
-legacy_bot._post_init = _post_init
-legacy_bot.chat.generate_reply = core_generate_reply
+    log.info("Midnight Oracle starting — instance %s", startup._INSTANCE_ID)
+    asyncio.run(startup.run(app, storage_client=_storage_client))
 
 
 if __name__ == "__main__":
-    legacy_bot.main()
+    main()
