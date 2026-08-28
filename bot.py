@@ -17,6 +17,8 @@ import asyncio
 import logging
 import os
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # ── PATH ──────────────────────────────────────────────────────────────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -53,6 +55,8 @@ if GROUP_CHAT_ID == 0:
 OWNER_ID = int(os.getenv("OWNER_ID", "0") or "0")
 if OWNER_ID == 0:
     log.warning("OWNER_ID not set — owner-only commands will be unavailable.")
+
+ORACLE_TZ = ZoneInfo(os.getenv("ORACLE_TIMEZONE", "Asia/Kolkata"))
 
 # ── Storage ────────────────────────────────────────────────────────────────────
 try:
@@ -121,7 +125,7 @@ def build_application() -> Application:
         MessageHandler(filters.ALL, _chat_registry_middleware),
         group=-999,  # very high priority, runs before all handlers
     )
-      from handlers.social_engine import track_member
+    from handlers.social_engine import track_member
     app.add_handler(MessageHandler(filters.ALL, track_member), group=-998)
 
     # Register all handlers from legacy_bot

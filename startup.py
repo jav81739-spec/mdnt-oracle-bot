@@ -397,6 +397,8 @@ async def run(application, storage_client=None):
 
     try:
         await application.initialize()
+        if application.post_init is not None:
+            await application.post_init(application)
         await application.start()
         await application.updater.start_polling(
             drop_pending_updates=True,
