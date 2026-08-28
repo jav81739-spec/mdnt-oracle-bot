@@ -21,15 +21,46 @@ def _mention(member: dict) -> str:
     return f"{member.get('name', 'Unknown')} (id={member.get('id')})"
 
 
+async def _ensure_known_chat(context: ContextTypes.DEFAULT_TYPE, chat_id: int, chat_type: str, title: str = ""):
+    """Seed the registry from configured known chat IDs without changing chat data."""
+    try:
+        await startup.register_chat(chat_id=chat_id, chat_type=chat_type, title=title)
+    except Exception as exc:
+        log.debug("registry seed failed for %s: %s", chat_id, exc)
+
+
 async def midnightmap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user or not OWNER_ID or user.id != OWNER_ID:
         return
 
+    # A bot cannot ask Telegram for a universal "all chats I belong to" list.
+    # Seed configured known targets so /midnightmap still works even when those
+    # chats have not produced a fresh update since the registry was introduced.
+    configured = os.getenv("GROUP_CHAT_ID", "").strip()
+    if configured:
+        for raw_id in configured.split(","):
+            raw_id = raw_id.strip()
+            if not raw_id:
+                continue
+            try:
+                chat_id = int(raw_id)
+                chat = await context.bot.get_chat(chat_id)
+                await _ensure_known_chat(
+                    context,
+                    chat_id,
+                    getattr(chat, "type", "group"),
+                    getattr(chat, "title", "") or "",
+                )
+            except Exception as exc:
+                log.debug("configured chat %s unavailable: %s", raw_id, exc)
+
     registry = await startup.get_chat_registry()
     if not registry:
         await update.effective_message.reply_text(
-            "🌙 Midnight Map\n\nNo groups or channels have been discovered yet."
+            "🌙 Midnight Map\n\nNo groups or channels have been discovered yet.\n\n"
+            "Telegram does not provide bots with a universal list of every chat they belong to. "
+            "Add/observe a chat once, or configure its chat ID in GROUP_CHAT_ID."
         )
         return
 
