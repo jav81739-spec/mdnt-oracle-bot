@@ -5,6 +5,7 @@ import logging
 import os
 import time
 import random as _random
+import asyncio
 
 import httpx
 from telegram import Update
@@ -21,7 +22,9 @@ chat_history: dict[str, list[dict[str, str]]] = {}
 _last_reply_time: dict[str, float] = {}
 DEFAULT_PERSONA = "friendly, casual, playful, naturally Hinglish when appropriate"
 MAX_HISTORY = 10
-COOLDOWN_SECONDS = 3
+COOLDOWN_SECONDS = 8
+_AI_CONCURRENCY = 2
+_ai_slots = asyncio.Semaphore(_AI_CONCURRENCY)
 STORAGE_KEY = "chat_settings"
 
 
@@ -66,11 +69,25 @@ async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now=time.monotonic()
     if now-_last_reply_time.get(chat_id,0.0)<COOLDOWN_SECONDS: return
     _last_reply_time[chat_id]=now; persona=chat_persona.get(chat_id,DEFAULT_PERSONA); history=chat_history.setdefault(chat_id,[]); history.append({"role":"user","text":message.text[:1000]}); del history[:-MAX_HISTORY]
-    try: reply_text=await generate_reply(message.text,persona,history)
-    except AIUnavailable as exc: log.info("AI unavailable for chat=%s: %s",chat_id,exc); await message.reply_text("🌙 my signal is a little weak right now — try again in a moment."); return
-    except Exception: log.exception("Unexpected AI chat failure for chat=%s",chat_id); await message.reply_text("🌙 something tangled the signal — try that again."); return
-    if not reply_text: await message.reply_text("🔌 AI chat needs a GEMINI_API_KEY in the deployment environment."); return
+    try:
+        async with _ai_slots:
+            reply_text=await generate_reply(message.text,persona,history)
+    except AIUnavailable as exc:
+        log.info("AI unavailable for chat=%s: %s",chat_id,exc)
+        reply_text = _local_fallback(message.text)
+    except Exception:
+        log.exception("Unexpected AI chat failure for chat=%s",chat_id)
+        reply_text = _local_fallback(message.text)
+    if not reply_text:
+        reply_text = _local_fallback(message.text)
     history.append({"role":"assistant","text":reply_text[:2000]}); del history[:-MAX_HISTORY]; await message.reply_text(reply_text)
+
+
+def _local_fallback(text: str) -> str:
+    lowered = (text or "").strip().lower()
+    if "?" in lowered:
+        return "🌙 hmm… that one deserves a proper answer. Give me another moment and ask me again."
+    return "🌙 I'm here. Keep going — I'm listening."
 
 
 async def generate_reply(user_text: str, persona: str, history: list) -> str | None:
