@@ -19,7 +19,7 @@ from telegram import Update, Bot
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, MessageHandler, filters
 
-from social_engine import _get, _set, _post, _handle, _m, _n, GROUP_CHAT_ID
+from handlers.social_engine import _get, _set, _post, _handle, _m, _n, GROUP_CHAT_ID
 
 log = logging.getLogger("midnight.presence")
 ORACLE_TZ = ZoneInfo(os.getenv("ORACLE_TZ", "Asia/Kolkata"))
@@ -156,7 +156,7 @@ async def silence_check(context):
     bot = context.bot
     cid = GROUP_CHAT_ID
 
-    from social_engine import _members
+    from handlers.social_engine import _members
     ms = await _members(cid)
     now = _now_ts()
 
