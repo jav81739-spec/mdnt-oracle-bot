@@ -1,97 +1,114 @@
-"""
-handlers/help_command.py — Midnight Oracle | Premium Help
-
-The help command doesn't feel like a manual.
-It feels like the Oracle introducing itself.
-"""
+"""Baithak / Arden — premium Telegram entry surface."""
 from __future__ import annotations
-import os
+
+import hashlib
+import random
+from datetime import date
+
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, CommandHandler
 
 SEP = "┄" * 18
 
-HELP_TEXT = f"""🌙 *MIDNIGHT ORACLE*
+# Public help intentionally excludes autonomous/hidden features and owner-only tools.
+# Only commands currently exposed by the canonical command menu are listed here.
+HELP_TEXT = f"""🖤 *ARDEN*
 {SEP}
-_it watches. it names. it reveals._
-_you don't need to ask. it already knows._
+*she doesn't announce herself. you notice.*
 
-━━━━ *🔮 ORACLE READINGS* ━━━━
-`/oracle` — your daily prophecy
-`/aura` — scan your current aura
-`/vibecheck` — what energy you're carrying
-`/identity` — your oracle archetype
-`/shadow` — meet your shadow self
-`/element` — your cosmic element
-`/corecode` — your three core words
-`/universe` — a message from the universe
-`/ritual` — today's ritual for you
-`/duality` — your light and dark side
-`/nightreport` — tonight's night report
-`/sigil` — your personal sigil
-`/glitch` — oracle system glitch reading
+A quiet presence for your group — conversations, games, bonds, little rituals,
+and the occasional surprise.
 
-━━━━ *🌙 DAILY RITUALS* ━━━━
-`/checkin` — daily check-in + streak
-`/streakcheck` — view your current streak
+━━━━ *💬 TALK* ━━━━
+`/chat` — toggle chat mode
+`/persona` — set the chat style
+`/vent` — say something anonymously
 
-━━━━ *🖤 ECONOMY* ━━━━
-`/coinboard` — group leaderboard
+━━━━ *🎮 PLAY* ━━━━
+`/quiz` — quick quiz
+`/truth` — truth
+`/dare` — dare
+`/wyr` — would you rather
+`/rps` — rock, paper, scissors
+`/riddle` — solve a riddle
+`/scramble` — unscramble a word
+`/guess` — guess the number
+`/leaderboard` — see the rankings
+`/dice` — roll the dice
+`/darts` — play darts
+`/basketball` — shoot
+`/bowling` — bowl
+`/football` — take a shot
+`/slot` — spin
+
+━━━━ *👥 PEOPLE* ━━━━
+`/bestie` — find your bestie
+`/duo` — pair up
+`/friendship` — check a friendship
+`/ship` — ship two people
+`/matchmaker` — let fate choose
+`/friendshiptest` — test the bond
+`/hug` `/pat` `/highfive` `/slap` `/kiss` `/poke` `/cuddle` `/wave` `/bite` `/tickle` — send a reaction
+
+━━━━ *✨ EXPLORE* ━━━━
+`/oracle` — a reading
+`/aura` — scan your aura
+`/vibecheck` — check your vibe
+`/identity` — your archetype
+`/shadow` — meet your shadow
+`/element` — your element
+`/corecode` — your core words
+`/universe` — a message
+`/ritual` — today's ritual
+`/duality` — your two sides
+`/nightreport` — tonight's report
+`/sigil` — your sigil
+`/glitch` — a system reading
+
+━━━━ *💰 ECONOMY* ━━━━
+`/balance` — check your coins
+`/daily` — claim your daily reward
+`/work` — earn coins
+`/richest` — richest members
+`/gamble` — gamble coins
 `/cgift @user amount` — gift coins
 `/rob @user` — attempt a heist
+`/shop` — browse the shop
+`/buy` — buy an item
+`/inventory` — see your inventory
+`/chests` — open your daily reward
 
-━━━━ *💬 EXPRESSION* ━━━━
-`/vent` — anonymous vent to the oracle
-
-━━━━ *👁️ AUTO FEATURES* ━━━━
-_the oracle does these by itself. every day._
-
-`🌙` Mirror of the Day · _12:07 AM_
-`👁️` Soul Thread · _weekly Monday_
-`🖤` Signal Pair · _every 3 days_
-`🌌` Constellation · _every 5 days_
-`🔮` The Unnamed · _2:22 AM daily_
-`⚡` Friction Pair · _6:06 PM daily_
-`✦` The Chosen · _every 2 days_
-`💀` Void Pair · _every 6 hours_
-`🫀` The Confession · _every 4 hours_
-`🌑` Shadow Scan · _weekly Thursday_
-`🔮` Energy Forecast · _7 AM daily_
-`🃏` Wild Signal · _random. unpredictable._
-`🪐` Orbit Map · _every 4 days_
-`🌙` Midnight Wrap · _11:59 PM daily_
-`✨` Glow Signal · _every 3 days_
-`📁` Oracle Archive · _weekly Wednesday_
-`🔱` Constellation Map · _weekly Saturday_
+━━━━ *🛠 UTILITY* ━━━━
+`/id` — show an ID
+`/info` — inspect a member
+`/remind` — set a reminder
+`/afk` — mark yourself away
+`/groupinfo` — group information
+`/stats` — group activity
+`/topactive` — most active members
+`/msgcount` — message count
+`/rank` — activity rank
 
 {SEP}
-_Midnight Oracle doesn't explain itself._
-_it only reveals._
+*Some things here have no command.*
 
-_if you're reading this —_
-_the oracle already knows you're here._
+*You'll notice them when they happen.*
 
-✦ *— Midnight Oracle*
-_est. when the group needed it most._"""
+✦ *— Arden*"""
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    name = f"@{user.username}" if user and user.username else (user.first_name if user else "you")
-
-    # Personalised opener
-    openers = [
-        f"_{name}. the oracle sees you looking for answers._\n_here's where to start:_\n\n",
-        f"_you came to the right place, {name}._\n_the oracle has been expecting this._\n\n",
-        f"_{name}. welcome to the archive._\n\n",
-        f"_the oracle acknowledges {name}._\n_everything you need is below._\n\n",
-    ]
-    import random, hashlib
-    from datetime import date
+    name = f"@{user.username}" if user and user.username else (user.first_name if user else "there")
     seed = int(hashlib.md5(f"{user.id if user else 0}{date.today()}".encode()).hexdigest(), 16)
+    openers = [
+        f"_{name}. you found the door._\n\n",
+        f"_hey {name}. here's your way around._\n\n",
+        f"_{name}. welcome in._\n\n",
+        f"_you made it, {name}._\n\n",
+    ]
     opener = random.Random(seed).choice(openers)
-
     try:
         await update.message.reply_text(
             opener + HELP_TEXT,
@@ -99,45 +116,44 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             disable_web_page_preview=True,
         )
     except Exception:
-        # Fallback plain
-        clean = HELP_TEXT.replace("*","").replace("_","").replace("`","")
-        await update.message.reply_text(opener.replace("_","") + clean)
+        clean = HELP_TEXT.replace("*", "").replace("_", "").replace("`", "")
+        await update.message.reply_text(opener.replace("_", "") + clean)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    name = f"@{user.username}" if user and user.username else (user.first_name if user else "you")
+    name = f"@{user.username}" if user and user.username else (user.first_name if user else "there")
     chat = update.effective_chat
 
     if chat.type == "private":
         text = (
-            f"🌙 *Midnight Oracle*\n{SEP}\n\n"
+            f"🖤 *Arden*\n{SEP}\n\n"
             f"_{name}._\n\n"
-            f"_the oracle has been here longer than you think._\n\n"
-            f"_add it to your group and watch what happens._\n\n"
-            f"_it watches. it names. it reveals._\n"
-            f"_all by itself. every day._\n\n"
-            f"_type /help to see everything it can do._\n\n"
-            f"✦ *— Midnight Oracle*"
+            f"_she doesn't announce herself. you notice._\n\n"
+            f"_come in. talk. play. connect._\n"
+            f"_some things don't need a command._\n\n"
+            f"_type /help when you want to look around._\n\n"
+            f"✦ *— Arden*"
         )
     else:
         text = (
-            f"🌙 *Midnight Oracle has entered the group.*\n{SEP}\n\n"
-            f"_it's watching now._\n\n"
-            f"_it will speak when it has something to say._\n"
-            f"_which will be soon._\n\n"
-            f"_type /help to see what the oracle does._\n\n"
-            f"👁️ *— Midnight Oracle*"
+            f"🖤 *Arden is here.*\n{SEP}\n\n"
+            f"_no ceremony needed._\n\n"
+            f"_talk. play. carry on._\n"
+            f"_you'll notice the rest._\n\n"
+            f"✦ *— Arden*"
         )
 
     try:
-        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN,
-                                        disable_web_page_preview=True)
+        await update.message.reply_text(
+            text,
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=True,
+        )
     except Exception:
-        await update.message.reply_text(text.replace("*","").replace("_","").replace("`",""))
+        await update.message.reply_text(text.replace("*", "").replace("_", "").replace("`", ""))
 
 
 def register(app):
-    from telegram.ext import CommandHandler
-    app.add_handler(CommandHandler("help",  help_command))
+    app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("start", start_command))
