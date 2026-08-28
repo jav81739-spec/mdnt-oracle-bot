@@ -10,7 +10,6 @@ Architecture:
     └── legacy_bot.py   (all handlers, Gemini, GIPHY, stickers, Baka/Nova)
     └── storage.py      (Redis compat facade → core/storage)
 """
-
 from __future__ import annotations
 
 import asyncio
@@ -62,7 +61,7 @@ except Exception as _e:
 import startup
 startup.init(_storage_client)
 
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ChatMemberHandler, filters
+from telegram.ext import Application, MessageHandler, filters
 from telegram import (
     BotCommand,
     BotCommandScopeDefault,
@@ -85,7 +84,6 @@ if hasattr(legacy_bot, "GROUP_CHAT_ID") and legacy_bot.GROUP_CHAT_ID == 0:
     legacy_bot.GROUP_CHAT_ID = GROUP_CHAT_ID
 
 async def _chat_registry_middleware(update, context):
-    """Called on every update — registers the chat so broadcast works."""
     chat = getattr(update, "effective_chat", None)
     if chat and chat.type in ("group", "supergroup", "channel"):
         await startup.register_chat(chat_id=chat.id, chat_type=chat.type, title=chat.title or "")
@@ -93,7 +91,6 @@ async def _chat_registry_middleware(update, context):
 
 def build_application() -> Application:
     app = Application.builder().token(TOKEN).build()
-
     app.add_handler(MessageHandler(filters.ALL, _chat_registry_middleware), group=-999)
     from handlers.social_engine import track_member
     app.add_handler(MessageHandler(filters.ALL, track_member), group=-998)
@@ -106,22 +103,26 @@ def build_application() -> Application:
         log.info("Handlers registered via legacy_bot._register_handlers()")
     else:
         _shim_register(app)
-
     return app
 
 
 def _shim_register(app: Application):
-    """
-    Capture the COMPLETE handler registration performed by legacy_bot.main().
+    """Import the complete handler set from legacy_bot without a second poller."""
+    class _CaptureApplication:
+        last_instance = None
 
-    legacy_bot.main() historically owns both registration and polling.  Calling
-    it directly from the production entrypoint would create a second polling
-    lifecycle.  Instead we temporarily replace legacy_bot.Application with a
-    tiny capture object, let its existing main() register every handler, and
-    copy those handler objects into our canonical Application.
+        def __init__(self):
+            self.handlers = []
+            type(self).last_instance = self
 
-    No legacy handlers are rewritten or selected manually.
-    """
+        def add_handler(self, handler, group=0):
+            self.handlers.append((handler, group))
+
+        def run_polling(self, *_args, **_kwargs):
+            # legacy_bot.main() reaches this point after registration. Never
+            # start its polling loop; startup.py owns the only real poller.
+            return None
+
     class _CaptureBuilder:
         def __init__(self):
             self._capture = _CaptureApplication()
@@ -135,19 +136,8 @@ def _shim_register(app: Application):
         def build(self):
             return self._capture
 
-    class _CaptureApplication:
-        def __init__(self):
-            self.handlers = []
-
-        def add_handler(self, handler, group=0):
-            self.handlers.append((handler, group))
-
-        def run_polling(self, *_args, **_kwargs):
-            return None
-
     original_application = legacy_bot.Application
     original_dummy_server = getattr(legacy_bot, "_start_dummy_server", None)
-    capture = None
 
     try:
         legacy_bot.Application = type(
@@ -159,19 +149,18 @@ def _shim_register(app: Application):
             legacy_bot._start_dummy_server = lambda: None
 
         legacy_bot.main()
-        capture = _CaptureBuilder()._capture if capture is None else capture
+        captured = _CaptureApplication.last_instance
+        if captured is None:
+            raise RuntimeError("legacy_bot.main() did not create its application")
 
-        # The builder creates its capture instance internally. Retrieve it by
-        # re-running through a holder instead of depending on legacy internals.
-        # A fresh capture is not useful, so the builder stores the last instance.
+        for handler, group in captured.handlers:
+            app.add_handler(handler, group=group)
+
+        log.info("Handlers registered from legacy_bot.main(): %d handlers", len(captured.handlers))
     finally:
         legacy_bot.Application = original_application
         if original_dummy_server is not None:
             legacy_bot._start_dummy_server = original_dummy_server
-
-    # The capture instance is attached to the temporary Application class by
-    # the builder below. This branch is replaced by the holder implementation.
-    raise RuntimeError("legacy handler capture did not initialize")
 
 
 async def _set_commands(app: Application):
