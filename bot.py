@@ -265,7 +265,25 @@ async def _post_init(app: Application):
     """Called by PTB after initialization — safe place for async setup."""
     await _set_commands(app)
 
-    # Run legacy_bot's own post_init if it has one
+    # --- ADD THIS ---
+    from handlers.social_engine import register_jobs, init_storage, track_member
+    from handlers.presence_engine import register, silence_check
+    from handlers.help_command import register as help_register
+
+    # Give social engine access to storage
+    init_storage(_storage_client)
+
+    # Register jobs (scheduled auto-posts)
+    register_jobs(app)
+
+    # Register presence engine message handler
+    register(app)
+
+    # Register help/start
+    help_register(app)
+
+    # Schedule daily silence check (2 AM)
+    app.job_queue.run_daily(silence_check, time=datetime.now(ORACLE_TZ).replace(hour=2,minute=0,second=0).timetz())# Run legacy_bot's own post_init if it has one
     if hasattr(legacy_bot, "_post_init"):
         try:
             await legacy_bot._post_init(app)
