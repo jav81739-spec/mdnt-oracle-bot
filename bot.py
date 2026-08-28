@@ -121,6 +121,8 @@ def build_application() -> Application:
         MessageHandler(filters.ALL, _chat_registry_middleware),
         group=-999,  # very high priority, runs before all handlers
     )
+  from handlers.social_engine import track_member
+app.add_handler(MessageHandler(filters.ALL, track_member), group=-998)
 
     # Register all handlers from legacy_bot
     # legacy_bot.register_handlers(app) if it has that function,
