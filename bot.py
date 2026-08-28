@@ -118,6 +118,18 @@ def _register_aesthetic_handlers(app: Application):
     log.info("Oracle aesthetic handlers registered: %s", ", ".join(added) if added else "none (already registered or unavailable)")
 
 
+def _register_owner_handlers(app: Application):
+    """Register owner-only commands without replacing any legacy handlers."""
+    from handlers.midnightmap import midnightmap_command
+
+    existing = _registered_command_names(app)
+    if "midnightmap" not in existing:
+        app.add_handler(CommandHandler("midnightmap", midnightmap_command))
+        log.info("Owner handler registered: /midnightmap")
+    else:
+        log.info("Owner handler already registered: /midnightmap")
+
+
 def build_application() -> Application:
     app = Application.builder().token(TOKEN).build()
     app.add_handler(MessageHandler(filters.ALL, _chat_registry_middleware), group=-999)
@@ -134,6 +146,7 @@ def build_application() -> Application:
         _shim_register(app)
 
     _register_aesthetic_handlers(app)
+    _register_owner_handlers(app)
     return app
 
 
