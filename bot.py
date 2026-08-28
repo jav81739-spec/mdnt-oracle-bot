@@ -72,7 +72,7 @@ startup.init(_storage_client)
 
 # ── PTB Application ────────────────────────────────────────────────────────────
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ChatMemberHandler, filters
-from telegram import BotCommand
+from telegram import BotCommand, BotCommandScopeDefault, BotCommandScopeAllPrivateChats
 
 # ── Import legacy_bot for all handlers ────────────────────────────────────────
 #
@@ -236,8 +236,10 @@ def _shim_register(app: Application):
 # ── Set Telegram command menu ─────────────────────────────────────────────────
 
 async def _set_commands(app: Application):
-    """Register the command menu that appears in Telegram."""
+    """Register the current Midnight Oracle command menu in private chats."""
     commands = [
+        BotCommand("start",       "🌙 Enter the Midnight Realm"),
+        BotCommand("help",        "📖 See what Midnight Oracle can do"),
         BotCommand("oracle",      "🔮 Your daily Oracle prophecy"),
         BotCommand("aura",        "🟣 Scan your aura"),
         BotCommand("vibecheck",   "✨ Vibe check"),
@@ -259,7 +261,11 @@ async def _set_commands(app: Application):
         BotCommand("vent",        "🫀 Anonymous vent"),
     ]
     try:
-        await app.bot.set_my_commands(commands)
+        # Remove any older private-chat override (e.g. /broadcast, /announce,
+        # /midnightmap) so Telegram falls back to this current menu.
+        await app.bot.delete_my_commands(scope=BotCommandScopeAllPrivateChats())
+        await app.bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
+        await app.bot.set_my_commands(commands, scope=BotCommandScopeDefault())
         log.info("Telegram command menu set (%d commands)", len(commands))
     except Exception as exc:
         log.warning("Could not set command menu: %s", exc)
