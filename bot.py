@@ -119,8 +119,6 @@ def _shim_register(app: Application):
             self.handlers.append((handler, group))
 
         def run_polling(self, *_args, **_kwargs):
-            # legacy_bot.main() reaches this point after registration. Never
-            # start its polling loop; startup.py owns the only real poller.
             return None
 
     class _CaptureBuilder:
@@ -206,12 +204,10 @@ async def _post_init(app: Application):
 
     from handlers.social_engine import register_jobs, init_storage
     from handlers.presence_engine import register, silence_check
-    from handlers.help_command import register as help_register
 
     init_storage(_storage_client)
     register_jobs(app)
     register(app)
-    help_register(app)
 
     app.job_queue.run_daily(
         silence_check,
