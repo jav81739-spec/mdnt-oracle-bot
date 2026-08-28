@@ -38,6 +38,7 @@ _lease_task: Optional[asyncio.Task] = None
 _health_server: Optional[HTTPServer] = None
 _shutting_down = False
 
+
 async def _store_get(key: str) -> Optional[str]:
     try:
         if _storage is None:
@@ -49,6 +50,7 @@ async def _store_get(key: str) -> Optional[str]:
     except Exception as exc:
         log.debug("storage.get(%s) failed: %s", key, exc)
         return None
+
 
 async def _store_set(key: str, value: str, ttl: int = 0) -> bool:
     try:
@@ -62,6 +64,7 @@ async def _store_set(key: str, value: str, ttl: int = 0) -> bool:
         log.debug("storage.set(%s) failed: %s", key, exc)
         return False
 
+
 async def _store_delete(key: str) -> bool:
     try:
         if _storage is None:
@@ -73,6 +76,7 @@ async def _store_delete(key: str) -> bool:
     except Exception as exc:
         log.debug("storage.delete(%s) failed: %s", key, exc)
         return False
+
 
 async def _acquire_lease() -> bool:
     raw = await _store_get(_LEASE_KEY)
@@ -98,9 +102,11 @@ async def _acquire_lease() -> bool:
         log.info("Polling lease acquired by %s", _INSTANCE_ID)
     return ok
 
+
 async def _refresh_lease():
     payload = json.dumps({"instance": _INSTANCE_ID, "ts": time.time()})
     await _store_set(_LEASE_KEY, payload, ttl=_LEASE_TTL)
+
 
 async def _release_lease():
     raw = await _store_get(_LEASE_KEY)
@@ -115,6 +121,7 @@ async def _release_lease():
             pass
     log.debug("Lease not owned by us — skipping release")
 
+
 async def _lease_heartbeat_loop():
     while not _shutting_down:
         await asyncio.sleep(_LEASE_REFRESH)
@@ -124,6 +131,7 @@ async def _lease_heartbeat_loop():
             await _refresh_lease()
         except Exception as exc:
             log.warning("Lease refresh failed: %s", exc)
+
 
 async def _wait_for_lease() -> bool:
     deadline = time.time() + _LEASE_WAIT_MAX
@@ -139,7 +147,9 @@ async def _wait_for_lease() -> bool:
     log.error("Could not acquire polling lease within %ds — giving up", _LEASE_WAIT_MAX)
     return False
 
+
 _REGISTRY_KEY = "midnight:chat_registry"
+
 
 async def register_chat(chat_id: int, chat_type: str, title: str = ""):
     if chat_type == "private":
@@ -152,12 +162,14 @@ async def register_chat(chat_id: int, chat_type: str, title: str = ""):
     except Exception as exc:
         log.debug("register_chat failed: %s", exc)
 
+
 async def get_chat_registry() -> dict:
     try:
         raw = await _store_get(_REGISTRY_KEY)
         return json.loads(raw) if raw else {}
     except Exception:
         return {}
+
 
 async def get_broadcast_targets(include_groups: bool = True, include_channels: bool = True) -> list[int]:
     registry = await get_chat_registry()
@@ -169,6 +181,7 @@ async def get_broadcast_targets(include_groups: bool = True, include_channels: b
         elif include_channels and t == "channel":
             targets.append(int(cid_str))
     return targets
+
 
 class _HealthHandler(BaseHTTPRequestHandler):
     def _respond(self, status: int, body: bytes, ctype: str = "text/plain"):
@@ -197,8 +210,10 @@ class _HealthHandler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         return
 
+
 class _ReuseHTTPServer(HTTPServer):
     allow_reuse_address = True
+
 
 def start_health_server() -> HTTPServer:
     global _health_server
@@ -209,6 +224,7 @@ def start_health_server() -> HTTPServer:
     log.info("Health server listening on 0.0.0.0:%d", port)
     return _health_server
 
+
 def _install_signal_handlers(loop: asyncio.AbstractEventLoop):
     def _handle_signal(signum, _frame):
         name = signal.Signals(signum).name
@@ -217,14 +233,9 @@ def _install_signal_handlers(loop: asyncio.AbstractEventLoop):
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
-async def _graceful_shutdown():
-    """Stop the bot and release resources without stopping the loop itself.
 
-    asyncio.run() owns this event loop. Calling loop.stop() from inside this
-    coroutine makes asyncio.run() raise 'Event loop stopped before Future
-    completed'. Let the coroutine return normally so asyncio.run() can close
-    the loop cleanly.
-    """
+async def _graceful_shutdown():
+    """Stop the bot and release resources without stopping the loop itself."""
     global _shutting_down
     if _shutting_down:
         return
@@ -256,6 +267,43 @@ async def _graceful_shutdown():
 
     log.info("Graceful shutdown complete")
 
+
+def _install_jobqueue_compat() -> None:
+    """Provide the legacy run_weekly helper used by Social Engine.
+
+    python-telegram-bot exposes run_daily/run_repeating/run_monthly, but not
+    run_weekly. Social Engine's existing scheduler uses run_weekly, so provide
+    a tiny compatibility method without changing any feature scheduling code.
+    The legacy helper treats weekday=0 as Monday (Python's weekday convention),
+    while PTB's run_daily uses Sunday=0, hence the +1 conversion.
+    """
+    try:
+        from telegram.ext import JobQueue
+
+        if hasattr(JobQueue, "run_weekly"):
+            return
+
+        def run_weekly(self, callback, time, weekday=0, data=None, name=None,
+                       chat_id=None, user_id=None, job_kwargs=None):
+            ptb_day = (int(weekday) + 1) % 7
+            return self.run_daily(
+                callback,
+                time=time,
+                days=(ptb_day,),
+                data=data,
+                name=name,
+                chat_id=chat_id,
+                user_id=user_id,
+                job_kwargs=job_kwargs,
+            )
+
+        JobQueue.run_weekly = run_weekly
+        log.info("JobQueue compatibility: installed run_weekly() adapter")
+    except Exception as exc:
+        log.exception("Could not install JobQueue compatibility adapter: %s", exc)
+        raise
+
+
 async def run(application, storage_client=None):
     global _storage, _app, _lease_task
 
@@ -277,6 +325,7 @@ async def run(application, storage_client=None):
 
     try:
         await application.initialize()
+        _install_jobqueue_compat()
         if application.post_init is not None:
             await application.post_init(application)
         await application.start()
@@ -291,6 +340,7 @@ async def run(application, storage_client=None):
         log.exception("Fatal error in polling loop: %s", exc)
     finally:
         await _graceful_shutdown()
+
 
 def init(storage_client=None):
     global _storage
