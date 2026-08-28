@@ -139,5 +139,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def register(app):
     from telegram.ext import CommandHandler
-    app.add_handler(CommandHandler("help",  help_command))
-    app.add_handler(CommandHandler("start", start_command))
+    # Keep these ahead of ordinary group-0 handlers so /start and /help
+    # cannot be swallowed by another generic handler.
+    app.add_handler(CommandHandler("help",  help_command), group=-1)
+    app.add_handler(CommandHandler("start", start_command), group=-1)
