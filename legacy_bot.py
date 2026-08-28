@@ -503,6 +503,12 @@ def _midnight_lock(chat_id):
 
 
 
+async def _get_bot_username(bot):
+    try:
+        me = await bot.get_me()
+        return (me.username or "").strip()
+    except Exception:
+        return ""
 async def handle_ai_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     if not message: return
