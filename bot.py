@@ -1,7 +1,7 @@
-"""Midnight Oracle — tiny canonical Render entrypoint.
+"""Midnight Oracle — canonical Render entrypoint.
 
 Telegram handler registration and lifecycle wiring live in handlers/runtime_registry.py.
-This file owns only configuration, startup and the single runtime loop.
+This file owns configuration, startup and the single runtime loop.
 """
 from __future__ import annotations
 
@@ -13,11 +13,12 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-import legacy_bot  # canonical legacy feature provider
+# Load environment BEFORE importing modules that read configuration at import time.
+load_dotenv()
+
+import legacy_bot
 import startup
 from handlers.runtime_registry import build_application, configure_lifecycle
-
-load_dotenv()
 
 logging.basicConfig(
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
@@ -45,10 +46,6 @@ except Exception:
     storage_client = None
 
 startup.init(storage_client)
-
-# Legacy compatibility contract retained intentionally: legacy_bot._addcoins,
-# legacy_bot._generate_gemini and legacy_bot._start_dummy_server remain available
-# to migrated modules/tests; bot.py itself does not own their runtime lifecycle.
 
 log.info(
     "BOOT_DIAGNOSTIC | brand=%s | owner_configured=%s | group_configured=%s | tz=%s",
