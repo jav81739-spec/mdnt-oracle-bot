@@ -1,16 +1,10 @@
 """
 startup.py — Midnight Oracle canonical startup manager.
 
-Fixes every P0 architectural problem:
-  ✅ Single entrypoint — import this from bot.py, nothing else
-  ✅ Polling ownership — only one instance ever polls Telegram
-  ✅ Stale lease recovery — expired leases auto-released
-  ✅ Clean async lifecycle — no asyncio.run() inside threads
-  ✅ Graceful SIGTERM — releases lease before exit
-  ✅ Health server — isolated from bot async lifecycle
-  ✅ Chat registry — auto-discovers groups/channels on every update
+Keeps one polling owner, stale-lease recovery, graceful shutdown, health
+checks, chat discovery, and all Telegram update types required by the durable
+Phase 1–5 surface.
 """
-
 from __future__ import annotations
 
 import asyncio
@@ -21,8 +15,8 @@ import signal
 import socket
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Optional
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 log = logging.getLogger("midnight.startup")
 
@@ -31,7 +25,6 @@ _LEASE_TTL = 60
 _LEASE_REFRESH = 20
 _LEASE_WAIT_MAX = 90
 _INSTANCE_ID = f"{socket.gethostname()}:{os.getpid()}"
-
 _storage = None
 _app = None
 _lease_task: Optional[asyncio.Task] = None
@@ -40,6 +33,7 @@ _shutting_down = False
 
 
 async def _store_get(key: str) -> Optional[str]:
+    """Read a lifecycle value from the configured storage facade."""
     try:
         if _storage is None:
             return None
@@ -53,6 +47,7 @@ async def _store_get(key: str) -> Optional[str]:
 
 
 async def _store_set(key: str, value: str, ttl: int = 0) -> bool:
+    """Write a lifecycle value with optional expiry."""
     try:
         if _storage is None:
             return False
@@ -66,6 +61,7 @@ async def _store_set(key: str, value: str, ttl: int = 0) -> bool:
 
 
 async def _store_delete(key: str) -> bool:
+    """Delete a lifecycle value."""
     try:
         if _storage is None:
             return False
@@ -78,7 +74,14 @@ async def _store_delete(key: str) -> bool:
         return False
 
 
+async def _refresh_lease():
+    """Refresh the current polling lease."""
+    payload = json.dumps({"instance": _INSTANCE_ID, "ts": time.time()})
+    await _store_set(_LEASE_KEY, payload, ttl=_LEASE_TTL)
+
+
 async def _acquire_lease() -> bool:
+    """Acquire the Telegram polling lease or reclaim an expired one."""
     raw = await _store_get(_LEASE_KEY)
     if raw:
         try:
@@ -95,7 +98,6 @@ async def _acquire_lease() -> bool:
             log.warning("Stale lease from %s (age %.0fs > TTL %ds) — reclaiming", owner, age, _LEASE_TTL)
         except Exception:
             pass
-
     payload = json.dumps({"instance": _INSTANCE_ID, "ts": time.time()})
     ok = await _store_set(_LEASE_KEY, payload, ttl=_LEASE_TTL)
     if ok:
@@ -103,12 +105,8 @@ async def _acquire_lease() -> bool:
     return ok
 
 
-async def _refresh_lease():
-    payload = json.dumps({"instance": _INSTANCE_ID, "ts": time.time()})
-    await _store_set(_LEASE_KEY, payload, ttl=_LEASE_TTL)
-
-
 async def _release_lease():
+    """Release the polling lease only when this process owns it."""
     raw = await _store_get(_LEASE_KEY)
     if raw:
         try:
@@ -123,6 +121,7 @@ async def _release_lease():
 
 
 async def _lease_heartbeat_loop():
+    """Keep the polling lease alive while Telegram polling is running."""
     while not _shutting_down:
         await asyncio.sleep(_LEASE_REFRESH)
         if _shutting_down:
@@ -134,6 +133,7 @@ async def _lease_heartbeat_loop():
 
 
 async def _wait_for_lease() -> bool:
+    """Wait briefly for another instance to release Telegram polling ownership."""
     deadline = time.time() + _LEASE_WAIT_MAX
     while time.time() < deadline:
         if await _acquire_lease():
@@ -152,6 +152,7 @@ _REGISTRY_KEY = "midnight:chat_registry"
 
 
 async def register_chat(chat_id: int, chat_type: str, title: str = ""):
+    """Register a group or channel without storing private-chat data."""
     if chat_type == "private":
         return
     try:
@@ -164,6 +165,7 @@ async def register_chat(chat_id: int, chat_type: str, title: str = ""):
 
 
 async def get_chat_registry() -> dict:
+    """Return the discovered public chat registry."""
     try:
         raw = await _store_get(_REGISTRY_KEY)
         return json.loads(raw) if raw else {}
@@ -172,6 +174,7 @@ async def get_chat_registry() -> dict:
 
 
 async def get_broadcast_targets(include_groups: bool = True, include_channels: bool = True) -> list[int]:
+    """Return registered group/channel targets for existing broadcast features."""
     registry = await get_chat_registry()
     targets = []
     for cid_str, info in registry.items():
@@ -184,7 +187,9 @@ async def get_broadcast_targets(include_groups: bool = True, include_channels: b
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
+    """Expose lightweight process health endpoints."""
     def _respond(self, status: int, body: bytes, ctype: str = "text/plain"):
+        """Write one health response."""
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -194,6 +199,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def do_GET(self):
+        """Serve health and readiness endpoints."""
         if self.path in ("/", "/health", "/healthz"):
             status = "shutting_down" if _shutting_down else "ok"
             code = 503 if _shutting_down else 200
@@ -205,17 +211,21 @@ class _HealthHandler(BaseHTTPRequestHandler):
             self._respond(404, b'{"status":"not_found"}', "application/json")
 
     def do_HEAD(self):
+        """Serve HEAD through the same health logic."""
         self.do_GET()
 
     def log_message(self, *_):
+        """Suppress default HTTP access logging."""
         return
 
 
 class _ReuseHTTPServer(HTTPServer):
+    """Health server with address reuse enabled."""
     allow_reuse_address = True
 
 
 def start_health_server() -> HTTPServer:
+    """Start the isolated HTTP health server."""
     global _health_server
     port = int(os.getenv("PORT", "10000"))
     _health_server = _ReuseHTTPServer(("0.0.0.0", port), _HealthHandler)
@@ -226,6 +236,7 @@ def start_health_server() -> HTTPServer:
 
 
 def _install_signal_handlers(loop: asyncio.AbstractEventLoop):
+    """Install SIGTERM/SIGINT handlers that schedule graceful shutdown."""
     def _handle_signal(signum, _frame):
         name = signal.Signals(signum).name
         log.info("Received %s — initiating graceful shutdown", name)
@@ -235,22 +246,23 @@ def _install_signal_handlers(loop: asyncio.AbstractEventLoop):
 
 
 async def _graceful_shutdown():
-    """Stop the bot and release resources without stopping the loop itself."""
+    """Stop the bot and release resources without stopping the event loop."""
     global _shutting_down
     if _shutting_down:
         return
     _shutting_down = True
     log.info("Graceful shutdown started")
-
     if _lease_task and not _lease_task.done():
         _lease_task.cancel()
         try:
             await _lease_task
         except asyncio.CancelledError:
             pass
-
     if _app is not None:
         try:
+            scheduler = _app.bot_data.get("oracle_scheduler")
+            if scheduler and scheduler.scheduler.running:
+                scheduler.scheduler.shutdown(wait=False)
             if _app.updater and _app.updater.running:
                 await _app.updater.stop()
             if _app.running:
@@ -259,44 +271,22 @@ async def _graceful_shutdown():
             log.info("Telegram application stopped")
         except Exception as exc:
             log.warning("Error stopping Telegram app: %s", exc)
-
     await _release_lease()
-
     if _health_server:
         threading.Thread(target=_health_server.shutdown, daemon=True).start()
-
     log.info("Graceful shutdown complete")
 
 
 def _install_jobqueue_compat() -> None:
-    """Provide the legacy run_weekly helper used by Social Engine.
-
-    python-telegram-bot exposes run_daily/run_repeating/run_monthly, but not
-    run_weekly. Social Engine's existing scheduler uses run_weekly, so provide
-    a tiny compatibility method without changing any feature scheduling code.
-    The legacy helper treats weekday=0 as Monday (Python's weekday convention),
-    while PTB's run_daily uses Sunday=0, hence the +1 conversion.
-    """
+    """Provide the legacy run_weekly helper used by Social Engine."""
     try:
         from telegram.ext import JobQueue
-
         if hasattr(JobQueue, "run_weekly"):
             return
-
-        def run_weekly(self, callback, time, weekday=0, data=None, name=None,
-                       chat_id=None, user_id=None, job_kwargs=None):
+        def run_weekly(self, callback, time, weekday=0, data=None, name=None, chat_id=None, user_id=None, job_kwargs=None):
+            """Adapt Python weekday numbering to PTB run_daily numbering."""
             ptb_day = (int(weekday) + 1) % 7
-            return self.run_daily(
-                callback,
-                time=time,
-                days=(ptb_day,),
-                data=data,
-                name=name,
-                chat_id=chat_id,
-                user_id=user_id,
-                job_kwargs=job_kwargs,
-            )
-
+            return self.run_daily(callback, time=time, days=(ptb_day,), data=data, name=name, chat_id=chat_id, user_id=user_id, job_kwargs=job_kwargs)
         JobQueue.run_weekly = run_weekly
         log.info("JobQueue compatibility: installed run_weekly() adapter")
     except Exception as exc:
@@ -305,24 +295,20 @@ def _install_jobqueue_compat() -> None:
 
 
 async def run(application, storage_client=None):
+    """Own the complete Telegram lifecycle, including every update type needed by durable games."""
     global _storage, _app, _lease_task
-
     if not logging.root.handlers:
         logging.basicConfig(format="%(asctime)s %(name)s %(levelname)s %(message)s", level=logging.INFO)
-
     _storage = storage_client
     _app = application
     loop = asyncio.get_running_loop()
     _install_signal_handlers(loop)
     start_health_server()
-
     if not await _wait_for_lease():
         log.critical("Cannot start: polling lease unavailable. Exiting.")
         return
-
     _lease_task = asyncio.ensure_future(_lease_heartbeat_loop())
     log.info("Starting Telegram polling — instance %s", _INSTANCE_ID)
-
     try:
         await application.initialize()
         _install_jobqueue_compat()
@@ -331,7 +317,7 @@ async def run(application, storage_client=None):
         await application.start()
         await application.updater.start_polling(
             drop_pending_updates=True,
-            allowed_updates=["message", "edited_message", "callback_query", "chat_member", "my_chat_member"],
+            allowed_updates=["message", "edited_message", "callback_query", "chat_member", "my_chat_member", "poll_answer", "poll", "inline_query"]
         )
         await asyncio.Event().wait()
     except asyncio.CancelledError:
@@ -343,5 +329,6 @@ async def run(application, storage_client=None):
 
 
 def init(storage_client=None):
+    """Set the lifecycle storage facade before polling begins."""
     global _storage
     _storage = storage_client
