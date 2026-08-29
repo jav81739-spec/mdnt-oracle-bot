@@ -23,16 +23,18 @@ if hasattr(legacy_bot,"GEMINI_MODEL"):
     legacy_bot.GEMINI_MODEL=configured if configured and configured not in retired else "gemini-3.6-flash"
     log.info("AI_MODEL_SELECTED | model=%s",legacy_bot.GEMINI_MODEL)
 if hasattr(legacy_bot,"GROUP_CHAT_ID") and legacy_bot.GROUP_CHAT_ID==0: legacy_bot.GROUP_CHAT_ID=GROUP_CHAT_ID
-
 async def _provider_fallback(first_name="friend", *args, **kwargs):
-    """Private recovery path: never exposes provider/model/rate-limit errors."""
-    name=(first_name or "friend").strip()[:60]
-    return f"{name}, I'm here. Keep going — what were you saying? 🌙"
+    name=(first_name or "friend").strip()[:60]; return f"{name}, I'm here. Keep going — what were you saying? 🌙"
 legacy_bot._get_fallback_reply=_provider_fallback
-
 async def _registry(update,context):
     chat=getattr(update,"effective_chat",None)
     if chat and chat.type in ("group","supergroup","channel"): await startup.register_chat(chat.id,chat.type,chat.title or "")
+    user=getattr(update,"effective_user",None); msg=getattr(update,"effective_message",None)
+    if user and chat and msg and getattr(msg,"text",None):
+        try:
+            from handlers.member_memory import remember
+            await remember(chat.id,user.id,user.first_name or "friend",user.username or "",msg.text)
+        except Exception: log.debug("member memory update skipped",exc_info=True)
 def _command_names(app):
     out=set()
     for hs in getattr(app,"handlers",{}).values():
@@ -68,7 +70,9 @@ async def _post_init(app):
     try:
         from handlers.social_engine import init_storage
         init_storage(_storage_client)
-    except Exception: log.exception("social storage init failed")
+        from handlers.member_memory import init
+        await init(_storage_client)
+    except Exception: log.exception("storage/memory init failed")
     try:
         from handlers.friend_engine import register
         register(app)
@@ -77,7 +81,7 @@ async def _post_init(app):
         from handlers.presence_engine import register,silence_check
         register(app); app.job_queue.run_daily(silence_check,time=time(2,0,tzinfo=ORACLE_TZ),name="presence_silence_check")
     except Exception: log.exception("presence engine registration failed")
-    log.info("AUTONOMOUS_CANONICAL_READY | legacy_social_scheduler=disabled | friend_engine=on")
+    log.info("AUTONOMOUS_CANONICAL_READY | legacy_social_scheduler=disabled | friend_engine=on | memory=on")
     log.info("Post-init complete — Midnight Oracle is ready")
 def _error(update,context): log.error("TELEGRAM_HANDLER_ERROR | update=%s | error=%r",getattr(update,"update_id","?"),context.error,exc_info=context.error)
 def main():
