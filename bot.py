@@ -19,11 +19,12 @@ import startup; startup.init(_storage_client)
 from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, PollAnswerHandler, PollHandler, InlineQueryHandler, filters
 import legacy_bot
-from midnight_oracle.friend_engine import FriendEngine
 from midnight_oracle.database import Database
 from midnight_oracle.friend_engine import FriendEngine as Phase1FriendEngine, GroupContext as Phase1GroupContext
 from midnight_oracle.memory_engine import MemoryEngine as Phase1MemoryEngine
+from midnight_oracle.mood_engine import MoodEngine
 from midnight_oracle.generators.reply_generator import ReplyGenerator
+from midnight_oracle.handlers.message_handler import MessageRouter
 
 if hasattr(legacy_bot,"GROUP_CHAT_ID") and legacy_bot.GROUP_CHAT_ID==0: legacy_bot.GROUP_CHAT_ID=GROUP_CHAT_ID
 
@@ -62,7 +63,7 @@ async def _phase1_direct_reply(update, context, text: str, bot_username: str) ->
 
 
 async def _resilient_ai_handler(update, context):
-    """Own the complete text decision path while yielding to active durable games."""
+    """Own the complete text decision path while yielding to active durable games and social engines."""
     message=getattr(update,"effective_message",None) or getattr(update,"message",None); text=(getattr(message,"text",None) or "").strip(); bot_username=""
     if not message or not text or text.startswith("/"): return
     chat_type=getattr(message.chat,"type","")
@@ -73,8 +74,12 @@ async def _resilient_ai_handler(update, context):
             if active and active["game_type"]=="word_scramble":
                 await handle_game_message(update,context)
                 return
+            router=context.application.bot_data.get("oracle_router")
+            if router:
+                await router.handle(update,context)
+                return
         except Exception:
-            log.exception("DURABLE_GAME_MESSAGE_FAILURE")
+            log.exception("DURABLE_SOCIAL_MESSAGE_FAILURE")
             return
     try: bot_username=await legacy_bot._get_bot_username(context.bot)
     except Exception: pass
@@ -197,6 +202,7 @@ async def _post_init(app):
         _phase1_db=Database(os.getenv("ORACLE_DATABASE_PATH","midnight_oracle.sqlite3")); await _phase1_db.connect()
         _phase1_memory=Phase1MemoryEngine(_phase1_db); _phase1_engine=Phase1FriendEngine(_phase1_db); _phase1_replies=ReplyGenerator()
         app.bot_data["oracle_db"]=_phase1_db
+        app.bot_data["oracle_router"]=MessageRouter(_phase1_engine,_phase1_memory,MoodEngine(),_phase1_replies)
         from midnight_oracle.scheduler import OracleScheduler
         oracle_scheduler=OracleScheduler(app,_phase1_db,ORACLE_TZ); oracle_scheduler.start(); app.bot_data["oracle_scheduler"]=oracle_scheduler
         log.info("PHASE1_FRIEND_ENGINE_READY | storage=sqlite | generation=openai")
