@@ -10,7 +10,7 @@ from .memory_engine import MemoryEngine
 from .mood_engine import MoodEngine
 from .handlers.message_handler import MessageRouter
 from .handlers.callback_handler import handle_callback
-from .handlers.command_handler import start, help_command, truth, memory, mymemory, forget
+from .handlers.command_handler import start, help_command, oracle, truth, memory, mymemory, forget, quiet, wake
 from .scheduler import OracleScheduler
 from .utils.logger import configure_logging, get_logger
 
@@ -35,6 +35,9 @@ async def _post_init(application: Application) -> None:
 
 async def _post_shutdown(application: Application) -> None:
     """Close persistent resources cleanly during application shutdown."""
+    scheduler = application.bot_data.get("oracle_scheduler")
+    if scheduler and scheduler.scheduler.running:
+        scheduler.scheduler.shutdown(wait=False)
     db = application.bot_data.get("oracle_db")
     if db:
         await db.close()
@@ -52,12 +55,8 @@ def build_application() -> Application:
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN is required")
     application = Application.builder().token(BOT_TOKEN).post_init(_post_init).post_shutdown(_post_shutdown).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("truth", truth))
-    application.add_handler(CommandHandler("memory", memory))
-    application.add_handler(CommandHandler("mymemory", mymemory))
-    application.add_handler(CommandHandler("forget", forget))
+    for name, callback in (("start", start), ("help", help_command), ("oracle", oracle), ("truth", truth), ("memory", memory), ("mymemory", mymemory), ("forget", forget), ("quiet", quiet), ("wake", wake)):
+        application.add_handler(CommandHandler(name, callback))
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _route_message))
     return application
