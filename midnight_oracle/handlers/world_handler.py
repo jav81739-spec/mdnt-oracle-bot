@@ -87,12 +87,15 @@ async def handle_poll(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
             await WouldYouRatherGame(db).close_poll(p.id,context.bot,int(state['group_id']));return
 
 async def end_game(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    """Gracefully end an active game and cancel scramble timeout."""
+    """Gracefully end an active game, including scramble partial scores."""
     if not update.effective_chat:return
     db=context.application.bot_data['oracle_db'];gid=update.effective_chat.id;sched=context.application.bot_data.get('oracle_scheduler')
     if sched:
         try:sched.scheduler.remove_job(f'scramble_timeout_{gid}')
         except Exception:pass
+    row=await db.fetchone("SELECT game_type FROM game_sessions WHERE group_id=? AND is_active=1 ORDER BY id DESC LIMIT 1",(gid,))
+    if row and row['game_type']=='word_scramble':
+        await update.effective_message.reply_text(await WordScrambleGame(db).endgame(gid));return
     await update.effective_message.reply_text(await GameEngine(db).endgame(gid))
 
 async def game_callback(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
