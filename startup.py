@@ -1,16 +1,4 @@
-"""
-startup.py — Midnight Oracle canonical startup manager.
-
-Fixes every P0 architectural problem:
-  ✅ Single entrypoint — import this from bot.py, nothing else
-  ✅ Polling ownership — only one instance ever polls Telegram
-  ✅ Stale lease recovery — expired leases auto-released
-  ✅ Clean async lifecycle — no asyncio.run() inside threads
-  ✅ Graceful SIGTERM — releases lease before exit
-  ✅ Health server — isolated from bot async lifecycle
-  ✅ Chat registry — auto-discovers groups/channels on every update
-"""
-
+"""Midnight Oracle runtime: single-instance polling, health, registry and shutdown."""
 from __future__ import annotations
 
 import asyncio
@@ -22,183 +10,197 @@ import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Optional
 
 log = logging.getLogger("midnight.startup")
 
-_LEASE_KEY        = "midnight:polling_lease"
-_LEASE_TTL        = 60
-_LEASE_REFRESH    = 20
-_LEASE_WAIT_MAX   = 90
-_INSTANCE_ID      = f"{socket.gethostname()}:{os.getpid()}"
+_LEASE_KEY = "midnight:polling_lease"
+_LEASE_TTL = 60
+_LEASE_REFRESH = 20
+_LEASE_WAIT_MAX = 90
+_INSTANCE_ID = f"{socket.gethostname()}:{os.getpid()}"
 
-_storage          = None
-_app              = None
-_lease_task: Optional[asyncio.Task] = None
-_health_server: Optional[HTTPServer] = None
-_shutting_down    = False
+_storage = None
+_app = None
+_lease_task = None
+_health_server = None
+_shutting_down = False
+_ready = False
+_lease_token = f"{_INSTANCE_ID}:{time.time_ns()}"
+_REGISTRY_KEY = "midnight:chat_registry"
 
-async def _store_get(key: str) -> Optional[str]:
+
+def init(storage_client=None):
+    global _storage
+    _storage = storage_client
+
+
+async def _store_get(key):
+    if _storage is None:
+        return None
     try:
-        if _storage is None:
-            return None
-        result = _storage.get(key)
-        if asyncio.iscoroutine(result):
-            result = await result
-        return result
+        value = _storage.get(key)
+        return await value if asyncio.iscoroutine(value) else value
     except Exception as exc:
-        log.debug("storage.get(%s) failed: %s", key, exc)
+        log.warning("storage GET failed | key=%s | %s", key, exc)
         return None
 
-async def _store_set(key: str, value: str, ttl: int = 0) -> bool:
+
+async def _store_set(key, value, ttl=0):
+    if _storage is None:
+        return False
     try:
-        if _storage is None:
-            return False
-        if ttl:
-            result = _storage.setex(key, ttl, value)
-        else:
-            result = _storage.set(key, value)
+        result = _storage.setex(key, ttl, value) if ttl else _storage.set(key, value)
         if asyncio.iscoroutine(result):
-            await result
-        return True
+            result = await result
+        return bool(result)
     except Exception as exc:
-        log.debug("storage.set(%s) failed: %s", key, exc)
+        log.warning("storage SET failed | key=%s | %s", key, exc)
         return False
 
-async def _store_delete(key: str) -> bool:
+
+async def _store_setnx(key, value, ttl):
+    if _storage is None:
+        return False
     try:
-        if _storage is None:
-            return False
+        result = _storage.setnx(key, value, ttl=ttl)
+        if asyncio.iscoroutine(result):
+            result = await result
+        return bool(result)
+    except Exception as exc:
+        log.warning("storage SETNX failed | key=%s | %s", key, exc)
+        return False
+
+
+async def _store_delete(key):
+    if _storage is None:
+        return False
+    try:
         result = _storage.delete(key)
         if asyncio.iscoroutine(result):
-            await result
-        return True
+            result = await result
+        return bool(result)
     except Exception as exc:
-        log.debug("storage.delete(%s) failed: %s", key, exc)
+        log.warning("storage DELETE failed | key=%s | %s", key, exc)
         return False
 
-async def _acquire_lease() -> bool:
-    """Try to acquire the polling lease. Returns True if we own it."""
-    raw = await _store_get(_LEASE_KEY)
-    if raw:
+
+async def _compare_and_refresh_lease():
+    payload = json.dumps({"instance": _INSTANCE_ID, "token": _lease_token, "ts": time.time()})
+    script = "if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('SET',KEYS[1],ARGV[2],'EX',ARGV[3]) else return 0 end"
+    if _storage is None:
+        return False
+    try:
+        if hasattr(_storage, "eval"):
+            result = _storage.eval(script, [_LEASE_KEY], [json.dumps({"instance": _INSTANCE_ID, "token": _lease_token, "ts": 0}), payload, str(_LEASE_TTL)])
+            if asyncio.iscoroutine(result):
+                result = await result
+            return str(result).upper() in {"OK", "TRUE", "1"}
+        current = await _store_get(_LEASE_KEY)
+        if current:
+            data = json.loads(current)
+            if data.get("token") == _lease_token:
+                return await _store_set(_LEASE_KEY, payload, _LEASE_TTL)
+    except Exception as exc:
+        log.warning("Lease refresh failed: %s", exc)
+    return False
+
+
+async def _acquire_lease():
+    """Atomically acquire the polling lease; never use GET→SET for ownership."""
+    payload = json.dumps({"instance": _INSTANCE_ID, "token": _lease_token, "ts": time.time()})
+    if await _store_setnx(_LEASE_KEY, payload, _LEASE_TTL):
+        log.info("Polling lease acquired | instance=%s", _INSTANCE_ID)
+        return True
+    current = await _store_get(_LEASE_KEY)
+    if current:
         try:
-            info = json.loads(raw)
-            owner = info.get("instance")
-            ts = info.get("ts", 0)
-            age = time.time() - ts
-            if owner == _INSTANCE_ID:
-                await _refresh_lease()
-                return True
-            if age < _LEASE_TTL:
-                log.info(
-                    "POLLING_LEASE held by %s (age %.0fs, TTL %ds)",
-                    owner, age, _LEASE_TTL,
-                )
-                return False
-            log.warning(
-                "Stale lease from %s (age %.0fs > TTL %ds) — reclaiming",
-                owner, age, _LEASE_TTL,
-            )
+            data = json.loads(current)
+            age = time.time() - float(data.get("ts", 0))
+            log.info("POLLING_LEASE busy | owner=%s | age=%.0fs", data.get("instance"), age)
         except Exception:
-            pass
+            log.info("POLLING_LEASE busy | owner=unknown")
+    return False
 
-    payload = json.dumps({"instance": _INSTANCE_ID, "ts": time.time()})
-    ok = await _store_set(_LEASE_KEY, payload, ttl=_LEASE_TTL)
-    if ok:
-        log.info("Polling lease acquired by %s", _INSTANCE_ID)
-    return ok
-
-async def _refresh_lease():
-    payload = json.dumps({"instance": _INSTANCE_ID, "ts": time.time()})
-    await _store_set(_LEASE_KEY, payload, ttl=_LEASE_TTL)
 
 async def _release_lease():
-    raw = await _store_get(_LEASE_KEY)
-    if raw:
-        try:
-            info = json.loads(raw)
-            if info.get("instance") == _INSTANCE_ID:
-                await _store_delete(_LEASE_KEY)
-                log.info("Polling lease released by %s", _INSTANCE_ID)
-                return
-        except Exception:
-            pass
-    log.debug("Lease not owned by us — skipping release")
+    global _lease_token
+    current = await _store_get(_LEASE_KEY)
+    if not current:
+        return
+    try:
+        data = json.loads(current)
+        if data.get("token") != _lease_token:
+            return
+        script = "if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end"
+        if hasattr(_storage, "eval"):
+            result = _storage.eval(script, [_LEASE_KEY], [current])
+            if asyncio.iscoroutine(result):
+                await result
+        else:
+            await _store_delete(_LEASE_KEY)
+        log.info("Polling lease released | instance=%s", _INSTANCE_ID)
+    except Exception as exc:
+        log.warning("Lease release failed: %s", exc)
+
 
 async def _lease_heartbeat_loop():
     while not _shutting_down:
         await asyncio.sleep(_LEASE_REFRESH)
         if _shutting_down:
             break
-        try:
-            await _refresh_lease()
-        except Exception as exc:
-            log.warning("Lease refresh failed: %s", exc)
+        if not await _compare_and_refresh_lease():
+            log.error("Polling lease ownership lost — stopping bot to prevent duplicate polling")
+            asyncio.create_task(_graceful_shutdown())
+            return
 
-async def _wait_for_lease() -> bool:
-    """Wait for a graceful handoff, then reclaim a lease that outlived its owner."""
+
+async def _wait_for_lease():
     deadline = time.time() + _LEASE_WAIT_MAX
     while time.time() < deadline:
         if await _acquire_lease():
             return True
         remaining = max(0, deadline - time.time())
-        wait = min(5, remaining)
-        if wait <= 0:
-            break
-        log.info(
-            "POLLING_LEASE busy — waiting %.0fs (%.0fs remaining)",
-            wait, remaining,
-        )
-        await asyncio.sleep(wait)
-
-    # The old lease has survived the full handoff window. At this point the
-    # new deployment must be allowed to start; the lease itself has a TTL.
-    log.warning(
-        "POLLING_LEASE still held after %ds — reclaiming lease",
-        _LEASE_WAIT_MAX,
-    )
-    await _store_delete(_LEASE_KEY)
+        await asyncio.sleep(min(5, remaining))
+    log.warning("POLLING_LEASE still busy after %ds; waiting for TTL instead of deleting another owner's lease", _LEASE_WAIT_MAX)
     return await _acquire_lease()
 
-_REGISTRY_KEY = "midnight:chat_registry"
 
 async def register_chat(chat_id: int, chat_type: str, title: str = ""):
     if chat_type == "private":
         return
     try:
         raw = await _store_get(_REGISTRY_KEY)
-        registry: dict = json.loads(raw) if raw else {}
-        registry[str(chat_id)] = {
-            "type": chat_type,
-            "title": title[:100],
-            "seen": int(time.time()),
-        }
+        registry = json.loads(raw) if raw else {}
+        registry[str(chat_id)] = {"type": chat_type, "title": (title or "")[:100], "seen": int(time.time())}
         await _store_set(_REGISTRY_KEY, json.dumps(registry, ensure_ascii=False))
     except Exception as exc:
-        log.debug("register_chat failed: %s", exc)
+        log.warning("register_chat failed | chat=%s | %s", chat_id, exc)
 
-async def get_chat_registry() -> dict:
+
+async def get_chat_registry():
     try:
         raw = await _store_get(_REGISTRY_KEY)
         return json.loads(raw) if raw else {}
     except Exception:
         return {}
 
-async def get_broadcast_targets(include_groups: bool = True, include_channels: bool = True) -> list[int]:
+
+async def get_broadcast_targets(include_groups=True, include_channels=True):
     registry = await get_chat_registry()
     targets = []
-    for cid_str, info in registry.items():
-        t = info.get("type", "")
-        if include_groups and t in ("group", "supergroup"):
-            targets.append(int(cid_str))
-        elif include_channels and t == "channel":
-            targets.append(int(cid_str))
+    for cid, info in registry.items():
+        kind = info.get("type", "")
+        if include_groups and kind in ("group", "supergroup"):
+            targets.append(int(cid))
+        elif include_channels and kind == "channel":
+            targets.append(int(cid))
     return targets
 
+
 class _HealthHandler(BaseHTTPRequestHandler):
-    def _respond(self, status: int, body: bytes, ctype: str = "text/plain"):
+    def _respond(self, status, body):
         self.send_response(status)
-        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -207,16 +209,11 @@ class _HealthHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path in ("/", "/health", "/healthz"):
-            status = "shutting_down" if _shutting_down else "ok"
-            code = 503 if _shutting_down else 200
-            body = json.dumps({"status": status, "instance": _INSTANCE_ID}).encode()
-            self._respond(code, body, "application/json")
+            self._respond(200, json.dumps({"status": "ok" if not _shutting_down else "shutting_down", "ready": _ready, "instance": _INSTANCE_ID}).encode())
         elif self.path == "/ready":
-            ready = (_app is not None) and (not _shutting_down)
-            code = 200 if ready else 503
-            self._respond(code, json.dumps({"ready": ready}).encode(), "application/json")
+            self._respond(200 if _ready and not _shutting_down else 503, json.dumps({"ready": _ready and not _shutting_down}).encode())
         else:
-            self._respond(404, b'{"status":"not_found"}', "application/json")
+            self._respond(404, b'{"status":"not_found"}')
 
     def do_HEAD(self):
         self.do_GET()
@@ -224,31 +221,34 @@ class _HealthHandler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         return
 
+
 class _ReuseHTTPServer(HTTPServer):
     allow_reuse_address = True
 
-def start_health_server() -> HTTPServer:
+
+def start_health_server():
     global _health_server
     port = int(os.getenv("PORT", "10000"))
     _health_server = _ReuseHTTPServer(("0.0.0.0", port), _HealthHandler)
-    t = threading.Thread(target=_health_server.serve_forever, daemon=True, name="midnight-health")
-    t.start()
+    threading.Thread(target=_health_server.serve_forever, daemon=True, name="midnight-health").start()
     log.info("Health server listening on 0.0.0.0:%d", port)
     return _health_server
 
-def _install_signal_handlers(loop: asyncio.AbstractEventLoop):
-    def _handle_signal(signum, _frame):
-        name = signal.Signals(signum).name
-        log.info("Received %s — initiating graceful shutdown", name)
-        loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_graceful_shutdown(), loop=loop))
-    signal.signal(signal.SIGTERM, _handle_signal)
-    signal.signal(signal.SIGINT, _handle_signal)
+
+def _install_signal_handlers(loop):
+    def handler(signum, _frame):
+        log.info("Received %s — initiating graceful shutdown", signal.Signals(signum).name)
+        loop.call_soon_threadsafe(lambda: asyncio.create_task(_graceful_shutdown()))
+    signal.signal(signal.SIGTERM, handler)
+    signal.signal(signal.SIGINT, handler)
+
 
 async def _graceful_shutdown():
-    global _shutting_down
+    global _shutting_down, _ready
     if _shutting_down:
         return
     _shutting_down = True
+    _ready = False
     log.info("Graceful shutdown started")
     if _lease_task and not _lease_task.done():
         _lease_task.cancel()
@@ -258,8 +258,10 @@ async def _graceful_shutdown():
             pass
     if _app is not None:
         try:
-            await _app.updater.stop()
-            await _app.stop()
+            if _app.updater.running:
+                await _app.updater.stop()
+            if _app.running:
+                await _app.stop()
             await _app.shutdown()
             log.info("Telegram application stopped")
         except Exception as exc:
@@ -268,40 +270,35 @@ async def _graceful_shutdown():
     if _health_server:
         threading.Thread(target=_health_server.shutdown, daemon=True).start()
     log.info("Graceful shutdown complete")
-    asyncio.get_running_loop().stop()
+
 
 async def run(application, storage_client=None):
-    global _storage, _app, _lease_task
-    if not logging.root.handlers:
-        logging.basicConfig(
-            format="%(asctime)s %(name)s %(levelname)s %(message)s",
-            level=logging.INFO,
-        )
+    global _storage, _app, _lease_task, _ready
     _storage = storage_client
     _app = application
     loop = asyncio.get_running_loop()
     _install_signal_handlers(loop)
     start_health_server()
+
     if not await _wait_for_lease():
-        log.critical("Cannot start: polling lease unavailable. Exiting.")
+        log.critical("Cannot start: polling lease unavailable")
         return
-    _lease_task = asyncio.ensure_future(_lease_heartbeat_loop())
+
+    _lease_task = asyncio.create_task(_lease_heartbeat_loop(), name="polling_lease_heartbeat")
     log.info("Starting Telegram polling — instance %s", _INSTANCE_ID)
     try:
         await application.initialize()
         await application.start()
         await application.updater.start_polling(
             drop_pending_updates=True,
-            allowed_updates=["message", "edited_message", "callback_query", "chat_member", "my_chat_member"],
+            allowed_updates=["message", "edited_message", "callback_query", "chat_member", "my_chat_member", "channel_post"],
         )
+        _ready = True
+        log.info("Telegram polling active | ready=true")
         await asyncio.Event().wait()
     except asyncio.CancelledError:
         pass
-    except Exception as exc:
-        log.exception("Fatal error in polling loop: %s", exc)
+    except Exception:
+        log.exception("Fatal error in polling loop")
     finally:
         await _graceful_shutdown()
-
-def init(storage_client=None):
-    global _storage
-    _storage = storage_client
