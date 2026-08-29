@@ -20,6 +20,14 @@ except ImportError:
 
 log = logging.getLogger("midnight.registry")
 
+_AUTONOMOUS_JOB_NAMES = {
+    "energy_forecast", "mirror_of_day", "the_unnamed", "friction_pair",
+    "midnight_wrap", "soul_thread", "shadow_scan", "constellation_map",
+    "oracle_archive", "viral_pull", "signal_pair", "constellation",
+    "the_chosen", "orbit_map", "glow_signal", "void_pair",
+    "the_confession", "wild_signal",
+}
+
 
 def build_application(token, storage_client):
     app = Application.builder().token(token).build()
@@ -103,6 +111,21 @@ async def _set_commands(app):
         log.exception("Could not set command menu")
 
 
+def _clear_legacy_autonomous_jobs(jq):
+    removed = []
+    for job in list(jq.jobs()):
+        name = getattr(job, "name", "")
+        if name in _AUTONOMOUS_JOB_NAMES or name.startswith("oracle_autonomous:"):
+            jq.scheduler.remove_job(job.id)
+            removed.append(name)
+    if removed:
+        log.warning(
+            "AUTONOMOUS_LEGACY_JOBS_REMOVED | count=%d | names=%s",
+            len(removed), ",".join(removed),
+        )
+    return len(removed)
+
+
 def configure_lifecycle(app, storage_client, oracle_tz):
     async def post_init():
         log.info("BOOT_DIAGNOSTIC | post_init entered")
@@ -116,14 +139,30 @@ def configure_lifecycle(app, storage_client, oracle_tz):
         from handlers.oracle_governor import install as install_oracle_governor
 
         init_storage(storage_client)
+
+        if hasattr(legacy_bot, "_post_init"):
+            try:
+                await legacy_bot._post_init(app)
+            except Exception:
+                log.exception("legacy_bot._post_init failed")
+
+        jq = app.job_queue
+        if not jq:
+            log.error("AUTOMATION_SCHEDULER_DISABLED | JobQueue unavailable")
+            register_presence(app)
+            help_register(app)
+            log.info("Post-init complete — Midnight Oracle is ready")
+            return
+
+        removed = _clear_legacy_autonomous_jobs(jq)
+        log.info("AUTONOMOUS_LEGACY_CLEANUP | removed=%d", removed)
+
         install_oracle_governor(social_engine)
         log.info(
             "Oracle delivery governor installed | enabled=%s",
             bool(getattr(social_engine, "_governor_installed", False)),
         )
 
-        # Explicit scheduler integration. Do not monkey-patch social_engine._w;
-        # that made the APScheduler callback path fragile and hard to diagnose.
         from handlers.autonomous_scheduler import register as register_autonomous
         autonomous_count = register_autonomous(
             app,
@@ -136,40 +175,30 @@ def configure_lifecycle(app, storage_client, oracle_tz):
         register_presence(app)
         help_register(app)
 
-        jq = app.job_queue
-        if jq:
-            jq.run_repeating(homecoming_job, interval=21600, first=30, name="hidden_homecoming")
-            jq.run_daily(
-                silence_check,
-                time=datetime.now(oracle_tz).replace(hour=2, minute=0, second=0, microsecond=0).timetz(),
-                name="silence_check",
+        jq.run_repeating(homecoming_job, interval=21600, first=30, name="hidden_homecoming")
+        jq.run_daily(
+            silence_check,
+            time=datetime.now(oracle_tz).replace(hour=2, minute=0, second=0, microsecond=0).timetz(),
+            name="silence_check",
+        )
+
+        async def oracle_scheduler_probe(context):
+            log.info(
+                "AUTONOMOUS_SCHEDULER_PROBE | callback=entered | governor=%s",
+                bool(getattr(social_engine, "_governor_installed", False)),
             )
 
-            async def oracle_scheduler_probe(context):
-                log.info(
-                    "AUTONOMOUS_SCHEDULER_PROBE | callback=entered | governor=%s",
-                    bool(getattr(social_engine, "_governor_installed", False)),
-                )
+        jq.run_once(oracle_scheduler_probe, when=10, name="oracle_scheduler_probe")
 
-            jq.run_once(oracle_scheduler_probe, when=10, name="oracle_scheduler_probe")
-
-            try:
-                jobs = list(jq.jobs())
-                job_names = [getattr(j, "name", "?") for j in jobs]
-                log.info(
-                    "AUTOMATION_SCHEDULER_JOBS | jobs=%d | names=%s",
-                    len(jobs), ",".join(job_names),
-                )
-            except Exception:
-                log.exception("Could not inspect scheduled jobs")
-        else:
-            log.error("AUTOMATION_SCHEDULER_DISABLED | JobQueue unavailable")
-
-        if hasattr(legacy_bot, "_post_init"):
-            try:
-                await legacy_bot._post_init(app)
-            except Exception:
-                log.exception("legacy_bot._post_init failed")
+        try:
+            jobs = list(jq.jobs())
+            job_names = [getattr(j, "name", "?") for j in jobs]
+            log.info(
+                "AUTOMATION_SCHEDULER_JOBS | jobs=%d | names=%s",
+                len(jobs), ",".join(job_names),
+            )
+        except Exception:
+            log.exception("Could not inspect scheduled jobs")
 
         log.info("Post-init complete — Midnight Oracle is ready")
 
