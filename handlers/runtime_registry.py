@@ -108,7 +108,7 @@ def configure_lifecycle(app, storage_client, oracle_tz):
         log.info("BOOT_DIAGNOSTIC | post_init entered")
         await _set_commands(app)
 
-        from handlers.social_engine import register_jobs, init_storage
+        from handlers.social_engine import init_storage
         from handlers.presence_engine import register as register_presence, silence_check
         from handlers.help_command import register as help_register
         from handlers.homecoming import homecoming_job
@@ -122,18 +122,21 @@ def configure_lifecycle(app, storage_client, oracle_tz):
             bool(getattr(social_engine, "_governor_installed", False)),
         )
 
-        jq = app.job_queue
-        if jq and not hasattr(jq, "run_weekly"):
-            def _run_weekly(callback, time, weekday=None, days=(), name=None, data=None, job_kwargs=None):
-                day = weekday if weekday is not None else (days[0] if days else 0)
-                return jq.run_daily(callback, time=time, days=(day,), name=name, data=data, job_kwargs=job_kwargs)
-            jq.run_weekly = _run_weekly
-            log.info("Installed run_weekly compatibility adapter")
+        # Explicit scheduler integration. Do not monkey-patch social_engine._w;
+        # that made the APScheduler callback path fragile and hard to diagnose.
+        from handlers.autonomous_scheduler import register as register_autonomous
+        autonomous_count = register_autonomous(
+            app,
+            social_engine,
+            social_engine._governed_run_feature,
+            oracle_tz,
+        )
+        log.info("AUTOMATION_SCHEDULER_READY | autonomous_features=%d", autonomous_count)
 
-        register_jobs(app)
         register_presence(app)
         help_register(app)
 
+        jq = app.job_queue
         if jq:
             jq.run_repeating(homecoming_job, interval=21600, first=30, name="hidden_homecoming")
             jq.run_daily(
@@ -142,8 +145,6 @@ def configure_lifecycle(app, storage_client, oracle_tz):
                 name="silence_check",
             )
 
-            # Non-user-facing scheduler smoke test. This fires once shortly after
-            # startup and proves that APScheduler can invoke an async callback.
             async def oracle_scheduler_probe(context):
                 log.info(
                     "AUTONOMOUS_SCHEDULER_PROBE | callback=entered | governor=%s",
@@ -156,7 +157,7 @@ def configure_lifecycle(app, storage_client, oracle_tz):
                 jobs = list(jq.jobs())
                 job_names = [getattr(j, "name", "?") for j in jobs]
                 log.info(
-                    "AUTOMATION_SCHEDULER_READY | jobs=%d | homecoming=6h | silence=02:00 | names=%s",
+                    "AUTOMATION_SCHEDULER_JOBS | jobs=%d | names=%s",
                     len(jobs), ",".join(job_names),
                 )
             except Exception:
