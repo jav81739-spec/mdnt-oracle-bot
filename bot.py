@@ -151,7 +151,7 @@ def _register_world_surface(app):
         log.exception("INLINE_SURFACE_REGISTRATION_FAILED")
     try:
         from midnight_oracle.handlers.callback_handler import handle_callback
-        app.add_handler(CallbackQueryHandler(handle_callback, pattern=r"^(reveal_|secret:|game:)$|^game:end$"), group=-19)
+        app.add_handler(CallbackQueryHandler(handle_callback, pattern=r"^(reveal_|secret:).+"), group=-19)
     except Exception:
         log.exception("CALLBACK_SURFACE_REGISTRATION_FAILED")
     try:
@@ -193,7 +193,6 @@ async def _set_commands(app):
 async def _post_init(app):
     """Initialize production services, durable world scheduling, and canonical command surfaces exactly once."""
     global _phase1_db,_phase1_engine,_phase1_memory,_phase1_replies
-    await _set_commands(app)
     try:
         _phase1_db=Database(os.getenv("ORACLE_DATABASE_PATH","midnight_oracle.sqlite3")); await _phase1_db.connect()
         _phase1_memory=Phase1MemoryEngine(_phase1_db); _phase1_engine=Phase1FriendEngine(_phase1_db); _phase1_replies=ReplyGenerator()
@@ -207,6 +206,7 @@ async def _post_init(app):
         from handlers.friend_engine import register
         register(app)
     except Exception: log.exception("FRIEND_ENGINE_REGISTRATION_FAILED")
+    await _set_commands(app)
     log.info("AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on")
 
 def _error(update,context):
