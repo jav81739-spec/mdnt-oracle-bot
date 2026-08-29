@@ -144,6 +144,10 @@ async def _post_init(app: Application):
     from handlers.homecoming import homecoming_job
 
     init_storage(_storage_client)
+    from handlers import social_engine
+    from handlers.oracle_governor import install as install_oracle_governor
+    install_oracle_governor(social_engine)
+
     jq = app.job_queue
     if jq and not hasattr(jq, "run_weekly"):
         def _run_weekly(callback, time, weekday=None, days=(), name=None, data=None, job_kwargs=None):
