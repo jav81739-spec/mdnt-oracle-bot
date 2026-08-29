@@ -39,23 +39,23 @@ class Database:
             if name not in cols:await self._db.execute(f'ALTER TABLE secret_events_log ADD COLUMN {name} {definition}')
         await self._db.commit()
     async def _table_columns(self,table:str)->set[str]:
-        """Return existing column names for a table.""";
+        """Return existing column names for a table."""
         async with self.db.execute(f'PRAGMA table_info({table})') as cur:return {str(r[1]) for r in await cur.fetchall()}
     async def close(self)->None:
-        """Close the SQLite connection safely.""";
+        """Close the SQLite connection safely."""
         if self._db is not None:await self._db.close();self._db=None
     @property
     def db(self)->aiosqlite.Connection:
-        """Return the connected database.""";
+        """Return the connected database."""
         if self._db is None:raise RuntimeError('Database is not connected')
         return self._db
     async def execute(self,sql:str,params:tuple=())->None:
         """Execute and commit a write.""";await self.db.execute(sql,params);await self.db.commit()
     async def fetchone(self,sql:str,params:tuple=())->aiosqlite.Row|None:
-        """Fetch one row.""";
+        """Fetch one row."""
         async with self.db.execute(sql,params) as cur:return await cur.fetchone()
     async def fetchall(self,sql:str,params:tuple=())->list[aiosqlite.Row]:
-        """Fetch all rows.""";
+        """Fetch all rows."""
         async with self.db.execute(sql,params) as cur:return await cur.fetchall()
     async def upsert_member(self,user_id:int,group_id:int,username:str,name:str)->None:
         """Create or refresh a member without replacing learned fields.""";ts=now_ts();await self.execute("INSERT INTO members(user_id,group_id,username,preferred_name,last_seen,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,group_id) DO UPDATE SET username=excluded.username,last_seen=excluded.last_seen,preferred_name=CASE WHEN members.preferred_name='' THEN excluded.preferred_name ELSE members.preferred_name END",(user_id,group_id,username or '',name or '',ts,ts))
@@ -78,27 +78,35 @@ class Database:
     async def get_active_wyr_session(self,group_id:int)->aiosqlite.Row|None:
         """Return the active WYR session for a group.""";return await self.fetchone("SELECT * FROM game_sessions WHERE group_id=? AND game_type='would_you_rather' AND is_active=1 ORDER BY id DESC LIMIT 1",(group_id,))
     async def update_wyr_votes(self,poll_id:str,user_id:int,option:int)->bool:
-        """Atomically record one WYR vote and reject duplicate voters."""
+        """Atomically record or move a WYR vote."""
+        if option not in (0,1):return False
         await self.db.execute('BEGIN IMMEDIATE')
         try:
-            rows=await self.db.execute("SELECT id,state FROM game_sessions WHERE game_type='would_you_rather' AND is_active=1")
+            async with self.db.execute("SELECT id,state FROM game_sessions WHERE game_type='would_you_rather' AND is_active=1") as cur:rows=await cur.fetchall()
+            import json
             found=None
-            for r in await rows.fetchall():
-                import json
-                s=json.loads(r[1]);
+            for r in rows:
+                try:s=json.loads(r[1])
+                except (TypeError,ValueError):continue
                 if str(s.get('poll_id'))==str(poll_id):found=(int(r[0]),s);break
             if not found:await self.db.rollback();return False
             sid,state=found;uid=str(user_id);a=state.setdefault('voters_a',[]);b=state.setdefault('voters_b',[])
-            if uid in a or uid in b:await self.db.rollback();return False
-            (a if option==0 else b).append(uid);await self.db.execute('UPDATE game_sessions SET state=? WHERE id=?',(json.dumps(state),sid));await self.db.commit();return True
+            if uid in a:a.remove(uid)
+            if uid in b:b.remove(uid)
+            (a if option==0 else b).append(uid)
+            await self.db.execute('UPDATE game_sessions SET state=? WHERE id=? AND is_active=1',(json.dumps(state),sid));await self.db.commit();return True
         except Exception:await self.db.rollback();raise
     async def close_wyr_session(self,poll_id:str,result:dict)->bool:
         """Atomically close a WYR session and record its history."""
         import json
         await self.db.execute('BEGIN IMMEDIATE')
         try:
-            rows=await self.db.execute("SELECT id,group_id FROM game_sessions WHERE game_type='would_you_rather' AND is_active=1 AND state LIKE ?",(f'%"poll_id": "{poll_id}"%',))
-            row=await rows.fetchone()
+            async with self.db.execute("SELECT id,group_id,state FROM game_sessions WHERE game_type='would_you_rather' AND is_active=1") as cur:rows=await cur.fetchall()
+            row=None
+            for r in rows:
+                try:
+                    if str(json.loads(r[2]).get('poll_id'))==str(poll_id):row=r;break
+                except (TypeError,ValueError):continue
             if not row:await self.db.rollback();return False
             sid,gid=int(row[0]),int(row[1]);cur=await self.db.execute('UPDATE game_sessions SET is_active=0,ended_at=? WHERE id=? AND is_active=1',(now_ts(),sid))
             if cur.rowcount!=1:await self.db.rollback();return False
