@@ -19,7 +19,7 @@ import startup; startup.init(_storage_client)
 from telegram import BotCommand, BotCommandScopeDefault, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, BotCommandScopeAllChatAdministrators, BotCommandScopeChat
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 import legacy_bot
-from friend_engine import FriendEngine
+from midnight_oracle.friend_engine import FriendEngine
 from midnight_oracle.database import Database
 from midnight_oracle.friend_engine import FriendEngine as Phase1FriendEngine, GroupContext as Phase1GroupContext
 from midnight_oracle.memory_engine import MemoryEngine as Phase1MemoryEngine
