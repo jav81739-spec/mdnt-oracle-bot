@@ -4,9 +4,7 @@ Kept outside bot.py so the production entrypoint remains a tiny lifecycle adapte
 """
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 from datetime import datetime
 
 from telegram import BotCommand
@@ -27,19 +25,35 @@ log = logging.getLogger("midnight.registry")
 
 
 def build_application(token, storage_client):
+    """Build the single Telegram application while preserving legacy handlers."""
     app = Application.builder().token(token).build()
 
     async def chat_registry(update, context):
+        """Record chats as soon as Telegram delivers an update from them."""
         chat_obj = getattr(update, "effective_chat", None)
         if chat_obj and chat_obj.type in ("group", "supergroup", "channel"):
-            from startup import register_chat
-            await register_chat(chat_obj.id, chat_obj.type, chat_obj.title or "")
+            try:
+                from startup import register_chat
+                await register_chat(chat_obj.id, chat_obj.type, chat_obj.title or "")
+            except Exception:
+                log.exception("CHAT_REGISTRY_FAILED | chat_id=%s", getattr(chat_obj, "id", None))
 
     app.add_handler(MessageHandler(filters.ALL, chat_registry), group=-999)
 
-    from handlers.engagement_engine import init_storage as init_engagement_storage, register as register_engagement
-    init_engagement_storage(storage_client)
-    register_engagement(app)
+    # engagement_engine was part of an intermediate integration and is not
+    # required for the canonical runtime. Do not make a missing optional module
+    # fatal to the bot or to the existing command stack.
+    try:
+        from handlers.engagement_engine import (
+            init_storage as init_engagement_storage,
+            register as register_engagement,
+        )
+        init_engagement_storage(storage_client)
+        register_engagement(app)
+    except ModuleNotFoundError:
+        log.info("Optional engagement_engine not present; continuing with canonical social engine")
+    except Exception:
+        log.exception("Optional engagement registration failed; continuing")
 
     if hasattr(legacy_bot, "register_handlers"):
         legacy_bot.register_handlers(app)
@@ -53,12 +67,19 @@ def build_application(token, storage_client):
     if hasattr(legacy_bot, "announce_command"):
         app.add_handler(CommandHandler("announce", legacy_bot.announce_command))
 
-    from handlers.midnightmap import register as register_midnightmap
-    register_midnightmap(app)
+    # midnightmap.py exposes the command itself, not a register() function.
+    # Register it directly so the owner-only command remains alive.
+    try:
+        from handlers.midnightmap import midnightmap_command
+        app.add_handler(CommandHandler("midnightmap", midnightmap_command))
+    except Exception:
+        log.exception("MIDNIGHTMAP_REGISTRATION_FAILED")
+
     return app
 
 
 def _shim_register(app):
+    """Register the legacy command/module surface when legacy_bot has no registry."""
     command_map = {
         "oracle": "oracle_new_command", "aura": "aura_command", "identity": "identity_command",
         "vibecheck": "vibecheck_command", "shadow": "shadow_command", "element": "element_command",
@@ -75,7 +96,10 @@ def _shim_register(app):
     for module in (chat, games, moderation, utility, aesthetic, friendship, fun,
                    matchmaking, stats, events, economy, timecapsule, marriage, deathgames):
         if hasattr(module, "register"):
-            module.register(app)
+            try:
+                module.register(app)
+            except Exception:
+                log.exception("LEGACY_MODULE_REGISTER_FAILED | module=%s", getattr(module, "__name__", module))
 
     if hasattr(legacy_bot, "handle_ai_message"):
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, legacy_bot.handle_ai_message), group=10)
@@ -85,6 +109,7 @@ def _shim_register(app):
 
 
 async def _set_commands(app):
+    """Publish the preserved legacy command menu to Telegram."""
     commands = [
         BotCommand("oracle", "🔮 Get a reading"), BotCommand("aura", "🟣 Scan your aura"),
         BotCommand("vibecheck", "✨ Check your vibe"), BotCommand("identity", "🃏 Your archetype"),
@@ -105,7 +130,9 @@ async def _set_commands(app):
 
 
 def configure_lifecycle(app, storage_client, oracle_tz):
+    """Attach startup automation and recovery hooks to the application."""
     async def post_init():
+        """Initialize social automation, presence checks, and legacy recovery."""
         log.info("BOOT_DIAGNOSTIC | post_init entered")
         await _set_commands(app)
 
@@ -123,6 +150,7 @@ def configure_lifecycle(app, storage_client, oracle_tz):
         jq = app.job_queue
         if jq and not hasattr(jq, "run_weekly"):
             def _run_weekly(callback, time, weekday=None, days=(), name=None, data=None, job_kwargs=None):
+                """Provide a small compatibility adapter for legacy weekly jobs."""
                 day = weekday if weekday is not None else (days[0] if days else 0)
                 return jq.run_daily(callback, time=time, days=(day,), name=name, data=data, job_kwargs=job_kwargs)
             jq.run_weekly = _run_weekly
@@ -159,6 +187,7 @@ def configure_lifecycle(app, storage_client, oracle_tz):
     hooks_ran = False
 
     async def initialize_with_hooks():
+        """Run Telegram initialization once, then execute Midnight startup hooks."""
         nonlocal hooks_ran
         await original_initialize()
         if not hooks_ran:
