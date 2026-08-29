@@ -1,9 +1,4 @@
-"""
-bot.py — Midnight Oracle | One canonical entrypoint.
-
-Render runs: python bot.py
-Existing token, groups, storage keys and internal compatibility names are preserved.
-"""
+"""Midnight Oracle — canonical Render entrypoint."""
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +12,10 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-logging.basicConfig(format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s", level=logging.INFO)
+logging.basicConfig(
+    format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+    level=logging.INFO,
+)
 log = logging.getLogger("midnight.bot")
 
 from dotenv import load_dotenv
@@ -29,15 +27,19 @@ TOKEN = os.getenv("BOT_TOKEN", "").strip()
 if not TOKEN:
     log.critical("BOT_TOKEN is not set. Add it to .env or Render environment.")
     sys.exit(1)
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID", "0") or "0")
 OWNER_ID = int(os.getenv("OWNER_ID", "0") or "0")
 ORACLE_TZ = ZoneInfo(os.getenv("ORACLE_TZ", os.getenv("ORACLE_TIMEZONE", "Asia/Kolkata")))
 
+log.info("BOOT_DIAGNOSTIC | brand=%s | owner_configured=%s | group_configured=%s | tz=%s", BOT_NAME, bool(OWNER_ID), bool(GROUP_CHAT_ID), ORACLE_TZ.key)
+
 try:
     from storage import redis_client as _storage_client
+    log.info("Storage facade loaded")
 except Exception as exc:
-    log.warning("storage.py import failed: %s", exc)
+    log.exception("Storage facade failed to load: %s", exc)
     _storage_client = None
 
 import startup
@@ -48,9 +50,12 @@ from telegram import BotCommand
 import legacy_bot
 
 if hasattr(legacy_bot, "GEMINI_MODEL") and legacy_bot.GEMINI_MODEL in {"gemini-3.7-flash", "gemini-3.5-flash-lite"}:
-    legacy_bot.GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    fixed_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    log.warning("Invalid Gemini model detected: %s → %s", legacy_bot.GEMINI_MODEL, fixed_model)
+    legacy_bot.GEMINI_MODEL = fixed_model
 if hasattr(legacy_bot, "GROUP_CHAT_ID") and legacy_bot.GROUP_CHAT_ID == 0:
     legacy_bot.GROUP_CHAT_ID = GROUP_CHAT_ID
+
 
 async def _chat_registry_middleware(update, context):
     chat = getattr(update, "effective_chat", None)
@@ -60,9 +65,11 @@ async def _chat_registry_middleware(update, context):
 
 def build_application() -> Application:
     app = Application.builder().token(TOKEN).build()
+
+    # Registry runs first. Member memory is handled by engagement_engine only;
+    # registering a second tracker here caused read/modify/write races.
     app.add_handler(MessageHandler(filters.ALL, _chat_registry_middleware), group=-999)
-    from handlers.social_engine import track_member
-    app.add_handler(MessageHandler(filters.ALL, track_member), group=-998)
+
     from handlers.engagement_engine import init_storage as init_engagement_storage, register as register_engagement
     init_engagement_storage(_storage_client)
     register_engagement(app)
@@ -93,22 +100,23 @@ def _shim_register(app: Application):
         from handlers import deathgames
 
     command_map = {
-        "oracle":"oracle_new_command", "aura":"aura_command", "identity":"identity_command",
-        "vibecheck":"vibecheck_command", "shadow":"shadow_command", "element":"element_command",
-        "corecode":"corecode_command", "universe":"universe_command", "ritual":"ritual_command",
-        "duality":"duality_command", "glitch":"glitch_command", "nightreport":"nightreport_command",
-        "sigil":"sigil_command", "checkin":"checkin_command", "streakcheck":"streakcheck_command",
-        "vent":"vent_command", "cgift":"cgift_command", "rob":"eng_rob_command", "coinboard":"coinboard_command",
+        "oracle": "oracle_new_command", "aura": "aura_command", "identity": "identity_command",
+        "vibecheck": "vibecheck_command", "shadow": "shadow_command", "element": "element_command",
+        "corecode": "corecode_command", "universe": "universe_command", "ritual": "ritual_command",
+        "duality": "duality_command", "glitch": "glitch_command", "nightreport": "nightreport_command",
+        "sigil": "sigil_command", "checkin": "checkin_command", "streakcheck": "streakcheck_command",
+        "vent": "vent_command", "cgift": "cgift_command", "rob": "eng_rob_command", "coinboard": "coinboard_command",
     }
     for cmd, fn in command_map.items():
         handler = getattr(legacy_bot, fn, None)
         if handler:
             app.add_handler(CommandHandler(cmd, handler))
 
-    for module in (chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking,
-                   stats, events, economy, timecapsule, marriage, deathgames):
+    for module in (chat, games, moderation, utility, aesthetic, friendship, fun,
+                   matchmaking, stats, events, economy, timecapsule, marriage, deathgames):
         if hasattr(module, "register"):
             module.register(app)
+
     if hasattr(legacy_bot, "handle_ai_message"):
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, legacy_bot.handle_ai_message), group=10)
     sticker_handler = getattr(legacy_bot, "handle_sticker", None) or getattr(legacy_bot, "smart_sticker_reply", None)
@@ -120,7 +128,7 @@ async def _set_commands(app: Application):
     commands = [
         BotCommand("oracle", "🔮 Get a reading"), BotCommand("aura", "🟣 Scan your aura"),
         BotCommand("vibecheck", "✨ Check your vibe"), BotCommand("identity", "🃏 Your archetype"),
-        BotCommand("shadow", "🌑 Meet your shadow"), BotCommand("element", "🌌 Your element"),
+        BotCommand("shadow", "🌑 Meet your shadow"), BotCommand("element", "🌌 Your cosmic element"),
         BotCommand("corecode", "🔱 Your core words"), BotCommand("universe", "🌌 A message"),
         BotCommand("ritual", "🕯️ Today's ritual"), BotCommand("duality", "☯️ Your two sides"),
         BotCommand("nightreport", "🌙 Night report"), BotCommand("sigil", "🔱 Your sigil"),
@@ -131,22 +139,26 @@ async def _set_commands(app: Application):
     ]
     try:
         await app.bot.set_my_commands(commands)
-        log.info("Telegram command menu set (%d public commands)", len(commands))
+        log.info("Telegram command menu set | public_commands=%d", len(commands))
     except Exception as exc:
-        log.warning("Could not set command menu: %s", exc)
+        log.exception("Could not set command menu: %s", exc)
 
 
 async def _post_init(app: Application):
+    log.info("BOOT_DIAGNOSTIC | post_init entered")
     await _set_commands(app)
+
     from handlers.social_engine import register_jobs, init_storage
     from handlers.presence_engine import register as register_presence, silence_check
     from handlers.help_command import register as help_register
     from handlers.homecoming import homecoming_job
-
-    init_storage(_storage_client)
     from handlers import social_engine
     from handlers.oracle_governor import install as install_oracle_governor
+
+    init_storage(_storage_client)
+
     install_oracle_governor(social_engine)
+    log.info("Oracle delivery governor installed | enabled=%s", bool(getattr(social_engine, "_governor_installed", False)))
 
     jq = app.job_queue
     if jq and not hasattr(jq, "run_weekly"):
@@ -162,14 +174,21 @@ async def _post_init(app: Application):
 
     if jq:
         jq.run_repeating(homecoming_job, interval=21600, first=30, name="hidden_homecoming")
-        log.info("HOMECOMING scheduler registered | every 6h | first run in 30s")
         jq.run_daily(silence_check, time=datetime.now(ORACLE_TZ).replace(hour=2, minute=0, second=0, microsecond=0).timetz(), name="silence_check")
+        try:
+            job_count = len(jq.jobs())
+        except Exception:
+            job_count = -1
+        log.info("AUTOMATION_SCHEDULER_READY | jobs=%s | homecoming=6h | silence=02:00", job_count)
+    else:
+        log.error("AUTOMATION_SCHEDULER_DISABLED | JobQueue unavailable")
 
     if hasattr(legacy_bot, "_post_init"):
         try:
             await legacy_bot._post_init(app)
-        except Exception as exc:
-            log.warning("legacy_bot._post_init failed: %s", exc)
+        except Exception:
+            log.exception("legacy_bot._post_init failed")
+
     log.info("Post-init complete — Midnight Oracle is ready")
 
 
@@ -177,13 +196,16 @@ def main():
     app = build_application()
     original_initialize = app.initialize
     hooks_ran = False
+
     async def initialize_with_hooks():
         nonlocal hooks_ran
         await original_initialize()
         if not hooks_ran:
             hooks_ran = True
             await _post_init(app)
+
     app.initialize = initialize_with_hooks
+    log.info("Midnight Oracle starting — instance %s", startup._INSTANCE_ID)
     asyncio.run(startup.run(app, storage_client=_storage_client))
 
 
