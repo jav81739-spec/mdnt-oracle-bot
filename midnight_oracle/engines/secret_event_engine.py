@@ -27,17 +27,20 @@ class SecretEventEngine:
     async def get(self,event_id:int):
         """Fetch a complete event row.""";return await self.db.get_secret_event(event_id)
     async def reveal(self,event_id:int,bot,message_id:int|None=None,by_user_id:int|None=None,group_id:int|None=None)->bool:
-        """Reveal an event once, editing the teaser or replacing a deleted message."""
+        """Claim an unrevealed event atomically, then edit or replace its teaser."""
         row=await self.db.get_secret_event(event_id)
         if not row or row['revealed_at']:return False
+        claimed=await self.db.mark_revealed(event_id,by_user_id,message_id or int(row['teaser_message_id'] or 0) or None)
+        if not claimed:return False
         gid=int(group_id if group_id is not None else row['group_id']);mid=int(message_id if message_id is not None else (row['teaser_message_id'] or 0));text=f'☾ Oracle noticed:\n\n{row["content"]}\n\n— observed quietly 🌙'
         try:
             if mid:await bot.edit_message_text(text,chat_id=gid,message_id=mid)
             else:await bot.send_message(gid,text)
         except BadRequest:
-            await bot.send_message(gid,text)
+            try:await bot.send_message(gid,text)
+            except Exception:return False
         except Exception:return False
-        return await self.db.mark_revealed(event_id,by_user_id,mid or None)
+        return True
     async def recover_unrevealed(self,bot)->None:
         """Reveal overdue unrevealed events after a restart."""
         rows=await self.db.fetchall('SELECT id,group_id,teaser_message_id,sent_at FROM secret_events_log WHERE revealed_at IS NULL AND sent_at<?',(now_ts()-1800,))
