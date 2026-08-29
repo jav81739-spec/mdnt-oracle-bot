@@ -1,8 +1,4 @@
-"""Quiet member memory + low-frequency engagement for Midnight Oracle.
-
-The Oracle remembers lightweight identity context (name, username, message count,
-last seen) without storing message bodies. Engagement is deliberately rate-limited.
-"""
+"""Quiet member memory + low-frequency engagement for Midnight Oracle."""
 from __future__ import annotations
 
 import asyncio
@@ -21,12 +17,15 @@ from telegram.ext import Application, ContextTypes, MessageHandler, filters
 log = logging.getLogger("midnight.engagement")
 TZ = ZoneInfo(os.getenv("ORACLE_TZ", os.getenv("ORACLE_TIMEZONE", "Asia/Kolkata")))
 MEMORY_TTL = 86400 * 180
+MAX_MEMBERS = 500
 
 _storage = None
+
 
 def init_storage(storage):
     global _storage
     _storage = storage
+
 
 async def _get(key):
     if not _storage:
@@ -37,16 +36,18 @@ async def _get(key):
     except Exception:
         return None
 
+
 async def _set(key, value, ttl=MEMORY_TTL):
     if not _storage:
         return False
     try:
         result = _storage.setex(key, ttl, value) if ttl else _storage.set(key, value)
         if asyncio.iscoroutine(result):
-            await result
-        return True
+            result = await result
+        return bool(result)
     except Exception:
         return False
+
 
 async def _members(chat_id):
     raw = await _get(f"mbr:{chat_id}")
@@ -54,6 +55,7 @@ async def _members(chat_id):
         return json.loads(raw) if raw else []
     except Exception:
         return []
+
 
 async def remember_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -68,11 +70,16 @@ async def remember_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     found = False
     for member in members:
         if int(member.get("id", 0)) == user.id:
+            old_username = member.get("username", "")
             member["name"] = name
             member["username"] = username
             member["last"] = now
             member["msgs"] = int(member.get("msgs", 0)) + 1
             member.setdefault("first_seen", now)
+            if username and username != old_username:
+                member.setdefault("username_history", [])
+                if old_username and old_username not in member["username_history"]:
+                    member["username_history"] = (member["username_history"] + [old_username])[-10:]
             found = True
             break
     if not found:
@@ -80,12 +87,12 @@ async def remember_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "id": user.id,
             "name": name,
             "username": username,
+            "username_history": [],
             "first_seen": now,
             "last": now,
             "msgs": 1,
         })
-    # Keep the most recently active 500 members; names survive for 180 days.
-    members = sorted(members, key=lambda x: int(x.get("last", 0)), reverse=True)[:500]
+    members = sorted(members, key=lambda x: int(x.get("last", 0)), reverse=True)[:MAX_MEMBERS]
     await _set(f"mbr:{chat.id}", json.dumps(members, ensure_ascii=False), MEMORY_TTL)
     await _set(f"room:last_activity:{chat.id}", str(now), 0)
 
@@ -97,8 +104,9 @@ def _mention(member):
     name = member.get("name", "someone").replace("[", "").replace("]", "")
     return f"[{name}](tg://user?id={member.get('id', 0)})"
 
+
 async def quiet_pulse(ctx: ContextTypes.DEFAULT_TYPE):
-    """At most one lightweight social touch per room per day, probabilistically."""
+    """At most one lightweight social touch per active room per day."""
     try:
         from startup import get_broadcast_targets, _storage
         storage = _storage
@@ -111,16 +119,18 @@ async def quiet_pulse(ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     now = int(time.time())
-    for chat_id in targets:
+    day = datetime.now(TZ).date().isoformat()
+    for chat_id in dict.fromkeys(targets):
         try:
+            last_speak = int(await _get(f"oracle:last_speak:{chat_id}") or 0)
+            if last_speak and now - last_speak < 86400:
+                continue
             last_activity = int(await _get(f"room:last_activity:{chat_id}") or 0)
             if not last_activity or now - last_activity > 86400:
                 continue
-            day = datetime.now(TZ).date().isoformat()
             key = f"quietpulse:{chat_id}:{day}"
             if await _get(key):
                 continue
-            # 30% daily chance keeps it feeling organic, not scheduled spam.
             seed = int(hashlib.md5(f"pulse:{chat_id}:{day}".encode()).hexdigest(), 16)
             if seed % 10 >= 3:
                 continue
@@ -132,11 +142,14 @@ async def quiet_pulse(ctx: ContextTypes.DEFAULT_TYPE):
             lines = [
                 f"🌙 _the room has a memory._\n\n{_mention(member)} — _the Oracle remembers your presence._\n\n✦",
                 f"👁️ _some names become familiar without anyone announcing them._\n\n{_mention(member)}. _noted._",
-                f"🖤 _quiet observation:_ { _mention(member) } _has been part of today's rhythm._\n\n_that's all. for now._",
+                f"🖤 _quiet observation:_ {_mention(member)} _has been part of today's rhythm._\n\n_that's all. for now._",
             ]
             await ctx.bot.send_message(chat_id, lines[seed % len(lines)], parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-            await _set(key, "1", 86400 * 2)
-            log.info("QUIET_PULSE sent | chat=%s | member=%s", chat_id, member.get("username") or member.get("name"))
+            if await _set(key, "1", 86400 * 2):
+                await _set(f"oracle:last_speak:{chat_id}", str(now), 86400 * 7)
+                log.info("QUIET_PULSE sent | chat=%s | member=%s", chat_id, member.get("username") or member.get("name"))
+            else:
+                log.warning("QUIET_PULSE delivered but marker could not be persisted | chat=%s", chat_id)
         except Exception as exc:
             log.debug("quiet pulse failed for %s: %s", chat_id, exc)
 
@@ -149,4 +162,4 @@ def register(app: Application):
             time=datetime.now(TZ).replace(hour=19, minute=30, second=0, microsecond=0).timetz(),
             name="quiet_member_pulse",
         )
-        log.info("Quiet member engagement registered (19:30 local, probabilistic daily cap)")
+        log.info("Quiet member engagement registered | 19:30 local | 1/day cap | 180d memory")
