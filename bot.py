@@ -23,29 +23,24 @@ from friend_engine import FriendEngine
 from midnight_oracle.database import Database
 from midnight_oracle.friend_engine import FriendEngine as Phase1FriendEngine, GroupContext as Phase1GroupContext
 from midnight_oracle.memory_engine import MemoryEngine as Phase1MemoryEngine
+from midnight_oracle.generators.reply_generator import ReplyGenerator
 
-# Never let a stale/retired Render environment resurrect a known-dead model.
-if hasattr(legacy_bot,"GEMINI_MODEL"):
-    configured=os.getenv("GEMINI_MODEL","").strip(); retired={"gemini-2.0-flash","gemini-3.7-flash","gemini-3.5-flash-lite"}
-    legacy_bot.GEMINI_MODEL=configured if configured and configured not in retired else "gemini-3.6-flash"
-    log.info("AI_MODEL_SELECTED | model=%s",legacy_bot.GEMINI_MODEL)
-
+# Legacy Gemini is no longer an AI generation dependency. Existing command/admin modules remain loaded.
 if hasattr(legacy_bot,"GROUP_CHAT_ID") and legacy_bot.GROUP_CHAT_ID==0: legacy_bot.GROUP_CHAT_ID=GROUP_CHAT_ID
 
-# ── Friend Engine: ambient social intelligence ────────────────────────────
 _friend_engine=FriendEngine()
 _friend_recent: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=8))
 _friend_social_cooldown=float(os.getenv("ORACLE_SOCIAL_COOLDOWN_SECONDS", "1200"))
 _phase1_db: Database | None = None
 _phase1_engine: Phase1FriendEngine | None = None
 _phase1_memory: Phase1MemoryEngine | None = None
+_phase1_replies: ReplyGenerator | None = None
 
 
 def _is_direct_summon(update, text: str, bot_username: str = "") -> bool:
-    """Return True when an existing explicit Telegram/Oracle trigger should bypass ambient social logic."""
+    """Return True when an explicit Telegram/Oracle trigger should bypass ambient social scoring."""
     message=getattr(update,"effective_message",None) or getattr(update,"message",None)
-    if not message:
-        return False
+    if not message: return False
     if getattr(message.chat,"type","") == "private": return True
     low=(text or "").casefold()
     if bot_username and f"@{bot_username.casefold()}" in low: return True
@@ -54,51 +49,61 @@ def _is_direct_summon(update, text: str, bot_username: str = "") -> bool:
     return bool(getattr(replied_user,"is_bot",False))
 
 
-def _build_friend_context(update, text: str, bot_username: str = "") -> dict:
-    """Build the bounded social context consumed by the compatibility FriendEngine."""
-    message=getattr(update,"effective_message",None) or getattr(update,"message",None); chat=getattr(update,"effective_chat",None); user=getattr(update,"effective_user",None)
-    chat_id=str(getattr(chat,"id",0)); now=datetime.now(ORACLE_TZ); recent=_friend_recent[chat_id]
-    return {"sender":str(getattr(user,"id",0)),"sender_name":getattr(user,"first_name",None) or "friend","group_id":chat_id,"recent_messages":list(recent),"hour":now.hour,"is_late_night":now.hour>=23 or now.hour<3,"now":now.timestamp(),"social_cooldown_seconds":_friend_social_cooldown,"ambient_engagement_rate":0.30,"direct_summon":_is_direct_summon(update,text,bot_username),"bot_username":bot_username,"message_id":getattr(message,"message_id",0)}
+async def _phase1_direct_reply(update, context, text: str, bot_username: str) -> bool:
+    """Generate a direct or private reply through OpenAI without touching the legacy Gemini path."""
+    if _phase1_replies is None: return False
+    message=getattr(update,"effective_message",None); user=getattr(update,"effective_user",None); chat=getattr(update,"effective_chat",None)
+    if not message or not user or not chat: return False
+    now=datetime.now(ORACLE_TZ); gid=chat.id
+    tier="new"; memory_snippet="none"
+    if _phase1_db and chat.type in {"group","supergroup"}:
+        row=await _phase1_db.fetchone("SELECT relationship_tier FROM members WHERE user_id=? AND group_id=?",(user.id,gid)); tier=str(row[0]) if row else "new"
+        memories=await _phase1_db.memories(user.id,gid,limit=3); memory_snippet=" | ".join(memories[:3])
+    try: await context.bot.send_chat_action(chat_id=gid,action="typing")
+    except Exception: pass
+    reply=await _phase1_replies.generate(chat.title or "Midnight Oracle",user.first_name or "friend",tier,text,_phase1_engine.mood.group_mood(gid).summary() if _phase1_engine and chat.type in {"group","supergroup"} else "private conversation",str(now.hour),now.hour>=23 or now.hour<3,memory_snippet)
+    await message.reply_text(reply)
+    return True
 
 
-async def _provider_fallback(first_name="friend", *args, **kwargs):
-    """Provide an internal conversational response when the external legacy provider is unavailable."""
-    name=(first_name or "friend").strip()[:60]
-    return random.choice((f"{name}, I'm here. Keep going — what were you saying? 🌙",f"I'm listening, {name}. Pick it up from there. ☾",f"Hmm, {name}. Tell me the rest — I'm with you. 🌙"))
-legacy_bot._get_fallback_reply=_provider_fallback
-
-_original_ai_handler=getattr(legacy_bot,"handle_ai_message",None)
-if _original_ai_handler is not None:
-    async def _resilient_ai_handler(update, context):
-        """Route ambient groups through the persistent Phase 1 Friend Engine and preserve explicit legacy behaviour."""
-        message=getattr(update,"effective_message",None) or getattr(update,"message",None); text=(getattr(message,"text",None) or "").strip(); bot_username=""
-        try: bot_username=await legacy_bot._get_bot_username(context.bot)
-        except Exception: pass
-        if message and text and not _is_direct_summon(update,text,bot_username) and getattr(message.chat,"type","") in {"group","supergroup"} and _phase1_engine is not None:
-            try:
-                uid=message.from_user.id if message.from_user else 0; gid=message.chat.id; now=datetime.now(ORACLE_TZ); recent=list(_friend_recent[str(gid)])
-                tier="new"; memory_snippet="none"
-                if _phase1_db:
-                    row=await _phase1_db.fetchone("SELECT relationship_tier FROM members WHERE user_id=? AND group_id=?",(uid,gid)); tier=str(row[0]) if row else "new"
-                    memories=await _phase1_db.memories(uid,gid,limit=3); memory_snippet=" | ".join(memories[:3])
-                ctx=Phase1GroupContext(str(uid),str(gid),recent,now.hour,now.hour>=23 or now.hour<3,message.chat.title or "",tier,message.from_user.first_name if message.from_user else "friend",now.timestamp(),memory_snippet)
-                decision=await _phase1_engine.process_message(message,ctx); _friend_recent[str(gid)].append(text)
-                if decision.should_reply and decision.reply_text:
-                    try: await context.bot.send_chat_action(chat_id=gid,action="typing")
-                    except Exception: pass
-                    await message.reply_text(decision.reply_text)
-                    log.info("AUTONOMOUS_JOB_ENTERED | mode=ambient_friend | group=%s | sender=%s | reason=%s",gid,uid,decision.reason)
-                    return
-            except Exception: log.exception("PHASE1_FRIEND_ENGINE_FAILURE")
+async def _resilient_ai_handler(update, context):
+    """Own the complete text decision path: direct/private OpenAI reply or ambient FriendEngine, otherwise silence."""
+    message=getattr(update,"effective_message",None) or getattr(update,"message",None); text=(getattr(message,"text",None) or "").strip(); bot_username=""
+    if not message or not text or text.startswith("/"): return
+    try: bot_username=await legacy_bot._get_bot_username(context.bot)
+    except Exception: pass
+    direct=_is_direct_summon(update,text,bot_username)
+    chat_type=getattr(message.chat,"type","")
+    if direct or chat_type == "private":
         try:
-            return await _original_ai_handler(update, context)
-        except Exception:
-            user=getattr(update,"effective_user",None); name=getattr(user,"first_name",None) or "friend"
-            log.exception("AI_PROVIDER_OR_HANDLER_FAILURE | local_chat_mode=engaged | user=%s",name)
-            try:
-                if message: await message.reply_text(await _provider_fallback(name)); log.info("AI_LOCAL_CHAT_SENT | user=%s",name)
-            except Exception: log.exception("AI_LOCAL_CHAT_SEND_FAILED | user=%s",name)
-    legacy_bot.handle_ai_message=_resilient_ai_handler
+            if await _phase1_direct_reply(update,context,text,bot_username): return
+        except Exception: log.exception("OPENAI_DIRECT_REPLY_FAILURE")
+        return
+    if chat_type not in {"group","supergroup"}: return
+    if _phase1_engine is None:
+        log.error("PHASE1_FRIEND_ENGINE_UNAVAILABLE | ambient_silence=true")
+        return
+    try:
+        uid=message.from_user.id if message.from_user else 0; gid=message.chat.id; now=datetime.now(ORACLE_TZ); recent=list(_friend_recent[str(gid)])
+        tier="new"; memory_snippet="none"
+        if _phase1_db:
+            row=await _phase1_db.fetchone("SELECT relationship_tier,interaction_count FROM members WHERE user_id=? AND group_id=?",(uid,gid)); tier=str(row[0]) if row else "new"
+            memories=await _phase1_db.memories(uid,gid,limit=3); memory_snippet=" | ".join(memories[:3])
+            await _phase1_db.upsert_member(uid,gid,getattr(message.from_user,"username","") or "",getattr(message.from_user,"first_name","") or "friend")
+        ctx=Phase1GroupContext(str(uid),str(gid),recent,now.hour,now.hour>=23 or now.hour<3,message.chat.title or "",tier,message.from_user.first_name if message.from_user else "friend",now.timestamp(),memory_snippet)
+        decision=await _phase1_engine.process_message(message,ctx); _friend_recent[str(gid)].append(text)
+        if _phase1_memory and message.from_user:
+            await _phase1_memory.observe(uid,gid,message.from_user.first_name or "friend",text,decision.should_reply)
+        if decision.should_reply and decision.reply_text:
+            try: await context.bot.send_chat_action(chat_id=gid,action="typing")
+            except Exception: pass
+            await message.reply_text(decision.reply_text)
+            log.info("AUTONOMOUS_JOB_ENTERED | mode=ambient_friend | group=%s | sender=%s | reason=%s",gid,uid,decision.reason)
+        else:
+            log.info("AUTONOMOUS_JOB_SKIPPED | group=%s | sender=%s | reason=%s",gid,uid,decision.reason)
+    except Exception: log.exception("PHASE1_FRIEND_ENGINE_FAILURE | ambient_silence=true")
+
+legacy_bot.handle_ai_message=_resilient_ai_handler
 
 
 async def _registry(update,context):
@@ -132,7 +137,7 @@ def _has_ai_handler(app):
     return False
 
 def build_application():
-    """Construct the production Telegram application without duplicate polling or legacy scheduler registration."""
+    """Construct the production Telegram application without duplicate polling or AI schedulers."""
     app=Application.builder().token(TOKEN).build()
     app.add_handler(MessageHandler(filters.ALL,_registry),group=-999)
     try:
@@ -171,10 +176,10 @@ async def _set_commands(app):
 
 async def _post_init(app):
     """Initialize production services exactly once after Telegram application startup."""
-    global _phase1_db,_phase1_engine,_phase1_memory
+    global _phase1_db,_phase1_engine,_phase1_memory,_phase1_replies
     await _set_commands(app)
     try:
-        _phase1_db=Database(os.getenv("ORACLE_DATABASE_PATH","midnight_oracle.sqlite3")); await _phase1_db.connect(); _phase1_memory=Phase1MemoryEngine(_phase1_db); _phase1_engine=Phase1FriendEngine(_phase1_db); log.info("PHASE1_FRIEND_ENGINE_READY | storage=sqlite | generation=openai")
+        _phase1_db=Database(os.getenv("ORACLE_DATABASE_PATH","midnight_oracle.sqlite3")); await _phase1_db.connect(); _phase1_memory=Phase1MemoryEngine(_phase1_db); _phase1_engine=Phase1FriendEngine(_phase1_db); _phase1_replies=ReplyGenerator(); log.info("PHASE1_FRIEND_ENGINE_READY | storage=sqlite | generation=openai")
     except Exception: log.exception("PHASE1_FRIEND_ENGINE_INIT_FAILED")
     try:
         from handlers.social_engine import init_storage
@@ -191,7 +196,7 @@ async def _post_init(app):
         register(app); app.job_queue.run_daily(silence_check,time=__import__('datetime').time(2,0,tzinfo=ORACLE_TZ),name="presence_silence_check")
     except Exception: log.exception("presence engine registration failed")
     log.info("AUTONOMOUS_CANONICAL_READY | legacy_social_scheduler=disabled | friend_engine=on | memory=on")
-    log.info("AI_RUNTIME_READY | handler_guard=%s | model=%s",_has_ai_handler(app),getattr(legacy_bot,"GEMINI_MODEL","legacy-disabled"))
+    log.info("AI_RUNTIME_READY | handler_guard=%s | generation=openai | ambient=FriendEngine",_has_ai_handler(app))
     log.info("Post-init complete — Midnight Oracle is ready")
 
 def _error(update,context):
