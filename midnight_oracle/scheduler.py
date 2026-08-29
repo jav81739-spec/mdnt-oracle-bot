@@ -62,7 +62,11 @@ class OracleScheduler:
             if not event:continue
             teaser,_=await engine.format_event(event)
             try:
-                msg=await self.application.bot.send_message(event.group_id,teaser,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('Reveal 👁',callback_data='secret:pending')]]));eid=await engine.record(event,msg.message_id);await self.application.bot.edit_message_reply_markup(event.group_id,msg.message_id,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('Reveal 👁',callback_data=f'secret:{eid}')]]));self.scheduler.add_job(engine.reveal,'date',run_date=datetime.now(self.timezone)+timedelta(minutes=30),args=[eid,self.application.bot,msg.message_id,None,event.group_id],id=f'auto_reveal_{eid}',replace_existing=True)
+                msg=await self.application.bot.send_message(event.group_id,teaser)
+                eid=await engine.record(event,msg.message_id)
+                await self.application.bot.edit_message_reply_markup(event.group_id,msg.message_id,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('Reveal 👁',callback_data=f'reveal_{eid}')]]))
+                sent_at=now_ts()
+                self.scheduler.add_job(engine.reveal,'date',run_date=datetime.now(self.timezone)+timedelta(minutes=30),args=[eid,self.application.bot,msg.message_id,None,event.group_id],id=f'auto_reveal_{eid}',replace_existing=True)
             except Exception:continue
     async def oracle_moment(self,group_id:int)->bool:
         """Send one rare Oracle Moment per day.""";row=await self.db.fetchone('SELECT sent_at FROM oracle_moments_log WHERE group_id=? ORDER BY sent_at DESC LIMIT 1',(group_id,));
