@@ -1,7 +1,4 @@
-"""Canonical Telegram handler/lifecycle registry for Midnight Oracle.
-
-Keeps the production entrypoint small and makes startup/scheduler wiring explicit.
-"""
+"""Canonical Telegram handler/lifecycle registry for Midnight Oracle."""
 from __future__ import annotations
 
 import logging
@@ -144,11 +141,26 @@ def configure_lifecycle(app, storage_client, oracle_tz):
                 time=datetime.now(oracle_tz).replace(hour=2, minute=0, second=0, microsecond=0).timetz(),
                 name="silence_check",
             )
+
+            # Non-user-facing scheduler smoke test. This fires once shortly after
+            # startup and proves that APScheduler can invoke an async callback.
+            async def oracle_scheduler_probe(context):
+                log.info(
+                    "AUTONOMOUS_SCHEDULER_PROBE | callback=entered | governor=%s",
+                    bool(getattr(social_engine, "_governor_installed", False)),
+                )
+
+            jq.run_once(oracle_scheduler_probe, when=10, name="oracle_scheduler_probe")
+
             try:
-                job_count = len(jq.jobs())
+                jobs = list(jq.jobs())
+                job_names = [getattr(j, "name", "?") for j in jobs]
+                log.info(
+                    "AUTOMATION_SCHEDULER_READY | jobs=%d | homecoming=6h | silence=02:00 | names=%s",
+                    len(jobs), ",".join(job_names),
+                )
             except Exception:
-                job_count = -1
-            log.info("AUTOMATION_SCHEDULER_READY | jobs=%s | homecoming=6h | silence=02:00", job_count)
+                log.exception("Could not inspect scheduled jobs")
         else:
             log.error("AUTOMATION_SCHEDULER_DISABLED | JobQueue unavailable")
 
