@@ -1,20 +1,14 @@
-# ── Telegram ──────────────────────────────────────────────────────────────
+# Existing production dependencies (preserved for the current bot)
 python-telegram-bot[job-queue,webhooks]==22.7
-
-# ── Environment ───────────────────────────────────────────────────────────
 python-dotenv==1.0.1
-
-# ── HTTP ──────────────────────────────────────────────────────────────────
 httpx==0.28.1
+aiosqlite==0.20.0
+apscheduler==3.10.4
+openai==1.68.2
+# Legacy modules remain available during the migration; the Phase 1 package does not use them.
 aiohttp==3.9.5
 requests==2.32.3
-
-# ── Google Gemini AI ──────────────────────────────────────────────────────
 google-genai==1.10.0
-
-# ── Upstash Redis (storage) ───────────────────────────────────────────────
 upstash-redis==1.3.0
-
-# ── Utilities ─────────────────────────────────────────────────────────────
 Pillow==10.3.0
 pytz==2024.1
