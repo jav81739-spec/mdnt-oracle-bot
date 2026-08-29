@@ -25,20 +25,19 @@ class MessageRouter:
             if not text or text.startswith('/'):return
             await self.engine.db.execute("INSERT INTO group_profile(group_id,group_name,timezone,created_at) VALUES(?,?,?,?) ON CONFLICT(group_id) DO UPDATE SET group_name=excluded.group_name",(chat.id,chat.title or '','Asia/Kolkata',now_ts()))
             await self.engine.db.upsert_member(user.id,chat.id,user.username or '',user.first_name or 'friend')
-            profile=await self.memory.get(user.id,chat.id); recent=self.recent.setdefault(chat.id,[]); now=datetime.now(); signal=self.mood.estimate(text)
+            profile=await self.memory.get(user.id,chat.id);recent=self.recent.setdefault(chat.id,[]);now=datetime.now();signal=self.mood.estimate(text)
             ctx=GroupContext(str(user.id),str(chat.id),recent[-10:],now.hour,now.hour>=23 or now.hour<3,chat.title or '',profile.relationship_tier,profile.preferred_name or user.first_name or 'friend',now_ts(),(' | '.join(list(profile.themes[:2])+list(profile.worries[:1]))) or 'none')
-            await self.jokes.observe(text,user.id,chat.id); await self.identity.update(chat.id,text,signal)
+            await self.jokes.observe(text,user.id,chat.id);await self.identity.update(chat.id,text,signal)
             direct=self._is_direct_summon(text,context)
             if direct:
                 reply=await self.replies.generate(chat.title or 'Midnight Oracle',ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet);await message.reply_text(reply);await self.memory.observe(user.id,chat.id,ctx.sender_name,text,True);recent.append(text);del recent[:-10];return
-            decision=await self.engine.process_message(message,ctx);await self.memory.observe(user.id,chat.id,ctx.sender_name,text,decision.should_reply or signal.social>=.5);recent.append(text);del recent[:-10]
-            if decision.should_reply and decision.reply_text:
-                await message.reply_text(decision.reply_text);return
             media=await self.stickers.evaluate(message,signal,ctx)
             if media.should_send:
                 if media.sticker_id:await message.reply_sticker(media.sticker_id)
                 elif media.reaction_emoji:await context.bot.set_message_reaction(chat.id,message.message_id,reaction=[ReactionTypeEmoji(media.reaction_emoji)])
-                await self.stickers.record(chat.id,'contextual',media.sticker_id)
+                await self.stickers.record(chat.id,'contextual',media.sticker_id);await self.memory.observe(user.id,chat.id,ctx.sender_name,text,True);recent.append(text);del recent[:-10];return
+            decision=await self.engine.process_message(message,ctx);await self.memory.observe(user.id,chat.id,ctx.sender_name,text,decision.should_reply or signal.social>=.5);recent.append(text);del recent[:-10]
+            if decision.should_reply and decision.reply_text:await message.reply_text(decision.reply_text)
         except Exception:return
     @staticmethod
     def _is_direct_summon(text:str,context:ContextTypes.DEFAULT_TYPE)->bool:
