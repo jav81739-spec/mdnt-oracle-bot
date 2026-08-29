@@ -70,10 +70,8 @@ async def _post_init(app):
         from handlers.presence_engine import register,silence_check
         register(app); app.job_queue.run_daily(silence_check,time=time(2,0,tzinfo=ORACLE_TZ),name="presence_silence_check")
     except Exception: log.exception("presence engine registration failed")
-    if hasattr(legacy_bot,"_post_init"):
-        try: await legacy_bot._post_init(app)
-        except Exception: log.exception("legacy_bot post_init failed")
-    log.info("AUTONOMOUS_CANONICAL_READY | legacy_social_scheduler=disabled | friend_engine=on"); log.info("Post-init complete — Midnight Oracle is ready")
+    log.info("AUTONOMOUS_CANONICAL_READY | legacy_social_scheduler=disabled | friend_engine=on")
+    log.info("Post-init complete — Midnight Oracle is ready")
 def _error(update,context): log.error("TELEGRAM_HANDLER_ERROR | update=%s | error=%r",getattr(update,"update_id","?"),context.error,exc_info=context.error)
 def main():
     app=build_application(); app.post_init=_post_init; app.add_error_handler(_error); log.info("Midnight Oracle starting — instance %s",startup._INSTANCE_ID); asyncio.run(startup.run(app,storage_client=_storage_client))
