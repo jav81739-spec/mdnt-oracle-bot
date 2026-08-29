@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from telegram import Message
 
-from .config import AMBIENT_ENGAGEMENT_RATE, ENGAGEMENT_THRESHOLD, MAX_AMBIENT_REPLIES_PER_HOUR, PER_MEMBER_COOLDOWN_SECONDS, PER_GROUP_COOLDOWN_SECONDS, SERIOUS_CONVERSATION_COOLDOWN_SECONDS
+from .config import AMBIENT_ENGAGEMENT_RATE, ENGAGEMENT_THRESHOLD, MAX_AMBIENT_REPLIES_PER_HOUR, PER_MEMBER_COOLDOWN_SECONDS, PER_GROUP_COOLDOWN_SECONDS
 from .database import Database
 from .generators.reply_generator import ReplyGenerator
 from .mood_engine import MoodEngine
@@ -25,6 +25,7 @@ class GroupContext:
     relationship_tier: str = "new"
     sender_name: str = "friend"
     now: float = 0.0
+    memory_snippet: str = "none"
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,7 @@ class EngineDecision:
 class FriendEngine:
     """Provide conservative ambient friendship without relying on keyword-only triggers."""
 
-    _TIRED = ("thak gaya", "thak gya", "thak gayi", "tired", "exhausted", "neend aa rahi", "bahut kaam", "bohot kaam", "burnt out", "drained")
+    _TIRED = ("thak gaya", "thak gya", "thak gayi", "tired", "exhausted", "neend aa rahi", "bahut kaam", "bohot kaam", "bahut mehnat", "burnt out", "drained")
     _FRUSTRATED = ("kya bakwas", "irritating", "fed up", "nahi ho raha", "nhi ho raha", "frustrated", "annoying", "dimag kharab", "pak gaya", "pak gayi")
     _LONELY = ("akela", "akeli", "bore ho raha", "bore ho rahi", "lonely", "alone", "koi nahi", "nobody", "no one")
     _VICTORY = ("ho gaya", "finally", "khatam", "cleared", "got it", "done", "finished", "we did it", "yess", "yes")
@@ -63,11 +64,12 @@ class FriendEngine:
                 return EngineDecision(False, None, "no_text")
             if context.group_id == "0":
                 return EngineDecision(False, None, "not_a_group")
-            signal = self.mood.observe(message.from_user.id if message.from_user else 0, int(context.group_id), text)
+            uid = message.from_user.id if message.from_user else 0
+            signal = self.mood.observe(uid, int(context.group_id), text)
             score, reasons = self._score(text, context, signal)
             if score < ENGAGEMENT_THRESHOLD:
                 return EngineDecision(False, None, "score_below_threshold")
-            allowed, reason = await self.cooldowns.can_ambient_reply(int(context.group_id), message.from_user.id if message.from_user else 0)
+            allowed, reason = await self.cooldowns.can_ambient_reply(int(context.group_id), uid)
             if not allowed:
                 return EngineDecision(False, None, reason)
             if self._last_sender.get(context.group_id) == context.sender:
@@ -79,7 +81,7 @@ class FriendEngine:
                 return EngineDecision(False, None, "hourly_cap")
             if self.rng.random() > AMBIENT_ENGAGEMENT_RATE:
                 return EngineDecision(False, None, "probabilistic_silence")
-            reply = await self.replies.generate(context.group_name or "Midnight Oracle", context.sender_name, context.relationship_tier, text, signal.summary(), str(context.hour), context.is_late_night, self._memory_hint(context))
+            reply = await self.replies.generate(context.group_name or "Midnight Oracle", context.sender_name, context.relationship_tier, text, signal.summary(), str(context.hour), context.is_late_night, context.memory_snippet)
             bucket.append(now)
             self._last_sender[context.group_id] = context.sender
             await self.cooldowns.set("group", context.group_id, "ambient", PER_GROUP_COOLDOWN_SECONDS)
@@ -98,7 +100,7 @@ class FriendEngine:
         if self._contains(low, self._HUMOUR) or "?" in text: score += 2; reasons.append("humour")
         if context.relationship_tier in {"known", "close"}: score += 1; reasons.append("known")
         if "?" in text or any(w in low.split() for w in ("bhai", "bro", "yaar", "guys", "anyone", "someone")): score += 1; reasons.append("outward")
-        if context.is_late_night and (self._contains(low, self._TIRED + self._FRUSTRATED + self._LONELY + self._VULNERABLE)): score += 1; reasons.append("late_emotion")
+        if context.is_late_night and self._contains(low, self._TIRED + self._FRUSTRATED + self._LONELY + self._VULNERABLE): score += 1; reasons.append("late_emotion")
         recent = " ".join(context.recent_messages).casefold()
         if self._serious(recent, low): score -= 4; reasons.append("serious")
         if context.recent_messages and any(x in recent for x in ("what do you think", "what should i do", "help me", "can someone")): score -= 4; reasons.append("directed_question")
@@ -113,8 +115,3 @@ class FriendEngine:
     def _serious(recent: str, current: str) -> bool:
         """Detect conservative markers of a serious conversation."""
         return any(x in recent or x in current for x in ("serious", "can't handle", "cannot handle", "please help", "hospital", "family problem", "passed away"))
-
-    @staticmethod
-    def _memory_hint(context: GroupContext) -> str:
-        """Build a minimal memory hint without exposing internal storage details."""
-        return "none"
