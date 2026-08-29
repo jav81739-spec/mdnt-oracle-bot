@@ -18,6 +18,8 @@ _LEASE_TTL = 60
 _LEASE_REFRESH = 20
 _LEASE_WAIT_MAX = 90
 _INSTANCE_ID = f"{socket.gethostname()}:{os.getpid()}"
+_REGISTRY_KEY = "midnight:chat_registry"
+_LEASE_TOKEN = f"{_INSTANCE_ID}:{time.time_ns()}"
 
 _storage = None
 _app = None
@@ -25,8 +27,6 @@ _lease_task = None
 _health_server = None
 _shutting_down = False
 _ready = False
-_lease_token = f"{_INSTANCE_ID}:{time.time_ns()}"
-_REGISTRY_KEY = "midnight:chat_registry"
 
 
 def init(storage_client=None):
@@ -84,59 +84,46 @@ async def _store_delete(key):
         return False
 
 
-async def _compare_and_refresh_lease():
-    payload = json.dumps({"instance": _INSTANCE_ID, "token": _lease_token, "ts": time.time()})
-    script = "if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('SET',KEYS[1],ARGV[2],'EX',ARGV[3]) else return 0 end"
-    if _storage is None:
-        return False
-    try:
-        if hasattr(_storage, "eval"):
-            result = _storage.eval(script, [_LEASE_KEY], [json.dumps({"instance": _INSTANCE_ID, "token": _lease_token, "ts": 0}), payload, str(_LEASE_TTL)])
-            if asyncio.iscoroutine(result):
-                result = await result
-            return str(result).upper() in {"OK", "TRUE", "1"}
-        current = await _store_get(_LEASE_KEY)
-        if current:
-            data = json.loads(current)
-            if data.get("token") == _lease_token:
-                return await _store_set(_LEASE_KEY, payload, _LEASE_TTL)
-    except Exception as exc:
-        log.warning("Lease refresh failed: %s", exc)
-    return False
-
-
 async def _acquire_lease():
-    """Atomically acquire the polling lease; never use GET→SET for ownership."""
-    payload = json.dumps({"instance": _INSTANCE_ID, "token": _lease_token, "ts": time.time()})
-    if await _store_setnx(_LEASE_KEY, payload, _LEASE_TTL):
+    """Atomically acquire the polling lease; never use GET→SET ownership."""
+    if await _store_setnx(_LEASE_KEY, _LEASE_TOKEN, _LEASE_TTL):
         log.info("Polling lease acquired | instance=%s", _INSTANCE_ID)
         return True
-    current = await _store_get(_LEASE_KEY)
-    if current:
-        try:
-            data = json.loads(current)
-            age = time.time() - float(data.get("ts", 0))
-            log.info("POLLING_LEASE busy | owner=%s | age=%.0fs", data.get("instance"), age)
-        except Exception:
-            log.info("POLLING_LEASE busy | owner=unknown")
+    log.info("POLLING_LEASE busy | another instance owns Telegram polling")
     return False
+
+
+async def _refresh_lease():
+    if _storage is None:
+        return False
+    script = "if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('SET',KEYS[1],ARGV[1],'EX',ARGV[2]) else return 0 end"
+    try:
+        if hasattr(_storage, "eval"):
+            result = _storage.eval(script, [_LEASE_KEY], [_LEASE_TOKEN, str(_LEASE_TTL)])
+            if asyncio.iscoroutine(result):
+                result = await result
+            ok = str(result).upper() in {"OK", "TRUE", "1"}
+        else:
+            current = await _store_get(_LEASE_KEY)
+            ok = current == _LEASE_TOKEN and await _store_set(_LEASE_KEY, _LEASE_TOKEN, _LEASE_TTL)
+        if not ok:
+            log.error("Polling lease ownership lost")
+        return ok
+    except Exception as exc:
+        log.warning("Lease refresh failed: %s", exc)
+        return False
 
 
 async def _release_lease():
-    global _lease_token
-    current = await _store_get(_LEASE_KEY)
-    if not current:
+    if _storage is None:
         return
+    script = "if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end"
     try:
-        data = json.loads(current)
-        if data.get("token") != _lease_token:
-            return
-        script = "if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end"
         if hasattr(_storage, "eval"):
-            result = _storage.eval(script, [_LEASE_KEY], [current])
+            result = _storage.eval(script, [_LEASE_KEY], [_LEASE_TOKEN])
             if asyncio.iscoroutine(result):
                 await result
-        else:
+        elif await _store_get(_LEASE_KEY) == _LEASE_TOKEN:
             await _store_delete(_LEASE_KEY)
         log.info("Polling lease released | instance=%s", _INSTANCE_ID)
     except Exception as exc:
@@ -147,21 +134,21 @@ async def _lease_heartbeat_loop():
     while not _shutting_down:
         await asyncio.sleep(_LEASE_REFRESH)
         if _shutting_down:
-            break
-        if not await _compare_and_refresh_lease():
-            log.error("Polling lease ownership lost — stopping bot to prevent duplicate polling")
-            asyncio.create_task(_graceful_shutdown())
+            return
+        if not await _refresh_lease():
+            log.critical("Polling lease lost — shutting down to prevent Telegram polling conflict")
+            await _graceful_shutdown()
             return
 
 
 async def _wait_for_lease():
-    deadline = time.time() + _LEASE_WAIT_MAX
-    while time.time() < deadline:
+    deadline = time.monotonic() + _LEASE_WAIT_MAX
+    while time.monotonic() < deadline:
         if await _acquire_lease():
             return True
-        remaining = max(0, deadline - time.time())
-        await asyncio.sleep(min(5, remaining))
-    log.warning("POLLING_LEASE still busy after %ds; waiting for TTL instead of deleting another owner's lease", _LEASE_WAIT_MAX)
+        remaining = deadline - time.monotonic()
+        await asyncio.sleep(min(5, max(0.5, remaining)))
+    log.warning("POLLING_LEASE still busy after %ds; final atomic attempt", _LEASE_WAIT_MAX)
     return await _acquire_lease()
 
 
@@ -211,7 +198,8 @@ class _HealthHandler(BaseHTTPRequestHandler):
         if self.path in ("/", "/health", "/healthz"):
             self._respond(200, json.dumps({"status": "ok" if not _shutting_down else "shutting_down", "ready": _ready, "instance": _INSTANCE_ID}).encode())
         elif self.path == "/ready":
-            self._respond(200 if _ready and not _shutting_down else 503, json.dumps({"ready": _ready and not _shutting_down}).encode())
+            ready = _ready and not _shutting_down
+            self._respond(200 if ready else 503, json.dumps({"ready": ready}).encode())
         else:
             self._respond(404, b'{"status":"not_found"}')
 
@@ -279,11 +267,9 @@ async def run(application, storage_client=None):
     loop = asyncio.get_running_loop()
     _install_signal_handlers(loop)
     start_health_server()
-
     if not await _wait_for_lease():
         log.critical("Cannot start: polling lease unavailable")
         return
-
     _lease_task = asyncio.create_task(_lease_heartbeat_loop(), name="polling_lease_heartbeat")
     log.info("Starting Telegram polling — instance %s", _INSTANCE_ID)
     try:
