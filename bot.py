@@ -1,5 +1,5 @@
 """
-bot.py — Arden | One canonical entrypoint.
+bot.py — Midnight Oracle | One canonical entrypoint.
 
 This is the ONLY file Render should run: python bot.py
 
@@ -9,7 +9,7 @@ Architecture:
     └── legacy_bot.py   (all handlers, Gemini, GIPHY, stickers)
     └── storage.py      (Redis compat facade → core/storage)
 
-Public brand: Arden
+Public brand: Midnight Oracle
 Internal compatibility identifiers intentionally remain unchanged so existing
 stored data, environment variables, feature keys, and legacy handlers are not
 broken by the rebrand.
@@ -32,13 +32,13 @@ logging.basicConfig(
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
     level=logging.INFO,
 )
-log = logging.getLogger("arden.bot")
+log = logging.getLogger("midnight.bot")
 
 from dotenv import load_dotenv
 load_dotenv()
 
-BOT_NAME = "Arden"
-BOT_TAGLINE = "She doesn't announce herself. You notice."
+BOT_NAME = "Midnight Oracle"
+BOT_TAGLINE = "It watches. It names. It reveals."
 
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 if not TOKEN:
@@ -77,19 +77,6 @@ from telegram import BotCommand
 
 import legacy_bot
 
-# Keep legacy feature names and storage compatibility, but make the AI identify
-# publicly as Arden. The replacement is deliberately narrow: it does not touch
-# commands, Redis keys, environment variables, or feature identifiers.
-if hasattr(legacy_bot, "ORACLE_SYSTEM_PROMPT"):
-    legacy_bot.ORACLE_SYSTEM_PROMPT = (
-        legacy_bot.ORACLE_SYSTEM_PROMPT
-        .replace("Midnight Oracle", "Arden")
-        .replace("the Oracle", "Arden")
-        .replace("the oracle", "Arden")
-        .replace("You ARE the Oracle", "You ARE Arden")
-        .replace("You are the Oracle", "You are Arden")
-    )
-
 if hasattr(legacy_bot, "GEMINI_MODEL"):
     current = legacy_bot.GEMINI_MODEL
     bad_models = {"gemini-3.7-flash", "gemini-3.5-flash-lite"}
@@ -115,10 +102,7 @@ async def _chat_registry_middleware(update, context):
 def build_application() -> Application:
     app = Application.builder().token(TOKEN).build()
 
-    app.add_handler(
-        MessageHandler(filters.ALL, _chat_registry_middleware),
-        group=-999,
-    )
+    app.add_handler(MessageHandler(filters.ALL, _chat_registry_middleware), group=-999)
 
     from handlers.social_engine import track_member
     app.add_handler(MessageHandler(filters.ALL, track_member), group=-998)
@@ -130,17 +114,12 @@ def build_application() -> Application:
         legacy_bot._register_handlers(app)
         log.info("Handlers registered via legacy_bot._register_handlers()")
     else:
-        log.warning(
-            "legacy_bot has no register_handlers() — "
-            "attempting to pull handlers via legacy_bot.main() shim"
-        )
         _shim_register(app)
 
     return app
 
 
 def _shim_register(app: Application):
-    """Register legacy handlers without starting a second polling loop."""
     from handlers import (
         chat, games, moderation, utility, aesthetic,
         friendship, fun, matchmaking, stats,
@@ -164,7 +143,6 @@ def _shim_register(app: Application):
     app.add_handler(CommandHandler("glitch", legacy_bot.glitch_command))
     app.add_handler(CommandHandler("nightreport", legacy_bot.nightreport_command))
     app.add_handler(CommandHandler("sigil", legacy_bot.sigil_command))
-
     app.add_handler(CommandHandler("checkin", legacy_bot.checkin_command))
     app.add_handler(CommandHandler("streakcheck", legacy_bot.streakcheck_command))
     app.add_handler(CommandHandler("vent", legacy_bot.vent_command))
@@ -172,39 +150,15 @@ def _shim_register(app: Application):
     app.add_handler(CommandHandler("rob", legacy_bot.eng_rob_command))
     app.add_handler(CommandHandler("coinboard", legacy_bot.coinboard_command))
 
-    if hasattr(chat, "register"): chat.register(app)
-    if hasattr(games, "register"): games.register(app)
-    if hasattr(moderation, "register"): moderation.register(app)
-    if hasattr(utility, "register"): utility.register(app)
-    if hasattr(aesthetic, "register"): aesthetic.register(app)
-    if hasattr(friendship, "register"): friendship.register(app)
-    if hasattr(fun, "register"): fun.register(app)
-    if hasattr(matchmaking, "register"): matchmaking.register(app)
-    if hasattr(stats, "register"): stats.register(app)
-    if hasattr(events, "register"): events.register(app)
-    if hasattr(economy, "register"): economy.register(app)
-    if hasattr(timecapsule, "register"): timecapsule.register(app)
-    if hasattr(marriage, "register"): marriage.register(app)
-    if hasattr(deathgames, "register"): deathgames.register(app)
+    for module in (chat, games, moderation, utility, aesthetic, friendship, fun,
+                   matchmaking, stats, events, economy, timecapsule, marriage, deathgames):
+        if hasattr(module, "register"):
+            module.register(app)
 
     if hasattr(legacy_bot, "handle_ai_message"):
-        app.add_handler(
-            MessageHandler(
-                filters.TEXT & ~filters.COMMAND,
-                legacy_bot.handle_ai_message,
-            ),
-            group=10,
-        )
-
-    if hasattr(legacy_bot, "handle_channel_post"):
-        app.add_handler(
-            MessageHandler(filters.IS_AUTOMATIC_FORWARD, legacy_bot.handle_channel_post)
-        )
-
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, legacy_bot.handle_ai_message), group=10)
     if hasattr(legacy_bot, "handle_sticker"):
-        app.add_handler(
-            MessageHandler(filters.Sticker.ALL, legacy_bot.handle_sticker)
-        )
+        app.add_handler(MessageHandler(filters.Sticker.ALL, legacy_bot.handle_sticker))
 
     log.info("Handlers registered via shim (legacy_bot internals)")
 
@@ -252,9 +206,7 @@ async def _post_init(app: Application):
 
     app.job_queue.run_daily(
         silence_check,
-        time=datetime.now(ORACLE_TZ).replace(
-            hour=2, minute=0, second=0, microsecond=0
-        ).timetz(),
+        time=datetime.now(ORACLE_TZ).replace(hour=2, minute=0, second=0, microsecond=0).timetz(),
     )
 
     if hasattr(legacy_bot, "_post_init"):
@@ -263,13 +215,13 @@ async def _post_init(app: Application):
         except Exception as exc:
             log.warning("legacy_bot._post_init failed: %s", exc)
 
-    log.info("Post-init complete — Arden is ready")
+    log.info("Post-init complete — Midnight Oracle is ready")
 
 
 def main():
     app = build_application()
     app.post_init = _post_init
-    log.info("Arden starting — instance %s", startup._INSTANCE_ID)
+    log.info("Midnight Oracle starting — instance %s", startup._INSTANCE_ID)
     asyncio.run(startup.run(app, storage_client=_storage_client))
 
 
