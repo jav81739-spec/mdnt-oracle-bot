@@ -85,7 +85,6 @@ async def _store_delete(key):
 
 
 async def _acquire_lease():
-    """Atomically acquire the polling lease; never use GET→SET ownership."""
     if await _store_setnx(_LEASE_KEY, _LEASE_TOKEN, _LEASE_TTL):
         log.info("Polling lease acquired | instance=%s", _INSTANCE_ID)
         return True
@@ -238,7 +237,8 @@ async def _graceful_shutdown():
     _shutting_down = True
     _ready = False
     log.info("Graceful shutdown started")
-    if _lease_task and not _lease_task.done():
+    current = asyncio.current_task()
+    if _lease_task and not _lease_task.done() and current is not _lease_task:
         _lease_task.cancel()
         try:
             await _lease_task
