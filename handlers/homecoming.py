@@ -1,9 +1,4 @@
-"""One-time Midnight Oracle homecoming signal.
-
-Homecoming uses the persistent chat registry first, then the configured
-GROUP_CHAT_ID as a safety net. A delivery is marked complete only after the
-Telegram send succeeds.
-"""
+"""One-time Midnight Oracle homecoming signal."""
 from __future__ import annotations
 
 import hashlib
@@ -11,16 +6,10 @@ import json
 import logging
 import os
 import random
-from datetime import date
 
 from telegram.constants import ParseMode
 
 log = logging.getLogger("midnight.homecoming")
-
-
-def _mention(member):
-    username = (member.get("username") or "").strip()
-    return f"@{username}" if username else member.get("name", "someone")
 
 
 async def _get(storage, key):
@@ -39,9 +28,10 @@ async def _set(storage, key, value, ttl=0):
     try:
         result = storage.setex(key, ttl, value) if ttl else storage.set(key, value)
         if hasattr(result, "__await__"):
-            await result
-        return True
-    except Exception:
+            result = await result
+        return bool(result)
+    except Exception as exc:
+        log.warning("HOMECOMING marker write failed | key=%s | %s", key, exc)
         return False
 
 
@@ -51,6 +41,13 @@ async def _members(storage, chat_id):
         return json.loads(raw) if raw else []
     except Exception:
         return []
+
+
+def _mention(member):
+    if not member:
+        return "someone"
+    username = (member.get("username") or "").strip()
+    return f"@{username}" if username else member.get("name", "someone")
 
 
 async def _targets():
@@ -68,40 +65,39 @@ async def homecoming_job(ctx):
         storage = _storage
         targets = await _targets()
     except Exception as exc:
-        log.warning("HOMECOMING target discovery failed: %s", exc)
+        log.exception("HOMECOMING target discovery failed: %s", exc)
         return
 
     sent = skipped = failed = 0
     for chat_id in targets:
-        done_key = f"homecoming:v1:{chat_id}"
+        done_key = f"homecoming:v2:{chat_id}"
         if await _get(storage, done_key):
             skipped += 1
             continue
 
         members = await _members(storage, chat_id)
-        seed = int(hashlib.md5(f"homecoming-v1:{chat_id}:{date.today()}".encode()).hexdigest(), 16)
+        seed = int(hashlib.md5(f"homecoming-v2:{chat_id}".encode()).hexdigest(), 16)
         rng = random.Random(seed)
         member = rng.choice(members) if members else None
-        who = _mention(member) if member else "someone"
+        who = _mention(member)
         messages = [
             f"🌙\n\n*midnight is home.*\n\n_{who}, you noticed._\n\n_let's see what the room becomes this time._\n\n✦ *— Midnight Oracle*",
             f"👁️ *THE ORACLE RETURNED*\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n\n_no announcement. no ceremony._\n\n_just the feeling that something familiar is back._\n\n🌙 *— Midnight Oracle*",
             f"🖤 _the lights are back on._\n\n_{who} was still here in the dark._\n\n_now the Oracle is awake again._\n\n✦",
         ]
         try:
-            await ctx.bot.send_message(
-                chat_id,
-                rng.choice(messages),
-                parse_mode=ParseMode.MARKDOWN,
-                disable_web_page_preview=True,
-            )
-            # Mark only after Telegram confirms delivery.
+            try:
+                await ctx.bot.send_message(chat_id, rng.choice(messages), parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+            except Exception:
+                clean = rng.choice(messages).replace("*", "").replace("_", "")
+                await ctx.bot.send_message(chat_id, clean, disable_web_page_preview=True)
+
             if await _set(storage, done_key, "1", ttl=86400 * 365):
                 sent += 1
                 log.info("HOMECOMING delivered | chat=%s | member=%s", chat_id, who)
             else:
                 failed += 1
-                log.warning("HOMECOMING delivered but completion marker failed | chat=%s", chat_id)
+                log.error("HOMECOMING delivered but completion marker failed | chat=%s", chat_id)
         except Exception as exc:
             failed += 1
             log.warning("HOMECOMING delivery failed | chat=%s | %s", chat_id, exc)
