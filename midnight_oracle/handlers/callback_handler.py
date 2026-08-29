@@ -39,6 +39,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.edit_message_text(f"☾ noted — {value[1] if len(value)>1 else 'mood'}")
         elif value[0] == 'truth':
             await query.answer('Passed. No explanation needed.' if len(value)>1 and value[1]=='pass' else 'Take your time.', show_alert=False)
+        elif value[0] == 'game' and len(value) > 1 and value[1] == 'end' and query.message:
+            from ..games.word_scramble import WordScrambleGame
+            row = await db.fetchone("SELECT game_type FROM game_sessions WHERE group_id=? AND is_active=1 ORDER BY id DESC LIMIT 1", (query.message.chat_id,))
+            if row and row['game_type'] == 'word_scramble':
+                await query.edit_message_text(await WordScrambleGame(db).endgame(query.message.chat_id))
     except Exception:
         try:
             await query.answer('', show_alert=False)
