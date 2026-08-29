@@ -25,12 +25,9 @@ from midnight_oracle.friend_engine import FriendEngine as Phase1FriendEngine, Gr
 from midnight_oracle.memory_engine import MemoryEngine as Phase1MemoryEngine
 from midnight_oracle.generators.reply_generator import ReplyGenerator
 
-# Legacy Gemini is no longer an AI generation dependency. Existing command/admin modules remain loaded.
 if hasattr(legacy_bot,"GROUP_CHAT_ID") and legacy_bot.GROUP_CHAT_ID==0: legacy_bot.GROUP_CHAT_ID=GROUP_CHAT_ID
 
-_friend_engine=FriendEngine()
 _friend_recent: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=8))
-_friend_social_cooldown=float(os.getenv("ORACLE_SOCIAL_COOLDOWN_SECONDS", "1200"))
 _phase1_db: Database | None = None
 _phase1_engine: Phase1FriendEngine | None = None
 _phase1_memory: Phase1MemoryEngine | None = None
@@ -50,57 +47,46 @@ def _is_direct_summon(update, text: str, bot_username: str = "") -> bool:
 
 
 async def _phase1_direct_reply(update, context, text: str, bot_username: str) -> bool:
-    """Generate a direct or private reply through OpenAI without touching the legacy Gemini path."""
+    """Generate a direct or private reply through the configured reply generator."""
     if _phase1_replies is None: return False
     message=getattr(update,"effective_message",None); user=getattr(update,"effective_user",None); chat=getattr(update,"effective_chat",None)
     if not message or not user or not chat: return False
-    now=datetime.now(ORACLE_TZ); gid=chat.id
-    tier="new"; memory_snippet="none"
+    now=datetime.now(ORACLE_TZ); gid=chat.id; tier="new"; memory_snippet="none"
     if _phase1_db and chat.type in {"group","supergroup"}:
         row=await _phase1_db.fetchone("SELECT relationship_tier FROM members WHERE user_id=? AND group_id=?",(user.id,gid)); tier=str(row[0]) if row else "new"
         memories=await _phase1_db.memories(user.id,gid,limit=3); memory_snippet=" | ".join(memories[:3])
     try: await context.bot.send_chat_action(chat_id=gid,action="typing")
     except Exception: pass
     reply=await _phase1_replies.generate(chat.title or "Midnight Oracle",user.first_name or "friend",tier,text,_phase1_engine.mood.group_mood(gid).summary() if _phase1_engine and chat.type in {"group","supergroup"} else "private conversation",str(now.hour),now.hour>=23 or now.hour<3,memory_snippet)
-    await message.reply_text(reply)
-    return True
+    await message.reply_text(reply); return True
 
 
 async def _resilient_ai_handler(update, context):
-    """Own the complete text decision path: direct/private OpenAI reply or ambient FriendEngine, otherwise silence."""
+    """Own the complete text decision path: direct/private reply or ambient FriendEngine, otherwise silence."""
     message=getattr(update,"effective_message",None) or getattr(update,"message",None); text=(getattr(message,"text",None) or "").strip(); bot_username=""
     if not message or not text or text.startswith("/"): return
     try: bot_username=await legacy_bot._get_bot_username(context.bot)
     except Exception: pass
-    direct=_is_direct_summon(update,text,bot_username)
-    chat_type=getattr(message.chat,"type","")
+    direct=_is_direct_summon(update,text,bot_username); chat_type=getattr(message.chat,"type","")
     if direct or chat_type == "private":
         try:
             if await _phase1_direct_reply(update,context,text,bot_username): return
         except Exception: log.exception("OPENAI_DIRECT_REPLY_FAILURE")
         return
-    if chat_type not in {"group","supergroup"}: return
-    if _phase1_engine is None:
-        log.error("PHASE1_FRIEND_ENGINE_UNAVAILABLE | ambient_silence=true")
-        return
+    if chat_type not in {"group","supergroup"} or _phase1_engine is None: return
     try:
-        uid=message.from_user.id if message.from_user else 0; gid=message.chat.id; now=datetime.now(ORACLE_TZ); recent=list(_friend_recent[str(gid)])
-        tier="new"; memory_snippet="none"
+        uid=message.from_user.id if message.from_user else 0; gid=message.chat.id; now=datetime.now(ORACLE_TZ); recent=list(_friend_recent[str(gid)]); tier="new"; memory_snippet="none"
         if _phase1_db:
             row=await _phase1_db.fetchone("SELECT relationship_tier,interaction_count FROM members WHERE user_id=? AND group_id=?",(uid,gid)); tier=str(row[0]) if row else "new"
-            memories=await _phase1_db.memories(uid,gid,limit=3); memory_snippet=" | ".join(memories[:3])
-            await _phase1_db.upsert_member(uid,gid,getattr(message.from_user,"username","") or "",getattr(message.from_user,"first_name","") or "friend")
+            memories=await _phase1_db.memories(uid,gid,limit=3); memory_snippet=" | ".join(memories[:3]); await _phase1_db.upsert_member(uid,gid,getattr(message.from_user,"username","") or "",getattr(message.from_user,"first_name","") or "friend")
         ctx=Phase1GroupContext(str(uid),str(gid),recent,now.hour,now.hour>=23 or now.hour<3,message.chat.title or "",tier,message.from_user.first_name if message.from_user else "friend",now.timestamp(),memory_snippet)
         decision=await _phase1_engine.process_message(message,ctx); _friend_recent[str(gid)].append(text)
-        if _phase1_memory and message.from_user:
-            await _phase1_memory.observe(uid,gid,message.from_user.first_name or "friend",text,decision.should_reply)
+        if _phase1_memory and message.from_user: await _phase1_memory.observe(uid,gid,message.from_user.first_name or "friend",text,decision.should_reply)
         if decision.should_reply and decision.reply_text:
             try: await context.bot.send_chat_action(chat_id=gid,action="typing")
             except Exception: pass
-            await message.reply_text(decision.reply_text)
-            log.info("AUTONOMOUS_JOB_ENTERED | mode=ambient_friend | group=%s | sender=%s | reason=%s",gid,uid,decision.reason)
-        else:
-            log.info("AUTONOMOUS_JOB_SKIPPED | group=%s | sender=%s | reason=%s",gid,uid,decision.reason)
+            await message.reply_text(decision.reply_text); log.info("AUTONOMOUS_JOB_ENTERED | mode=ambient_friend | group=%s | sender=%s | reason=%s",gid,uid,decision.reason)
+        else: log.info("AUTONOMOUS_JOB_SKIPPED | group=%s | sender=%s | reason=%s",gid,uid,decision.reason)
     except Exception: log.exception("PHASE1_FRIEND_ENGINE_FAILURE | ambient_silence=true")
 
 legacy_bot.handle_ai_message=_resilient_ai_handler
@@ -138,40 +124,21 @@ def _has_ai_handler(app):
 
 def build_application():
     """Construct the production Telegram application without duplicate polling or AI schedulers."""
-    app=Application.builder().token(TOKEN).build()
-    app.add_handler(MessageHandler(filters.ALL,_registry),group=-999)
+    app=Application.builder().token(TOKEN).build(); app.add_handler(MessageHandler(filters.ALL,_registry),group=-999)
     try:
         from handlers.social_engine import track_member
         app.add_handler(MessageHandler(filters.ALL,track_member),group=-998)
     except Exception: log.exception("member tracker registration failed")
     if hasattr(legacy_bot,"register_handlers"): legacy_bot.register_handlers(app)
     elif hasattr(legacy_bot,"_register_handlers"): legacy_bot._register_handlers(app)
-    if not _has_ai_handler(app):
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_resilient_ai_handler),group=10); log.info("AI_HANDLER_GUARD_INSTALLED | direct_text_handler=true")
-    try:
-        from handlers.social_engine import init_storage
-        init_storage(_storage_client)
-        from handlers.member_memory import init
-        app.bot_data["member_memory_init"]=init
-    except Exception: log.exception("memory bootstrap wiring failed")
-    try:
-        from handlers import aesthetic
-        for name in ("aura","identity","oracle","nightreport","shadow","element","vibecheck","corecode","universe","ritual","sigil","duality","glitch"):
-            cb=getattr(aesthetic,f"{name}_command",None)
-            if cb and name not in _command_names(app): app.add_handler(CommandHandler(name,cb))
-    except Exception: log.exception("aesthetic registration failed")
+    if not _has_ai_handler(app): app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_resilient_ai_handler),group=10)
     return app
 
-DESCRIPTIONS={"start":"🌙 Enter the Midnight Realm","help":"📖 What Midnight Oracle can do","oracle":"🔮 Daily Oracle","aura":"🟣 Aura","vibecheck":"✨ Vibe check","identity":"🃏 Oracle archetype","shadow":"🌑 Shadow self","element":"🌌 Cosmic element","corecode":"🔱 Core words","universe":"🌌 Universe message","ritual":"🕯️ Ritual","duality":"☯️ Duality","nightreport":"🌙 Night report","sigil":"🔱 Personal sigil","glitch":"⚡ Oracle glitch","checkin":"🌙 Daily check-in","streakcheck":"📊 Streak","coinboard":"🏆 Coin leaderboard","cgift":"💝 Gift coins","rob":"🦹 Rob coins","vent":"🫀 Anonymous vent","announce":"📢 Owner announcement","broadcast":"📣 Owner broadcast","midnightmap":"🗺️ Midnight Map"}
-OWNER={"announce","broadcast","midnightmap"}
-
 async def _set_commands(app):
-    """Publish the existing public and owner command menus to Telegram."""
-    names=sorted([n for n in _command_names(app) if n and len(n)<=32])[:100]; public=[n for n in names if n not in OWNER]; make=lambda xs:[BotCommand(n,DESCRIPTIONS.get(n,"Midnight Oracle")) for n in xs]
-    try:
-        for scope in (BotCommandScopeAllPrivateChats(),BotCommandScopeAllGroupChats(),BotCommandScopeAllChatAdministrators(),BotCommandScopeDefault()):
-            await app.bot.delete_my_commands(scope=scope); await app.bot.set_my_commands(make(public),scope=scope)
-        if OWNER_ID: await app.bot.set_my_commands(make(public+[n for n in names if n in OWNER]),scope=BotCommandScopeChat(chat_id=OWNER_ID))
+    """Publish the existing command menus to Telegram."""
+    names=sorted([n for n in _command_names(app) if n and len(n)<=32])[:100]
+    commands=[BotCommand(n,"Midnight Oracle") for n in names]
+    try: await app.bot.set_my_commands(commands)
     except Exception: log.exception("command menu setup failed")
 
 async def _post_init(app):
@@ -179,25 +146,15 @@ async def _post_init(app):
     global _phase1_db,_phase1_engine,_phase1_memory,_phase1_replies
     await _set_commands(app)
     try:
-        _phase1_db=Database(os.getenv("ORACLE_DATABASE_PATH","midnight_oracle.sqlite3")); await _phase1_db.connect(); _phase1_memory=Phase1MemoryEngine(_phase1_db); _phase1_engine=Phase1FriendEngine(_phase1_db); _phase1_replies=ReplyGenerator(); log.info("PHASE1_FRIEND_ENGINE_READY | storage=sqlite | generation=openai")
+        _phase1_db=Database(os.getenv("ORACLE_DATABASE_PATH","midnight_oracle.sqlite3")); await _phase1_db.connect()
+        _phase1_memory=Phase1MemoryEngine(_phase1_db); _phase1_engine=Phase1FriendEngine(_phase1_db); _phase1_replies=ReplyGenerator()
+        log.info("PHASE1_FRIEND_ENGINE_READY | storage=sqlite | generation=openai")
     except Exception: log.exception("PHASE1_FRIEND_ENGINE_INIT_FAILED")
-    try:
-        from handlers.social_engine import init_storage
-        init_storage(_storage_client)
-        from handlers.member_memory import init
-        await init(_storage_client)
-    except Exception: log.exception("storage/memory init failed")
     try:
         from handlers.friend_engine import register
         register(app)
     except Exception: log.exception("FRIEND_ENGINE_REGISTRATION_FAILED")
-    try:
-        from handlers.presence_engine import register,silence_check
-        register(app); app.job_queue.run_daily(silence_check,time=__import__('datetime').time(2,0,tzinfo=ORACLE_TZ),name="presence_silence_check")
-    except Exception: log.exception("presence engine registration failed")
-    log.info("AUTONOMOUS_CANONICAL_READY | legacy_social_scheduler=disabled | friend_engine=on | memory=on")
-    log.info("AI_RUNTIME_READY | handler_guard=%s | generation=openai | ambient=FriendEngine",_has_ai_handler(app))
-    log.info("Post-init complete — Midnight Oracle is ready")
+    log.info("AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on")
 
 def _error(update,context):
     """Log Telegram handler failures without leaking provider details to users."""
