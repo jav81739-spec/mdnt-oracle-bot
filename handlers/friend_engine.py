@@ -32,11 +32,15 @@ NIGHT = [
 
 
 def _keyboard():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("🙂 I'm okay", callback_data="oracle:mood:okay"), InlineKeyboardButton("🥲 Not really", callback_data="oracle:mood:rough")], [InlineKeyboardButton("🔥 Great", callback_data="oracle:mood:great"), InlineKeyboardButton("🤐 Later", callback_data="oracle:mood:later")]])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🙂 I'm okay", callback_data="oracle:mood:okay"), InlineKeyboardButton("🥲 Not really", callback_data="oracle:mood:rough")],
+        [InlineKeyboardButton("🔥 Great", callback_data="oracle:mood:great"), InlineKeyboardButton("🤐 Later", callback_data="oracle:mood:later")],
+    ])
 
 
 async def _recent_member() -> dict | None:
     if not GROUP_CHAT_ID:
+        log.info("AUTONOMOUS_MEMBER_SKIP | reason=group_not_configured")
         return None
     try:
         from handlers import social_engine
@@ -48,21 +52,28 @@ async def _recent_member() -> dict | None:
 
 
 async def _send(kind: str, templates: list[str], context: ContextTypes.DEFAULT_TYPE):
+    log.info("AUTONOMOUS_JOB_ENTERED | feature=friend_%s", kind)
     if not GROUP_CHAT_ID:
+        log.info("AUTONOMOUS_JOB_SKIPPED | feature=friend_%s | reason=group_not_configured", kind)
         return
     try:
         from handlers import social_engine
         key = f"friend:{GROUP_CHAT_ID}:{kind}"
         if await social_engine._done(key, 18 * 3600):
+            log.info("AUTONOMOUS_JOB_SKIPPED | feature=friend_%s | reason=cooldown", kind)
             return
         member = await _recent_member()
         if not member:
+            log.info("AUTONOMOUS_JOB_SKIPPED | feature=friend_%s | reason=no_recent_member", kind)
             return
         name = (member.get("name") or "friend")[:60]
-        await context.bot.send_message(GROUP_CHAT_ID, random.choice(templates).format(name=name), reply_markup=_keyboard())
+        text = random.choice(templates).format(name=name)
+        log.info("AUTONOMOUS_RUN | feature=friend_%s | member=%s", kind, name)
+        await context.bot.send_message(GROUP_CHAT_ID, text, reply_markup=_keyboard())
+        log.info("AUTONOMOUS_SENT | feature=friend_%s | member=%s", kind, name)
         log.info("FRIEND_CHECKIN_SENT | kind=%s | member=%s", kind, name)
     except Exception:
-        log.exception("FRIEND_CHECKIN_FAILED | kind=%s", kind)
+        log.exception("AUTONOMOUS_FAILED | feature=friend_%s", kind)
 
 
 async def morning(context):
@@ -82,7 +93,12 @@ async def mood_callback(update, context):
     if not query:
         return
     await query.answer()
-    replies = {"okay": "Good. Keep that okay protected. 🌙", "rough": "No pressure to explain. If you want to talk, I'm around.", "great": "Then keep that energy. 🔥", "later": "Fair. No interrogation. Come back when you feel like talking. 🖤"}
+    replies = {
+        "okay": "Good. Keep that okay protected. 🌙",
+        "rough": "No pressure to explain. If you want to talk, I'm around.",
+        "great": "Then keep that energy. 🔥",
+        "later": "Fair. No interrogation. Come back when you feel like talking. 🖤",
+    }
     mood = (query.data or "").split(":")[-1]
     try:
         await query.message.reply_text(replies.get(mood, "I'm listening. 🌙"))
