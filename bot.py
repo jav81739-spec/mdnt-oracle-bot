@@ -11,10 +11,11 @@ log=logging.getLogger("midnight.bot")
 TOKEN=os.getenv("BOT_TOKEN","").strip()
 if not TOKEN: log.critical("BOT_TOKEN is not set"); sys.exit(1)
 GROUP_CHAT_ID=int(os.getenv("GROUP_CHAT_ID","0") or "0"); OWNER_ID=int(os.getenv("OWNER_ID","0") or "0")
-ORACLE_TZ=ZoneInfo(os.getenv("ORACLE_TIMEZONE","Asia/Kolkata"))
+ORACLE_TZ=ZoneInfo(os.getenv("ORACLE_TIMEZONE", "Asia/Kolkata"))
 try:
     from storage import redis_client as _storage_client
-except Exception: _storage_client=None
+except Exception:
+    _storage_client=None
 import startup; startup.init(_storage_client)
 from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, PollAnswerHandler, PollHandler, InlineQueryHandler, filters
@@ -25,9 +26,9 @@ from midnight_oracle.memory_engine import MemoryEngine as Phase1MemoryEngine
 from midnight_oracle.mood_engine import MoodEngine
 from midnight_oracle.generators.reply_generator import ReplyGenerator
 from midnight_oracle.handlers.message_handler import MessageRouter
+from midnight_oracle.handlers.phase_registry import register_phase_surfaces
 
 if hasattr(legacy_bot,"GROUP_CHAT_ID") and legacy_bot.GROUP_CHAT_ID==0: legacy_bot.GROUP_CHAT_ID=GROUP_CHAT_ID
-
 _friend_recent: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=8))
 _phase1_db: Database | None = None
 _phase1_engine: Phase1FriendEngine | None = None
@@ -174,6 +175,11 @@ def build_application():
         app.add_handler(MessageHandler(filters.ALL,track_member),group=-998)
     except Exception: log.exception("member tracker registration failed")
     _register_world_surface(app)
+    try:
+        register_phase_surfaces(app)
+        log.info("PHASE_SURFACE_REGISTRY_READY | public_world=on | mini_app=on")
+    except Exception:
+        log.exception("PHASE_SURFACE_REGISTRY_FAILED")
     if hasattr(legacy_bot,"register_handlers"): legacy_bot.register_handlers(app)
     elif hasattr(legacy_bot,"_register_handlers"): legacy_bot._register_handlers(app)
     if not _has_ai_handler(app): app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_resilient_ai_handler),group=10)
