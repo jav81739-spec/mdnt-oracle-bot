@@ -22,7 +22,8 @@ class MessageRouter:
         """Announce only newly unlocked social achievements."""
         if not self.achievements:return
         try:
-            for key in await self.achievements.evaluate(member.user_id,group_id,event):
+            user_id=int(getattr(member,'user_id',getattr(member,'id',0)))
+            for key in await self.achievements.evaluate(user_id,group_id,event):
                 await message.reply_text(await self.achievements.announce(key,member,group_id))
         except Exception:
             return
