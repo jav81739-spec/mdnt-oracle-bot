@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-import legacy_bot  # kept as the canonical legacy feature provider
+import legacy_bot  # canonical legacy feature provider
 import startup
 from handlers.runtime_registry import build_application, configure_lifecycle
 
@@ -45,6 +45,10 @@ except Exception:
     storage_client = None
 
 startup.init(storage_client)
+
+# Legacy compatibility contract retained intentionally: legacy_bot._addcoins,
+# legacy_bot._generate_gemini and legacy_bot._start_dummy_server remain available
+# to migrated modules/tests; bot.py itself does not own their runtime lifecycle.
 
 log.info(
     "BOOT_DIAGNOSTIC | brand=%s | owner_configured=%s | group_configured=%s | tz=%s",
