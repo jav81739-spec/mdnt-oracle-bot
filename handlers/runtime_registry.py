@@ -140,6 +140,17 @@ def configure_lifecycle(app, storage_client, oracle_tz):
 
         init_storage(storage_client)
 
+        # The legacy bot can invoke social_engine.register_jobs() during its
+        # private post-init hook.  Do not merely remove those jobs afterwards:
+        # prevent their registration at the source so there is exactly one
+        # autonomous scheduler in the process.
+        legacy_register_jobs = getattr(social_engine, "register_jobs", None)
+        if legacy_register_jobs is not None:
+            def _legacy_scheduler_disabled(*args, **kwargs):
+                log.info("AUTONOMOUS_LEGACY_REGISTRATION_BLOCKED")
+                return None
+            social_engine.register_jobs = _legacy_scheduler_disabled
+
         if hasattr(legacy_bot, "_post_init"):
             try:
                 await legacy_bot._post_init(app)
@@ -154,6 +165,7 @@ def configure_lifecycle(app, storage_client, oracle_tz):
             log.info("Post-init complete — Midnight Oracle is ready")
             return
 
+        # Defensive cleanup for jobs created before the registration guard ran.
         removed = _clear_legacy_autonomous_jobs(jq)
         log.info("AUTONOMOUS_LEGACY_CLEANUP | removed=%d", removed)
 
