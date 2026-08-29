@@ -1,7 +1,8 @@
 """Midnight Oracle — single production entrypoint."""
 from __future__ import annotations
-import asyncio, logging, os, sys, random
-from datetime import time
+import asyncio, logging, os, sys, random, re
+from collections import defaultdict, deque
+from datetime import datetime
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 load_dotenv()
@@ -18,6 +19,7 @@ import startup; startup.init(_storage_client)
 from telegram import BotCommand, BotCommandScopeDefault, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, BotCommandScopeAllChatAdministrators, BotCommandScopeChat
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 import legacy_bot
+from friend_engine import FriendEngine
 
 # Never let a stale/retired Render environment resurrect a known-dead model.
 if hasattr(legacy_bot,"GEMINI_MODEL"):
@@ -27,9 +29,56 @@ if hasattr(legacy_bot,"GEMINI_MODEL"):
 
 if hasattr(legacy_bot,"GROUP_CHAT_ID") and legacy_bot.GROUP_CHAT_ID==0: legacy_bot.GROUP_CHAT_ID=GROUP_CHAT_ID
 
-# Provider failure must never become a user-visible outage message. This is a
-# local conversational mode, deliberately not labelled as a fallback/error.
+# ── Friend Engine: ambient social intelligence ────────────────────────────
+_friend_engine=FriendEngine()
+_friend_recent: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=8))
+_friend_social_cooldown=float(os.getenv("ORACLE_SOCIAL_COOLDOWN_SECONDS", "1200"))
+
+
+def _is_direct_summon(update, text: str, bot_username: str = "") -> bool:
+    """Return True when an existing explicit Telegram/Oracle trigger should bypass ambient social logic."""
+    message=getattr(update,"effective_message",None) or getattr(update,"message",None)
+    if not message:
+        return False
+    if getattr(message.chat,"type","") == "private":
+        return True
+    low=(text or "").casefold()
+    if bot_username and f"@{bot_username.casefold()}" in low:
+        return True
+    if re.search(r"\b(?:midnight|oracle)\b", low):
+        return True
+    replied=getattr(message,"reply_to_message",None)
+    replied_user=getattr(replied,"from_user",None)
+    return bool(getattr(replied_user,"is_bot",False))
+
+
+def _build_friend_context(update, text: str, bot_username: str = "") -> dict:
+    """Build the bounded social context consumed by FriendEngine."""
+    message=getattr(update,"effective_message",None) or getattr(update,"message",None)
+    chat=getattr(update,"effective_chat",None)
+    user=getattr(update,"effective_user",None)
+    chat_id=str(getattr(chat,"id",0))
+    now=datetime.now(ORACLE_TZ)
+    recent=_friend_recent[chat_id]
+    context={
+        "sender": str(getattr(user,"id",0)),
+        "sender_name": getattr(user,"first_name",None) or "friend",
+        "group_id": chat_id,
+        "recent_messages": list(recent),
+        "hour": now.hour,
+        "is_late_night": now.hour >= 23 or now.hour < 3,
+        "now": now.timestamp(),
+        "social_cooldown_seconds": _friend_social_cooldown,
+        "ambient_engagement_rate": 0.30,
+        "direct_summon": _is_direct_summon(update,text,bot_username),
+        "bot_username": bot_username,
+        "message_id": getattr(message,"message_id",0),
+    }
+    return context
+
+
 async def _provider_fallback(first_name="friend", *args, **kwargs):
+    """Provide an internal conversational response when the external AI provider is unavailable."""
     name=(first_name or "friend").strip()[:60]
     replies=(
         f"{name}, I'm here. Keep going — what were you saying? 🌙",
@@ -39,11 +88,40 @@ async def _provider_fallback(first_name="friend", *args, **kwargs):
     return random.choice(replies)
 legacy_bot._get_fallback_reply=_provider_fallback
 
-# Turn any provider exception into the local conversational path. The original
-# handler remains responsible for its normal filtering, memory and formatting.
 _original_ai_handler=getattr(legacy_bot,"handle_ai_message",None)
 if _original_ai_handler is not None:
     async def _resilient_ai_handler(update, context):
+        """Route ambient group conversation through FriendEngine while preserving explicit legacy behavior."""
+        message=getattr(update,"effective_message",None) or getattr(update,"message",None)
+        text=(getattr(message,"text",None) or "").strip()
+        bot_username=""
+        try:
+            bot_username=await legacy_bot._get_bot_username(context.bot)
+        except Exception:
+            pass
+
+        # Commands, DMs, mentions and explicit Oracle replies retain the old path exactly.
+        if message and text and not _is_direct_summon(update,text,bot_username) and getattr(message.chat,"type","") in {"group","supergroup"}:
+            chat_id=str(message.chat.id)
+            recent=_friend_recent[chat_id]
+            friend_context=_build_friend_context(update,text,bot_username)
+            should_reply, reply_text=_friend_engine.should_engage(text,friend_context)
+            recent.append(text)
+            if should_reply and reply_text:
+                user=getattr(update,"effective_user",None)
+                name=getattr(user,"first_name",None) or "friend"
+                try:
+                    await context.bot.send_chat_action(chat_id=message.chat.id,action="typing")
+                except Exception:
+                    pass
+                try:
+                    await message.reply_text(reply_text)
+                    log.info("FRIEND_ENGINE_REPLY | group=%s | sender=%s | score=engaged",chat_id,name)
+                except Exception:
+                    log.exception("FRIEND_ENGINE_REPLY_FAILED | group=%s",chat_id)
+                return
+            # Observation happens even when Oracle chooses silence; never force the legacy gate to speak.
+
         try:
             return await _original_ai_handler(update, context)
         except Exception:
@@ -51,7 +129,6 @@ if _original_ai_handler is not None:
             name=getattr(user,"first_name",None) or "friend"
             log.exception("AI_PROVIDER_OR_HANDLER_FAILURE | local_chat_mode=engaged | user=%s",name)
             try:
-                message=getattr(update,"effective_message",None)
                 if message:
                     await message.reply_text(await _provider_fallback(name))
                     log.info("AI_LOCAL_CHAT_SENT | user=%s",name)
@@ -60,6 +137,7 @@ if _original_ai_handler is not None:
     legacy_bot.handle_ai_message=_resilient_ai_handler
 
 async def _registry(update,context):
+    """Record chat/member activity without changing command behavior."""
     chat=getattr(update,"effective_chat",None)
     if chat and chat.type in ("group","supergroup","channel"):
         try: await startup.register_chat(chat.id,chat.type,chat.title or "")
@@ -72,6 +150,7 @@ async def _registry(update,context):
         except Exception: log.debug("member memory update skipped",exc_info=True)
 
 def _command_names(app):
+    """Return command names already registered on the application."""
     out=set()
     for hs in getattr(app,"handlers",{}).values():
         for h in hs:
@@ -80,6 +159,7 @@ def _command_names(app):
     return out
 
 def _has_ai_handler(app):
+    """Return whether the application contains the protected AI handler."""
     for hs in getattr(app,"handlers",{}).values():
         for h in hs:
             cb=getattr(h,"callback",None)
@@ -88,6 +168,7 @@ def _has_ai_handler(app):
     return False
 
 def build_application():
+    """Construct the production Telegram application without duplicate polling or scheduler registration."""
     app=Application.builder().token(TOKEN).build()
     app.add_handler(MessageHandler(filters.ALL,_registry),group=-999)
     try:
@@ -103,7 +184,6 @@ def build_application():
         from handlers.social_engine import init_storage
         init_storage(_storage_client)
         from handlers.member_memory import init
-        # init is async and is intentionally awaited from post-init below.
         app.bot_data["member_memory_init"] = init
     except Exception: log.exception("memory bootstrap wiring failed")
     try:
@@ -118,6 +198,7 @@ DESCRIPTIONS={"start":"🌙 Enter the Midnight Realm","help":"📖 What Midnight
 OWNER={"announce","broadcast","midnightmap"}
 
 async def _set_commands(app):
+    """Publish the existing public and owner command menus to Telegram."""
     names=sorted([n for n in _command_names(app) if n and len(n)<=32])[:100]; public=[n for n in names if n not in OWNER]; make=lambda xs:[BotCommand(n,DESCRIPTIONS.get(n,"Midnight Oracle")) for n in xs]
     try:
         for scope in (BotCommandScopeAllPrivateChats(),BotCommandScopeAllGroupChats(),BotCommandScopeAllChatAdministrators(),BotCommandScopeDefault()):
@@ -126,6 +207,7 @@ async def _set_commands(app):
     except Exception: log.exception("command menu setup failed")
 
 async def _post_init(app):
+    """Initialize production services exactly once after Telegram application startup."""
     await _set_commands(app)
     try:
         from handlers.social_engine import init_storage
@@ -139,15 +221,18 @@ async def _post_init(app):
     except Exception: log.exception("FRIEND_ENGINE_REGISTRATION_FAILED")
     try:
         from handlers.presence_engine import register,silence_check
-        register(app); app.job_queue.run_daily(silence_check,time=time(2,0,tzinfo=ORACLE_TZ),name="presence_silence_check")
+        register(app); app.job_queue.run_daily(silence_check,time=__import__('datetime').time(2,0,tzinfo=ORACLE_TZ),name="presence_silence_check")
     except Exception: log.exception("presence engine registration failed")
     log.info("AUTONOMOUS_CANONICAL_READY | legacy_social_scheduler=disabled | friend_engine=on | memory=on")
     log.info("AI_RUNTIME_READY | handler_guard=%s | model=%s",_has_ai_handler(app),getattr(legacy_bot,"GEMINI_MODEL","unknown"))
     log.info("Post-init complete — Midnight Oracle is ready")
 
-def _error(update,context): log.error("TELEGRAM_HANDLER_ERROR | update=%s | error=%r",getattr(update,"update_id","?"),context.error,exc_info=context.error)
+def _error(update,context):
+    """Log Telegram handler failures without leaking provider details to users."""
+    log.error("TELEGRAM_HANDLER_ERROR | update=%s | error=%r",getattr(update,"update_id","?"),context.error,exc_info=context.error)
 
 def main():
+    """Start the single production polling process."""
     app=build_application(); app.post_init=_post_init; app.add_error_handler(_error); log.info("Midnight Oracle starting — instance %s",startup._INSTANCE_ID); asyncio.run(startup.run(app,storage_client=_storage_client))
 
 if __name__=="__main__": main()
