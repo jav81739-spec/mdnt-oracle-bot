@@ -18,9 +18,15 @@ async def handle_callback(update:Update,context:ContextTypes.DEFAULT_TYPE)->None
                 engine=SecretEventEngine(db);context.application.bot_data['secret_event_engine']=engine
             if await db.is_revealed(event_id):await query.answer('☾ Already revealed.',show_alert=False);return
             ok=await engine.reveal(event_id,context.bot,query.message.message_id if query.message else None,query.from_user.id,query.message.chat_id if query.message else None)
-            await query.answer('' if ok else '☾ Already revealed.',show_alert=False);return
-        await query.answer()
-        value=data.split(':',1)
+            if ok:
+                sched=context.application.bot_data.get('oracle_scheduler')
+                if sched:
+                    try:sched.scheduler.remove_job(f'auto_reveal_{event_id}')
+                    except Exception:pass
+                await query.answer('',show_alert=False)
+            else:await query.answer('☾ Already revealed.',show_alert=False)
+            return
+        await query.answer();value=data.split(':',1)
         if value[0]=='mood':await query.edit_message_text(f"☾ noted — {value[1] if len(value)>1 else 'mood'}")
         elif value[0]=='truth':await query.answer('Passed. No explanation needed.' if len(value)>1 and value[1]=='pass' else 'Take your time.',show_alert=False)
     except Exception:return
