@@ -23,12 +23,30 @@ class OracleScheduler:
         if self.scheduler.running:return
         self.scheduler.add_job(self.morning,'cron',hour=MORNING_HOUR,minute=MORNING_MINUTE,id='oracle_morning',replace_existing=True);self.scheduler.add_job(self.evening,'cron',hour=EVENING_HOUR,minute=EVENING_MINUTE,id='oracle_evening',replace_existing=True);self.scheduler.add_job(self.three_am,'cron',hour=3,minute=0,id='oracle_3am',replace_existing=True);self.scheduler.add_job(self.absence_daily,'cron',hour=14,minute=0,id='oracle_absence',replace_existing=True);self.scheduler.add_job(self.secret_daily,'cron',hour=15,minute=0,id='oracle_secret',replace_existing=True);self.scheduler.add_job(self.recover_timed,'date',run_date=datetime.now(self.timezone)+timedelta(seconds=2),id='oracle_recovery',replace_existing=True);self.scheduler.start()
     async def recover_timed(self)->None:
-        """Recover expired WYR polls, active scramble sessions, and overdue secret events."""
+        """Recover expired WYR polls, reset interrupted scramble sessions, and reveal overdue secret events."""
         await SecretEventEngine(self.db).recover_unrevealed(self.application.bot)
         await WouldYouRatherGame(self.db).recover_expired(self.application.bot)
         rows=await self.db.fetchall("SELECT group_id FROM game_sessions WHERE game_type='word_scramble' AND is_active=1")
         for r in rows:
-            gid=int(r['group_id']);await self.application.bot.send_message(gid,'☾ Oracle lost its place. Starting fresh.');await self.db.execute("UPDATE game_sessions SET is_active=0,ended_at=? WHERE group_id=? AND game_type='word_scramble' AND is_active=1",(now_ts(),gid))
+            gid=int(r['group_id'])
+            try:await self.application.bot.send_message(gid,'☾ Oracle lost its place. Starting fresh.')
+            except Exception:pass
+            await self.db.execute("UPDATE game_sessions SET is_active=0,ended_at=? WHERE group_id=? AND game_type='word_scramble' AND is_active=1",(now_ts(),gid))
+            try:
+                member=type('Member',(),{'user_id':0,'preferred_name':'Oracle','relationship_tier':'known'})()
+                text=await WordScrambleGame(self.db).start(gid,member)
+                await self.application.bot.send_message(gid,text)
+                self.scheduler.add_job(self._scramble_timeout,'date',run_date=datetime.now(self.timezone)+timedelta(seconds=30),args=[gid],id=f'scramble_timeout_{gid}',replace_existing=True)
+            except Exception:pass
+    async def _scramble_timeout(self,group_id:int)->None:
+        """Resolve a recovered scramble timeout and schedule its next round when needed."""
+        text=await WordScrambleGame(self.db).timeout(group_id)
+        if not text:return
+        try:await self.application.bot.send_message(group_id,text)
+        except Exception:pass
+        row=await WordScrambleGame(self.db).get_active(group_id)
+        if row and json.loads(row['state']).get('awaiting_answer'):
+            self.scheduler.add_job(self._scramble_timeout,'date',run_date=datetime.now(self.timezone)+timedelta(seconds=30),args=[group_id],id=f'scramble_timeout_{group_id}',replace_existing=True)
     async def morning(self)->None:
         """Send morning check-ins only to recently active groups."""
         for r in await self.db.fetchall('SELECT group_id,group_name FROM group_profile WHERE morning_active=1'):
@@ -65,7 +83,6 @@ class OracleScheduler:
                 msg=await self.application.bot.send_message(event.group_id,teaser)
                 eid=await engine.record(event,msg.message_id)
                 await self.application.bot.edit_message_reply_markup(event.group_id,msg.message_id,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('Reveal 👁',callback_data=f'reveal_{eid}')]]))
-                sent_at=now_ts()
                 self.scheduler.add_job(engine.reveal,'date',run_date=datetime.now(self.timezone)+timedelta(minutes=30),args=[eid,self.application.bot,msg.message_id,None,event.group_id],id=f'auto_reveal_{eid}',replace_existing=True)
             except Exception:continue
     async def oracle_moment(self,group_id:int)->bool:
