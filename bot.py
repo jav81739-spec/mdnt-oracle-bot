@@ -63,6 +63,9 @@ def build_application() -> Application:
     app.add_handler(MessageHandler(filters.ALL, _chat_registry_middleware), group=-999)
     from handlers.social_engine import track_member
     app.add_handler(MessageHandler(filters.ALL, track_member), group=-998)
+    from handlers.engagement_engine import init_storage as init_engagement_storage, register as register_engagement
+    init_engagement_storage(_storage_client)
+    register_engagement(app)
 
     if hasattr(legacy_bot, "register_handlers"):
         legacy_bot.register_handlers(app)
@@ -155,6 +158,7 @@ async def _post_init(app: Application):
 
     if jq:
         jq.run_repeating(homecoming_job, interval=21600, first=30, name="hidden_homecoming")
+        log.info("HOMECOMING scheduler registered | every 6h | first run in 30s")
         jq.run_daily(silence_check, time=datetime.now(ORACLE_TZ).replace(hour=2, minute=0, second=0, microsecond=0).timetz(), name="silence_check")
 
     if hasattr(legacy_bot, "_post_init"):
