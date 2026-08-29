@@ -23,6 +23,13 @@ if hasattr(legacy_bot,"GEMINI_MODEL"):
     legacy_bot.GEMINI_MODEL=configured if configured and configured not in retired else "gemini-3.6-flash"
     log.info("AI_MODEL_SELECTED | model=%s",legacy_bot.GEMINI_MODEL)
 if hasattr(legacy_bot,"GROUP_CHAT_ID") and legacy_bot.GROUP_CHAT_ID==0: legacy_bot.GROUP_CHAT_ID=GROUP_CHAT_ID
+
+async def _provider_fallback(first_name="friend", *args, **kwargs):
+    """Private recovery path: never exposes provider/model/rate-limit errors."""
+    name=(first_name or "friend").strip()[:60]
+    return f"{name}, I'm here. Keep going — what were you saying? 🌙"
+legacy_bot._get_fallback_reply=_provider_fallback
+
 async def _registry(update,context):
     chat=getattr(update,"effective_chat",None)
     if chat and chat.type in ("group","supergroup","channel"): await startup.register_chat(chat.id,chat.type,chat.title or "")
