@@ -16,8 +16,8 @@ try:
     from storage import redis_client as _storage_client
 except Exception: _storage_client=None
 import startup; startup.init(_storage_client)
-from telegram import BotCommand, BotCommandScopeDefault, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, BotCommandScopeAllChatAdministrators, BotCommandScopeChat
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram import BotCommand
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, PollAnswerHandler, PollHandler, InlineQueryHandler, filters
 import legacy_bot
 from midnight_oracle.friend_engine import FriendEngine
 from midnight_oracle.database import Database
@@ -62,12 +62,23 @@ async def _phase1_direct_reply(update, context, text: str, bot_username: str) ->
 
 
 async def _resilient_ai_handler(update, context):
-    """Own the complete text decision path: direct/private reply or ambient FriendEngine, otherwise silence."""
+    """Own the complete text decision path while yielding to active durable games."""
     message=getattr(update,"effective_message",None) or getattr(update,"message",None); text=(getattr(message,"text",None) or "").strip(); bot_username=""
     if not message or not text or text.startswith("/"): return
+    chat_type=getattr(message.chat,"type","")
+    if chat_type in {"group","supergroup"} and _phase1_db is not None:
+        try:
+            from midnight_oracle.handlers.world_handler import handle_game_message
+            active=await _phase1_db.fetchone("SELECT game_type FROM game_sessions WHERE group_id=? AND is_active=1 LIMIT 1",(message.chat.id,))
+            if active and active["game_type"]=="word_scramble":
+                await handle_game_message(update,context)
+                return
+        except Exception:
+            log.exception("DURABLE_GAME_MESSAGE_FAILURE")
+            return
     try: bot_username=await legacy_bot._get_bot_username(context.bot)
     except Exception: pass
-    direct=_is_direct_summon(update,text,bot_username); chat_type=getattr(message.chat,"type","")
+    direct=_is_direct_summon(update,text,bot_username)
     if direct or chat_type == "private":
         try:
             if await _phase1_direct_reply(update,context,text,bot_username): return
@@ -122,39 +133,81 @@ def _has_ai_handler(app):
             if cb is _resilient_ai_handler or getattr(cb,"__name__","") in {"handle_ai_message","_resilient_ai_handler"}: return True
     return False
 
+def _register_world_surface(app):
+    """Register the durable Phase 3 world handlers without replacing the legacy command stack."""
+    try:
+        from midnight_oracle.handlers.world_handler import start_game, game_callback, handle_poll_answer, handle_poll
+        for command in ("tod", "wyr", "nhie", "scramble"):
+            app.add_handler(CommandHandler(command, start_game), group=-20)
+        app.add_handler(PollAnswerHandler(handle_poll_answer), group=-20)
+        app.add_handler(PollHandler(handle_poll), group=-20)
+        app.add_handler(CallbackQueryHandler(game_callback, pattern=r"^game:"), group=-20)
+    except Exception:
+        log.exception("WORLD_SURFACE_REGISTRATION_FAILED")
+    try:
+        from midnight_oracle.handlers.inline_handler import handle_inline
+        app.add_handler(InlineQueryHandler(handle_inline), group=-20)
+    except Exception:
+        log.exception("INLINE_SURFACE_REGISTRATION_FAILED")
+    try:
+        from midnight_oracle.handlers.callback_handler import handle_callback
+        app.add_handler(CallbackQueryHandler(handle_callback, pattern=r"^(reveal_|secret:|game:)$|^game:end$"), group=-19)
+    except Exception:
+        log.exception("CALLBACK_SURFACE_REGISTRATION_FAILED")
+    try:
+        from midnight_oracle.handlers.prediction_handler import predict, predictions
+        app.add_handler(CommandHandler("predict", predict), group=-20)
+        app.add_handler(CommandHandler("predictions", predictions), group=-20)
+    except Exception:
+        log.exception("PREDICTION_SURFACE_REGISTRATION_FAILED")
+
 def build_application():
-    """Construct the production Telegram application without duplicate polling or AI schedulers."""
+    """Construct the production Telegram application with legacy commands and durable Phase 1–5 surfaces."""
     app=Application.builder().token(TOKEN).build(); app.add_handler(MessageHandler(filters.ALL,_registry),group=-999)
     try:
         from handlers.social_engine import track_member
         app.add_handler(MessageHandler(filters.ALL,track_member),group=-998)
     except Exception: log.exception("member tracker registration failed")
+    _register_world_surface(app)
     if hasattr(legacy_bot,"register_handlers"): legacy_bot.register_handlers(app)
     elif hasattr(legacy_bot,"_register_handlers"): legacy_bot._register_handlers(app)
     if not _has_ai_handler(app): app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_resilient_ai_handler),group=10)
     return app
 
 async def _set_commands(app):
-    """Publish the existing command menus to Telegram."""
+    """Publish the complete public command surface to Telegram without exposing private controls."""
     names=sorted([n for n in _command_names(app) if n and len(n)<=32])[:100]
-    commands=[BotCommand(n,"Midnight Oracle") for n in names]
+    descriptions={
+        "start":"Midnight Oracle", "help":"Command guide", "oracle":"Daily prophecy", "aura":"Scan your aura",
+        "vibecheck":"Check your energy", "identity":"Oracle archetype", "shadow":"Meet your shadow", "element":"Cosmic element",
+        "corecode":"Three core words", "universe":"A message from the universe", "ritual":"Today's ritual", "duality":"Light and dark side",
+        "nightreport":"Tonight's night report", "sigil":"Personal sigil", "glitch":"Oracle system reading", "checkin":"Daily check-in",
+        "streakcheck":"View your streak", "vent":"Anonymous vent", "coinboard":"Group coin leaderboard", "cgift":"Gift coins", "rob":"Attempt a heist",
+        "tod":"Truth or Dare", "wyr":"Would You Rather", "nhie":"Never Have I Ever", "scramble":"Word Scramble", "predict":"Make a prediction", "predictions":"Pending predictions",
+        "house":"Open Oracle House", "truth":"Truth question", "memory":"Group memory", "mymemory":"What Oracle remembers", "forget":"Forget a memory", "quiet":"Quiet mode", "wake":"Wake Oracle",
+    }
+    commands=[BotCommand(n,descriptions.get(n,"Midnight Oracle")) for n in names]
     try: await app.bot.set_my_commands(commands)
     except Exception: log.exception("command menu setup failed")
 
 async def _post_init(app):
-    """Initialize production services exactly once after Telegram application startup."""
+    """Initialize production services, durable world scheduling, and canonical command surfaces exactly once."""
     global _phase1_db,_phase1_engine,_phase1_memory,_phase1_replies
     await _set_commands(app)
     try:
         _phase1_db=Database(os.getenv("ORACLE_DATABASE_PATH","midnight_oracle.sqlite3")); await _phase1_db.connect()
         _phase1_memory=Phase1MemoryEngine(_phase1_db); _phase1_engine=Phase1FriendEngine(_phase1_db); _phase1_replies=ReplyGenerator()
+        app.bot_data["oracle_db"]=_phase1_db
+        from midnight_oracle.scheduler import OracleScheduler
+        oracle_scheduler=OracleScheduler(app,_phase1_db,ORACLE_TZ); oracle_scheduler.start(); app.bot_data["oracle_scheduler"]=oracle_scheduler
         log.info("PHASE1_FRIEND_ENGINE_READY | storage=sqlite | generation=openai")
+        log.info("PHASE2_5_SURFACE_READY | scheduler=on | games=on | secret_events=on | mini_app=on")
     except Exception: log.exception("PHASE1_FRIEND_ENGINE_INIT_FAILED")
     try:
         from handlers.friend_engine import register
         register(app)
     except Exception: log.exception("FRIEND_ENGINE_REGISTRATION_FAILED")
-    log.info("AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on")
+    log.info("AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on")
 
 def _error(update,context):
     """Log Telegram handler failures without leaking provider details to users."""
@@ -162,6 +215,6 @@ def _error(update,context):
 
 def main():
     """Start the single production polling process."""
-    app=build_application(); app.post_init=_post_init; app.add_error_handler(_error); log.info("Midnight Oracle starting — instance %s",startup._INSTANCE_ID); asyncio.run(startup.run(app,storage_client=_storage_client))
+    app=build_application(); app.post_init=_post_init; app.add_error_handler(_error); asyncio.run(startup.run(app,storage_client=_storage_client))
 
 if __name__=="__main__": main()
