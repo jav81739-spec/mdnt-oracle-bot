@@ -1,10 +1,4 @@
-"""Central Gemini HTTPS gateway for Midnight Oracle.
-
-No Gemini SDK is required. The service uses the public HTTPS endpoint through
-httpx, keeps secrets out of URLs/logs, bounds every request, and retries only
-transient failures. The model is configurable so deployments can switch models
-without code changes.
-"""
+"""Central Gemini HTTPS gateway for Midnight Oracle."""
 from __future__ import annotations
 
 import asyncio
@@ -27,8 +21,7 @@ class AIService:
 
     def __post_init__(self) -> None:
         self.api_key = self.api_key or os.getenv("GEMINI_API_KEY", "")
-        # Current stable production default. Override with GEMINI_MODEL when needed.
-        self.model = self.model or os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
+        self.model = self.model or os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
         self._client: httpx.AsyncClient | None = None
         self._client_lock = asyncio.Lock()
 
@@ -39,10 +32,7 @@ class AIService:
             if self._client is None:
                 self._client = httpx.AsyncClient(
                     timeout=httpx.Timeout(self.timeout, connect=min(5.0, self.timeout)),
-                    headers={
-                        "Content-Type": "application/json",
-                        "x-goog-api-key": self.api_key,
-                    },
+                    headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key},
                 )
         return self._client
 
@@ -75,8 +65,7 @@ class AIService:
                     response.raise_for_status()
                 elif response.status_code >= 400:
                     raise AIUnavailable(f"Gemini API returned HTTP {response.status_code}")
-                data = response.json()
-                text = self._extract_text(data)
+                text = self._extract_text(response.json())
                 if not text:
                     raise AIUnavailable("Gemini returned no text candidate")
                 return text.strip()
