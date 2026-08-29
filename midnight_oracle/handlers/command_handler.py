@@ -13,7 +13,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show the compact public command guide."""
-    await update.effective_message.reply_text("☾ /oracle  talk\n/memory  group memory\n/mymemory  your memory\n/forget <topic>  forget\n/truth [level]  truth")
+    await update.effective_message.reply_text("☾ /oracle  talk\n/memory  group memory\n/mymemory  your memory\n/forget <topic>  forget\n/truth [level]  truth\n/quiet  admin silence\n/wake  admin wake")
+
+
+async def oracle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Provide a direct-summon response without invoking ambient scoring."""
+    await update.effective_message.reply_text("☾ I'm here. What's on your mind?")
 
 
 async def truth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -75,3 +80,29 @@ async def forget(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         group_id = int(row[0]) if row else 0
     count = await db.delete_memories_matching(update.effective_user.id, group_id, " ".join(context.args)) if group_id else 0
     await update.effective_message.reply_text("☾ Forgotten." if count else "☾ I couldn't find that memory.")
+
+
+async def quiet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Silence ambient replies for two hours for administrators."""
+    if not update.effective_chat or not update.effective_user or update.effective_chat.type == "private":
+        return
+    member = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
+    if member.status not in {"administrator", "creator"}:
+        return
+    db = context.application.bot_data.get("oracle_db")
+    if db:
+        await db.set_cooldown("group", str(update.effective_chat.id), "ambient", 7200)
+    await update.effective_message.reply_text("☾ Quiet mode. I'll stay out for two hours.")
+
+
+async def wake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Wake ambient replies for administrators by clearing the group cooldown."""
+    if not update.effective_chat or not update.effective_user or update.effective_chat.type == "private":
+        return
+    member = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
+    if member.status not in {"administrator", "creator"}:
+        return
+    db = context.application.bot_data.get("oracle_db")
+    if db:
+        await db.execute("DELETE FROM cooldowns WHERE scope='group' AND scope_id=? AND cooldown_type='ambient'", (str(update.effective_chat.id),))
+    await update.effective_message.reply_text("☾ I'm awake.")
