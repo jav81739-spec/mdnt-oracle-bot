@@ -26,9 +26,12 @@ class MemoryEngine:
         self.db = db
 
     async def observe(self, user_id: int, group_id: int, name: str, text: str, meaningful: bool) -> None:
-        """Record a member interaction and extract conservative memory signals."""
+        """Record a member interaction, refresh relationship tier, and extract conservative memory signals."""
         await self.db.upsert_member(user_id, group_id, "", name)
         await self.db.increment_interaction(user_id, group_id)
+        row = await self.db.fetchone("SELECT interaction_count FROM members WHERE user_id=? AND group_id=?", (user_id, group_id))
+        count = int(row[0]) if row else 1
+        await self.db.execute("UPDATE members SET relationship_tier=? WHERE user_id=? AND group_id=?", (self.relationship_tier(count), user_id, group_id))
         if not meaningful:
             return
         low = text.casefold()
@@ -47,12 +50,7 @@ class MemoryEngine:
         member = await self.db.fetchone("SELECT preferred_name,relationship_tier FROM members WHERE user_id=? AND group_id=?", (user_id, group_id))
         name = str(member[0] if member else "")
         tier = str(member[1] if member else "new")
-        return MemberMemory(name, tier,
-            tuple(await self.db.memories(user_id, group_id, "interest", MEMORY_INTEREST_LIMIT)),
-            tuple(await self.db.memories(user_id, group_id, "theme", MEMORY_THEME_LIMIT)),
-            tuple(await self.db.memories(user_id, group_id, "worry", MEMORY_WORRY_LIMIT)),
-            tuple(await self.db.memories(user_id, group_id, "win", MEMORY_WIN_LIMIT)),
-            tuple(await self.db.memories(user_id, group_id, "joke", MEMORY_JOKE_LIMIT)))
+        return MemberMemory(name, tier, tuple(await self.db.memories(user_id, group_id, "interest", MEMORY_INTEREST_LIMIT)), tuple(await self.db.memories(user_id, group_id, "theme", MEMORY_THEME_LIMIT)), tuple(await self.db.memories(user_id, group_id, "worry", MEMORY_WORRY_LIMIT)), tuple(await self.db.memories(user_id, group_id, "win", MEMORY_WIN_LIMIT)), tuple(await self.db.memories(user_id, group_id, "joke", MEMORY_JOKE_LIMIT)))
 
     async def forget(self, user_id: int, group_id: int, term: str) -> int:
         """Deactivate memories matching the requested term."""
