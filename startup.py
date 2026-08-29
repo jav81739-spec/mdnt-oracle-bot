@@ -157,7 +157,11 @@ async def register_chat(chat_id: int, chat_type: str, title: str = ""):
     try:
         raw = await _store_get(_REGISTRY_KEY)
         registry = json.loads(raw) if raw else {}
-        registry[str(chat_id)] = {"type": chat_type, "title": (title or "")[:100], "seen": int(time.time())}
+        registry[str(chat_id)] = {
+            "type": chat_type,
+            "title": (title or "")[:100],
+            "seen": int(time.time()),
+        }
         await _store_set(_REGISTRY_KEY, json.dumps(registry, ensure_ascii=False))
     except Exception as exc:
         log.warning("register_chat failed | chat=%s | %s", chat_id, exc)
@@ -172,6 +176,7 @@ async def get_chat_registry():
 
 
 async def get_broadcast_targets(include_groups=True, include_channels=True):
+    """Return observed chats plus the configured primary room as a safety fallback."""
     registry = await get_chat_registry()
     targets = []
     for cid, info in registry.items():
@@ -180,7 +185,12 @@ async def get_broadcast_targets(include_groups=True, include_channels=True):
             targets.append(int(cid))
         elif include_channels and kind == "channel":
             targets.append(int(cid))
-    return targets
+
+    configured = int(os.getenv("GROUP_CHAT_ID", "0") or "0")
+    if configured and configured not in targets:
+        targets.append(configured)
+
+    return list(dict.fromkeys(targets))
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
