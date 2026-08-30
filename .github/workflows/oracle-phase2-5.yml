@@ -1,14 +1,25 @@
 name: Midnight Oracle Phase 2-5
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Branch or commit SHA to verify
+        required: false
+        default: main
+        type: string
+
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref || github.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
