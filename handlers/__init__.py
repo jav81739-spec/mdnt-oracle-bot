@@ -27,12 +27,10 @@ _wrap("leaderboard_cmd", "leaderboard", key="leaderboard")
 
 
 async def _checkin(update, context):
-    """Provide a quiet daily check-in without exposing internal state."""
     await update.effective_message.reply_text("☾ Check-in. How are you actually doing today?\n\nNo performance required. Just an honest answer, if you have one. 🌙")
 
 
 async def _streakcheck(update, context):
-    """Show a simple activity streak derived from the existing member log."""
     db=context.application.bot_data.get("oracle_db"); user=update.effective_user; chat=update.effective_chat
     if not db or not user or not chat:
         await update.effective_message.reply_text("☾ Your streak is quiet for now."); return
@@ -47,7 +45,6 @@ async def _streakcheck(update, context):
 
 
 async def _vent(update, context):
-    """Accept an anonymous group vent without echoing the sender identity."""
     text=" ".join(getattr(context,"args",[]) or []).strip()
     if not text:
         await update.effective_message.reply_text("☾ Tell me what's sitting heavy. Use /vent <message>.")
@@ -56,7 +53,7 @@ async def _vent(update, context):
 
 
 def _register_legacy_surface(app) -> None:
-    """Restore the pre-rebuild public command surface without exposing private controls."""
+    """Restore recoverable legacy commands without exposing private controls."""
     from . import chat, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule, marriage, deathgames
     modules = {
         "chat": {"chat": ("toggle_chat",), "persona": ("set_persona",)},
@@ -91,7 +88,6 @@ def _register_legacy_surface(app) -> None:
 _legacy_wrapped=False
 
 def register_legacy_surface(app) -> None:
-    """Register all recoverable legacy commands exactly once."""
     global _legacy_wrapped
     if _legacy_wrapped:return
     _legacy_wrapped=True
@@ -106,7 +102,6 @@ _original_friend_register=_friend_engine.register
 
 
 def _friend_register_with_legacy(app):
-    """Attach legacy commands, relationship rituals, then the existing friend-engine registration."""
     register_legacy_surface(app)
     try:
         from .relationship_engine import register as register_relationships
@@ -117,3 +112,13 @@ def _friend_register_with_legacy(app):
     return _original_friend_register(app)
 
 _friend_engine.register=_friend_register_with_legacy
+
+# Production compatibility: the rebuild's death-game engine is the canonical
+# implementation. Keep legacy_bot's public module reference intact while
+# ensuring the V2 command surface is what the entrypoint activates.
+try:
+    import legacy_bot as _legacy_bot
+    from . import deathgames_v2 as _deathgames_v2
+    _legacy_bot.deathgames = _deathgames_v2
+except Exception:
+    pass
