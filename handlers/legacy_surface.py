@@ -1,13 +1,43 @@
 """Live legacy command surface for the canonical Midnight Oracle runtime."""
 from __future__ import annotations
-import logging
+import logging, os
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram.error import TelegramError
 import legacy_bot
 from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule, marriage, deathgames
 log=logging.getLogger("midnight.legacy_surface")
 
+# Commands which can change group state, spend/transfer value, or expose owner controls.
+_PROTECTED = {"broadcast","announce","midnightmap","ownerstatus","ownerstats","setcommands","reload","shutdown","restart","admin","moderation","mute","unmute","ban","warn","clearwarns","pin","unpin","purge","setrules","lock","unlock","groupinfo","setwelcome","setgoodbye","rob","withdraw","deposit","buy","gift","cgift","kill","vote","endgame","startround","deathgame"}
+_OWNER_ONLY = {"broadcast","announce","midnightmap","ownerstatus","ownerstats","setcommands","reload","shutdown","restart"}
+
 def _callback(target,name):
     cb=getattr(target,name,None);return cb if callable(cb) else None
+
+async def _is_owner(update):
+    try:return int(os.getenv("OWNER_ID","0") or "0") == int(update.effective_user.id)
+    except Exception:return False
+
+async def _is_group_admin(update, context):
+    if not update.effective_chat or update.effective_chat.type not in ("group","supergroup"): return False
+    try:
+        member=await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
+        return member.status in ("administrator","creator")
+    except (TelegramError, AttributeError, TypeError):return False
+
+async def _authorized(update, context, command):
+    if command in _OWNER_ONLY:return await _is_owner(update)
+    return await _is_owner(update) or await _is_group_admin(update, context)
+
+def _protected_callback(cb, command):
+    if command not in _PROTECTED:return cb
+    async def guarded(update, context):
+        if not await _authorized(update, context, command):
+            if getattr(update,"effective_message",None): await update.effective_message.reply_text("☾ This command is restricted to the owner or group admins.")
+            return
+        return await cb(update, context)
+    guarded.__name__=getattr(cb,"__name__",f"guarded_{command}")
+    return guarded
 
 def _add_command(app,existing,command,target,callback_name,*,group=0):
     name=command.lower().lstrip("/")
@@ -15,7 +45,7 @@ def _add_command(app,existing,command,target,callback_name,*,group=0):
     cb=_callback(target,callback_name)
     if cb is None:
         log.warning("LEGACY_COMMAND_UNAVAILABLE | command=/%s | callback=%s.%s",name,getattr(target,"__name__",target),callback_name);return False
-    app.add_handler(CommandHandler(name,cb),group=group);existing.add(name);return True
+    app.add_handler(CommandHandler(name,_protected_callback(cb,name)),group=group);existing.add(name);return True
 
 def register_legacy_surface(app):
     existing={str(command).lower().lstrip("/") for hs in getattr(app,"handlers",{}).values() for handler in hs for command in (getattr(handler,"commands",None) or ())}
