@@ -1,12 +1,11 @@
 """Midnight Oracle runtime compatibility bootstrap.
 
 Keeps the existing Social Engine intact while wiring its autonomous jobs,
-member registry, and canonical human-chat router into the live application.
+member registry, and canonical human-chat bridge into the live application.
 No commands are replaced and no autonomous feature names are exposed.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 
 log = logging.getLogger("midnight.runtime")
@@ -62,18 +61,17 @@ try:
 
             try:
                 from telegram.ext import MessageHandler, filters
-                marker = "_midnight_human_router_registered"
+                marker = "_midnight_human_bridge_registered"
                 if not app.bot_data.get(marker):
-                    router = app.bot_data.get("oracle_router")
-                    if router is not None:
-                        app.add_handler(
-                            MessageHandler(filters.TEXT & ~filters.COMMAND, router.handle),
-                            group=-40,
-                        )
-                        app.bot_data[marker] = True
-                        log.info("HUMAN_CHAT_ROUTER_READY | group=on")
+                    from handlers.live_chat_bridge import handle_live_chat
+                    app.add_handler(
+                        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_live_chat),
+                        group=-40,
+                    )
+                    app.bot_data[marker] = True
+                    log.info("HUMAN_CHAT_BRIDGE_READY | dm=on | groups=on | fallback=off")
             except Exception:
-                log.exception("HUMAN_CHAT_ROUTER_REGISTRATION_FAILED")
+                log.exception("HUMAN_CHAT_BRIDGE_REGISTRATION_FAILED")
 
             try:
                 from telegram.ext import MessageHandler, filters
