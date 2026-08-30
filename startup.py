@@ -1,8 +1,4 @@
-"""
-startup.py — Midnight Oracle canonical startup manager.
-Keeps one polling owner, stale-lease recovery, graceful shutdown, health checks,
-chat discovery, and all Telegram update types required by the durable Phase 1–5 surface.
-"""
+"""Canonical Midnight Oracle startup manager."""
 from __future__ import annotations
 import asyncio,json,logging,os,signal,socket,threading,time
 from typing import Optional
@@ -12,8 +8,7 @@ _LEASE_KEY="midnight:polling_lease";_LEASE_TTL=60;_LEASE_REFRESH=20;_LEASE_WAIT_
 async def _store_get(key):
     try:
         if _storage is None:return None
-        result=_storage.get(key)
-        return await result if asyncio.iscoroutine(result) else result
+        result=_storage.get(key);return await result if asyncio.iscoroutine(result) else result
     except Exception:return None
 async def _store_set(key,value,ttl=0):
     try:
@@ -48,12 +43,6 @@ async def _lease_heartbeat_loop():
     while not _shutting_down:
         await asyncio.sleep(_LEASE_REFRESH)
         if not _shutting_down:await _refresh_lease()
-async def _wait_for_lease():
-    deadline=time.time()+_LEASE_WAIT_MAX
-    while time.time()<deadline:
-        if await _acquire_lease():return True
-        await asyncio.sleep(min(5,max(0,deadline-time.time())))
-    return False
 _REGISTRY_KEY="midnight:chat_registry"
 async def register_chat(chat_id,chat_type,title=""):
     if chat_type=="private":return
@@ -72,7 +61,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
         if self.command!="HEAD":self.wfile.write(body)
     def do_GET(self):
         if self.path in ("/","/health","/healthz"):
-            code=503 if _shutting_down else 200;self._respond(code,json.dumps({"status":"shutting_down" if _shutting_down else "ok","instance":_INSTANCE_ID}).encode(),"application/json")
+            self._respond(503 if _shutting_down else 200,json.dumps({"status":"shutting_down" if _shutting_down else "ok","instance":_INSTANCE_ID}).encode(),"application/json")
         elif self.path=="/ready":self._respond(200 if _app and not _shutting_down else 503,json.dumps({"ready":bool(_app and not _shutting_down)}).encode(),"application/json")
         else:self._respond(404,b'{"status":"not_found"}',"application/json")
     do_HEAD=do_GET
@@ -80,28 +69,16 @@ class _HealthHandler(BaseHTTPRequestHandler):
 class _ReuseHTTPServer(HTTPServer):allow_reuse_address=True
 def start_health_server():
     global _health_server
+    if _health_server is not None:return _health_server
     port=int(os.getenv("PORT","10000"));_health_server=_ReuseHTTPServer(("0.0.0.0",port),_HealthHandler);threading.Thread(target=_health_server.serve_forever,daemon=True).start();return _health_server
 def _install_signal_handlers(loop):
     def handler(signum,_frame):loop.call_soon_threadsafe(lambda:asyncio.ensure_future(_graceful_shutdown(),loop=loop))
     signal.signal(signal.SIGTERM,handler);signal.signal(signal.SIGINT,handler)
-async def _graceful_shutdown():
-    global _shutting_down
-    if _shutting_down:return
-    _shutting_down=True
-    if _lease_task and not _lease_task.done():_lease_task.cancel()
-    if _app:
-        try:
-            if _app.updater and _app.updater.running:await _app.updater.stop()
-            if _app.running:await _app.stop()
-            await _app.shutdown()
-        except Exception:pass
-    await _release_lease()
-    if _health_server:threading.Thread(target=_health_server.shutdown,daemon=True).start()
 def _install_jobqueue_compat():
     try:
         from telegram.ext import JobQueue
-        if hasattr(JobQueue,"run_weekly"):return
-        JobQueue.run_weekly=lambda self,callback,time,weekday=0,**kw:self.run_daily(callback,time=time,days=((int(weekday)+1)%7,),**kw)
+        if not hasattr(JobQueue,"run_weekly"):
+            JobQueue.run_weekly=lambda self,callback,time,weekday=0,**kw:self.run_daily(callback,time=time,days=((int(weekday)+1)%7,),**kw)
     except Exception:pass
 async def _verify_command_menu(application):
     try:
@@ -114,9 +91,20 @@ def _install_live_runtime_bridges(application):
         from handlers.live_chat_bridge import handle_live_chat
         if not application.bot_data.get("_midnight_human_bridge_registered"):
             application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,handle_live_chat),group=-40);application.bot_data["_midnight_human_bridge_registered"]=True
-        from handlers import social_engine
-        social_engine.init_storage(_storage);social_engine.register_jobs(application)
-    except Exception:log.exception("LIVE_RUNTIME_BRIDGE_INSTALL_FAILED")
+    except Exception:log.exception("LIVE_CHAT_BRIDGE_INSTALL_FAILED")
+async def _graceful_shutdown():
+    global _shutting_down
+    if _shutting_down:return
+    _shutting_down=True
+    if _lease_task and not _lease_task.done():_lease_task.cancel()
+    if _app:
+        try:
+            if _app.updater and _app.updater.running:await _app.updater.stop()
+            if _app.running:await _app.stop()
+            await _app.shutdown()
+        except Exception:log.exception("APPLICATION_SHUTDOWN_FAILED")
+    await _release_lease()
+    if _health_server:threading.Thread(target=_health_server.shutdown,daemon=True).start()
 async def run(application,storage_client=None):
     global _storage,_app,_lease_task
     _storage=storage_client;_app=application;loop=asyncio.get_running_loop();_install_signal_handlers(loop);start_health_server()
@@ -126,9 +114,15 @@ async def run(application,storage_client=None):
         await application.initialize();_install_jobqueue_compat()
         if application.post_init:await application.post_init(application)
         _install_live_runtime_bridges(application);await application.start();await application.bot.get_me();await _verify_command_menu(application)
-        await application.updater.start_polling(drop_pending_updates=True,allowed_updates=["message","edited_message","callback_query","chat_member","my_chat_member","poll_answer","poll","inline_query","chosen_inline_result"]);await asyncio.Event().wait()
+        await application.updater.start_polling(drop_pending_updates=True,allowed_updates=None);await asyncio.Event().wait()
     except asyncio.CancelledError:pass
     except Exception:log.exception("Fatal error in polling loop")
     finally:await _graceful_shutdown()
 def init(storage_client=None):
     global _storage;_storage=storage_client
+async def _wait_for_lease():
+    deadline=time.time()+_LEASE_WAIT_MAX
+    while time.time()<deadline:
+        if await _acquire_lease():return True
+        await asyncio.sleep(min(5,max(0,deadline-time.time())))
+    return False
