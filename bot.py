@@ -1,20 +1,17 @@
 """Midnight Oracle — single production entrypoint."""
 from __future__ import annotations
-import asyncio, logging, os, sys
+import asyncio,logging,os,sys
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
-load_dotenv()
-logging.basicConfig(format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",level=logging.INFO)
-log=logging.getLogger("midnight.bot")
+load_dotenv();logging.basicConfig(format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",level=logging.INFO);log=logging.getLogger("midnight.bot")
 TOKEN=os.getenv("BOT_TOKEN","").strip()
-if not TOKEN: log.critical("BOT_TOKEN is not set"); sys.exit(1)
-GROUP_CHAT_ID=int(os.getenv("GROUP_CHAT_ID","0") or "0"); OWNER_ID=int(os.getenv("OWNER_ID","0") or "0")
-ORACLE_TZ=ZoneInfo(os.getenv("ORACLE_TIMEZONE", "Asia/Kolkata"))
-try: from storage import redis_client as _storage_client
-except Exception: _storage_client=None
-import startup; startup.init(_storage_client)
-from telegram import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeChat, MenuButtonCommands
-from telegram.ext import Application,CommandHandler,MessageHandler,CallbackQueryHandler,PollAnswerHandler,PollHandler,InlineQueryHandler,filters
+if not TOKEN:log.critical("BOT_TOKEN is not set");sys.exit(1)
+GROUP_CHAT_ID=int(os.getenv("GROUP_CHAT_ID","0") or "0");OWNER_ID=int(os.getenv("OWNER_ID","0") or "0");ORACLE_TZ=ZoneInfo(os.getenv("ORACLE_TIMEZONE","Asia/Kolkata"))
+try:from storage import redis_client as _storage_client
+except Exception:_storage_client=None
+import startup;startup.init(_storage_client)
+from telegram import BotCommand,BotCommandScopeAllGroupChats,BotCommandScopeAllPrivateChats,MenuButtonCommands
+from telegram.ext import Application,CommandHandler
 import legacy_bot
 from midnight_oracle.database import Database
 from midnight_oracle.friend_engine import FriendEngine as Phase1FriendEngine
@@ -23,14 +20,10 @@ from midnight_oracle.mood_engine import MoodEngine
 from midnight_oracle.generators.reply_generator import ReplyGenerator
 from midnight_oracle.handlers.message_handler import MessageRouter
 from midnight_oracle.handlers.phase_registry import register_phase_surfaces
-
 ADMIN_ONLY_COMMANDS={"broadcast","announce","midnightmap","ownerstatus","ownerstats","setcommands","reload","shutdown","restart","admin","moderation","mute","unmute","ban","kick","warn","clearwarns","pin","unpin","purge","setrules","lock","unlock","groupinfo","setwelcome","setgoodbye"}
-if hasattr(legacy_bot,"GROUP_CHAT_ID") and legacy_bot.GROUP_CHAT_ID==0: legacy_bot.GROUP_CHAT_ID=GROUP_CHAT_ID
-_phase1_db:Database|None=None;_phase1_engine:Phase1FriendEngine|None=None;_phase1_memory:Phase1MemoryEngine|None=None;_phase1_replies:ReplyGenerator|None=None
+_phase1_db=None;_phase1_engine=None;_phase1_memory=None;_phase1_replies=None
 
-def _command_names(app):
-    return {str(c).strip().lstrip("/").casefold() for hs in getattr(app,"handlers",{}).values() for h in hs for c in (getattr(h,"commands",None) or ())}
-
+def _command_names(app):return {str(c).strip().lstrip("/").casefold() for hs in getattr(app,"handlers",{}).values() for h in hs for c in (getattr(h,"commands",None) or ())}
 def _ensure_member_help(app):
     existing=_command_names(app)
     try:
@@ -40,8 +33,7 @@ def _ensure_member_help(app):
     except Exception:log.exception("MEMBER_HELP_REGISTRATION_FAILED")
 
 def build_application():
-    app=Application.builder().token(TOKEN).build();app.bot_data["storage_client"]=_storage_client
-    register_phase_surfaces(app);_ensure_member_help(app)
+    app=Application.builder().token(TOKEN).build();app.bot_data["storage_client"]=_storage_client;register_phase_surfaces(app);_ensure_member_help(app)
     try:
         from handlers.legacy_surface import register_legacy_surface
         result=register_legacy_surface(app);log.info("LEGACY_SURFACE_WIRED | added=%d | skipped=%d",len(result.get("added",[])),len(result.get("skipped",[])))
@@ -74,8 +66,7 @@ async def _set_commands(app):
         from handlers.help_command import SECTIONS,HINTS
         priority=[name for _,commands in SECTIONS for name in commands]
     except Exception:priority=[];HINTS={}
-    rank={name:i for i,name in enumerate(["start","help"]+priority)};ordered=sorted(names,key=lambda n:(rank.get(n,10000),n));commands=[BotCommand(n,HINTS.get(n,"Midnight Oracle")) for n in ordered[:100]]
-    app.bot_data["public_command_commands"]=commands;app.bot_data["public_command_names"]=names
+    rank={name:i for i,name in enumerate(["start","help"]+priority)};ordered=sorted(names,key=lambda n:(rank.get(n,10000),n));commands=[BotCommand(n,HINTS.get(n,"Midnight Oracle")) for n in ordered[:100]];app.bot_data["public_command_commands"]=commands;app.bot_data["public_command_names"]=names
     for scope in (BotCommandScopeAllPrivateChats(),BotCommandScopeAllGroupChats()):
         try:await app.bot.set_my_commands(commands,scope=scope)
         except Exception:log.exception("COMMAND_MENU_PUBLISH_FAILED")
