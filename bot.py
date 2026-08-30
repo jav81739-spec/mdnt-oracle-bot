@@ -13,7 +13,7 @@ import startup
 import legacy_bot
 startup.init(_storage_client)
 from telegram import BotCommand,BotCommandScopeAllGroupChats,BotCommandScopeAllPrivateChats,MenuButtonCommands
-from telegram.ext import Application,CommandHandler,MessageHandler,filters
+from telegram.ext import Application,CommandHandler
 from midnight_oracle.database import Database
 from midnight_oracle.friend_engine import FriendEngine as Phase1FriendEngine
 from midnight_oracle.memory_engine import MemoryEngine as Phase1MemoryEngine
@@ -35,23 +35,11 @@ def _ensure_member_help(app):
 
 def build_application():
     app=Application.builder().token(TOKEN).build();app.bot_data["storage_client"]=_storage_client;register_phase_surfaces(app);_ensure_member_help(app)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_route_human_message),group=-40)
     try:
         from handlers.relationship_engine import register
         register(app)
     except Exception:log.exception("RELATIONSHIP_SURFACE_REGISTRATION_FAILED")
     return app
-
-async def _route_human_message(update, context):
-    message=getattr(update,"effective_message",None);chat=getattr(update,"effective_chat",None);user=getattr(update,"effective_user",None)
-    if not message or not chat or not user or bool(getattr(user,"is_bot",False)):return
-    text=(message.text or message.caption or "").strip()
-    if not text or text.startswith("/") or chat.type not in {"private","group","supergroup"}:return
-    router=getattr(context.application,"bot_data",{}).get("oracle_router")
-    if router is None:
-        log.error("ORACLE_ROUTER_MISSING | chat=%s | type=%s | user=%s",chat.id,chat.type,user.id);return
-    try:await router.handle(update,context)
-    except Exception:log.exception("ORACLE_MESSAGE_ROUTE_FAILED | chat=%s | type=%s | user=%s",chat.id,chat.type,user.id)
 
 async def _post_init(app):
     global _phase1_db,_phase1_engine,_phase1_memory,_phase1_replies
