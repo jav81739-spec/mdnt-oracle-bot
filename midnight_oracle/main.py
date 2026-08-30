@@ -9,8 +9,7 @@ from .memory_engine import MemoryEngine
 from .mood_engine import MoodEngine
 from .handlers.message_handler import MessageRouter
 from .handlers.callback_handler import handle_callback
-from .handlers.command_handler import start,oracle,truth,memory,mymemory,forget,quiet,wake,house
-from handlers.help_command import help_command
+from .handlers.command_handler import start,help_command,oracle,truth,memory,mymemory,forget,quiet,wake,house
 from .handlers.inline_handler import handle_inline
 from .handlers.world_handler import start_game,end_game,game_callback,handle_game_message,handle_poll_answer,handle_poll
 from .handlers.prediction_handler import predict,predictions
