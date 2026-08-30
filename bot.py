@@ -35,19 +35,6 @@ ADMIN_ONLY_COMMANDS={
 }
 
 if hasattr(legacy_bot,"GROUP_CHAT_ID") and legacy_bot.GROUP_CHAT_ID==0: legacy_bot.GROUP_CHAT_ID=GROUP_CHAT_ID
-_friend_recent: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=8))
-_phase1_db: Database | None = None
-_phase1_engine: Phase1FriendEngine | None = None
-_phase1_memory: Phase1MemoryEngine | None = None
-_phase1_replies: ReplyGenerator | None = None
-
-def _is_direct_summon(update, text: str, bot_username: str = "") -> bool:
-    message=getattr(update,"effective_message",None) or getattr(update,"message",None)
-    if not message:return False
-    if getattr(message.chat,"type","")=="private":return True
-    low=(text or "").casefold()
-    if bot_username and f"@{bot_username.casefold()}" in low:return True
-    return bool(re.search(r"\b(oracle|midnight)\b",low))
 
 def _command_names(app):
     names=set()
@@ -90,35 +77,11 @@ def build_application():
             log.info("COMMAND_MENU_GROUP_SCOPE_REFRESHED | count=%d",len(commands))
         except Exception:log.exception("COMMAND_MENU_GROUP_SCOPE_REFRESH_FAILED")
 
-    async def _live_human_chat(update, context):
-        """Canonical live text bridge. Commands remain handled by command handlers."""
-        message=getattr(update,"effective_message",None);chat=getattr(update,"effective_chat",None);user=getattr(update,"effective_user",None)
-        if not message or not chat or not user or user.is_bot:return
-        text=(message.text or message.caption or "").strip()
-        if not text or text.startswith("/"):return
-        router=app.bot_data.get("oracle_router")
-        if router is None:
-            log.error("LIVE_CHAT_ROUTER_MISSING | chat=%s",getattr(chat,"id","?"));return
-        try:
-            await router.handle(update,context)
-        except Exception:
-            log.exception("LIVE_CHAT_ROUTER_FAILED | chat=%s | user=%s",chat.id,user.id)
-
-    async def _track_social_member(update, context):
-        """Populate the autonomous member registry from real group activity."""
-        message=getattr(update,"effective_message",None);chat=getattr(update,"effective_chat",None);user=getattr(update,"effective_user",None)
-        if not message or not chat or not user or user.is_bot or chat.type not in ("group","supergroup"):return
-        try:
-            from handlers import social_engine
-            await social_engine.register_member(chat.id,user.id,user.first_name or "friend",user.username or "")
-            await social_engine.bump_msg_count(chat.id,user.id)
-        except Exception:log.exception("SOCIAL_MEMBER_TRACK_FAILED | chat=%s | user=%s",chat.id,user.id)
-
+    # Human chat and autonomous social tracking are installed by startup.run()
+    # after post_init, so the production runtime has exactly one owner for each
+    # surface and cannot double-answer or double-count a message.
     app.add_handler(MessageHandler(filters.ChatType.GROUPS,_refresh_group_command_scope),group=-1000)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_live_human_chat),group=-900)
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,_track_social_member),group=-899)
-    log.info("LIVE_CHAT_BRIDGE_REGISTERED | dm=on | groups=on | trigger=on | fallback=off")
-    log.info("SOCIAL_MEMBER_TRACKER_REGISTERED | groups=on")
+    log.info("LIVE_RUNTIME_BRIDGES_DEFERRED_TO_STARTUP | chat=canonical | social=canonical")
     return app
 
 async def _set_commands(app):
@@ -177,6 +140,11 @@ async def _post_init(app):
         register_memorial(app)
     except Exception:log.exception("MEMORIAL_SURFACE_REGISTRATION_FAILED")
     _ensure_member_help(app);await _set_commands(app);log.info("AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on")
+
+_phase1_db: Database | None = None
+_phase1_engine: Phase1FriendEngine | None = None
+_phase1_memory: Phase1MemoryEngine | None = None
+_phase1_replies: ReplyGenerator | None = None
 
 def _error(update,context):log.error("TELEGRAM_HANDLER_ERROR | update=%s | error=%r",getattr(update,"update_id","?"),context.error,exc_info=context.error)
 def main():
