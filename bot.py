@@ -9,7 +9,9 @@ if not TOKEN:log.critical("BOT_TOKEN is not set");sys.exit(1)
 GROUP_CHAT_ID=int(os.getenv("GROUP_CHAT_ID","0") or "0");OWNER_ID=int(os.getenv("OWNER_ID","0") or "0");ORACLE_TZ=ZoneInfo(os.getenv("ORACLE_TIMEZONE","Asia/Kolkata"))
 try:from storage import redis_client as _storage_client
 except Exception:_storage_client=None
-import startup;startup.init(_storage_client)
+import startup
+import legacy_bot
+startup.init(_storage_client)
 from telegram import BotCommand,BotCommandScopeAllGroupChats,BotCommandScopeAllPrivateChats,MenuButtonCommands
 from telegram.ext import Application,CommandHandler
 from midnight_oracle.database import Database
@@ -41,10 +43,6 @@ def build_application():
         from handlers.relationship_engine import register
         register(app)
     except Exception:log.exception("RELATIONSHIP_SURFACE_REGISTRATION_FAILED")
-    try:
-        from handlers.social_command_surface import register
-        added=register(app);log.info("SOCIAL_COMMAND_SURFACE_READY | added=%d",len(added))
-    except Exception:log.exception("SOCIAL_COMMAND_SURFACE_REGISTRATION_FAILED")
     return app
 
 async def _post_init(app):
