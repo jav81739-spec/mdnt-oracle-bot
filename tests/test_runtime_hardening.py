@@ -2,10 +2,15 @@ import os
 import unittest
 
 
+def _read_text(path, **kwargs):
+    with open(path, **kwargs) as handle:
+        return handle.read()
+
+
 class RuntimeHardeningTests(unittest.TestCase):
     def test_required_runtime_configuration_is_documented(self):
         self.assertTrue(os.path.exists('.env.example'))
-        text = open('.env.example', encoding='utf-8').read()
+        text = _read_text('.env.example', encoding='utf-8')
         for key in ('BOT_TOKEN', 'GEMINI_API_KEY'):
             self.assertIn(key, text)
             self.assertNotIn('AIza', text)
@@ -23,7 +28,7 @@ class RuntimeHardeningTests(unittest.TestCase):
                 for base, _, files in os.walk(root):
                     paths.extend(os.path.join(base, f) for f in files if f.endswith('.py'))
             for path in paths:
-                text = open(path, encoding='utf-8', errors='ignore').read()
+                text = _read_text(path, encoding='utf-8', errors='ignore')
                 for marker in banned:
                     self.assertNotIn(marker, text, path)
 
