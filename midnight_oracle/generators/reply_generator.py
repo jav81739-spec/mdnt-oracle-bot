@@ -16,6 +16,7 @@ Current message: {message}
 Mood signals: {mood_summary}
 Local hour: {time}; late-night={is_late_night}
 Relevant memory: {relevant_memory_snippet}
+Conversation context: {conversation_context}
 
 CONVERSATIONAL BRAIN
 - Treat this as an ongoing friendship, not isolated question answering.
@@ -68,8 +69,8 @@ class ReplyGenerator:
             messages.append({'role': role, 'content': content})
         return messages
 
-    def _messages(self, group_name: str, name: str, relationship_tier: str, message: str, mood_summary: str, time_text: str, late: bool, memory: str, recent_context: list[str] | None) -> list[dict[str, str]]:
-        prompt = SYSTEM_TEMPLATE.format(group_name=group_name[:100], name=name[:60], relationship_tier=relationship_tier, message=message[:1400], mood_summary=mood_summary[:500], time=time_text, is_late_night=late, relevant_memory_snippet=memory[:700] or "none")
+    def _messages(self, group_name: str, name: str, relationship_tier: str, message: str, mood_summary: str, time_text: str, late: bool, memory: str, recent_context: list[str] | None, conversation_context: str = "") -> list[dict[str, str]]:
+        prompt = SYSTEM_TEMPLATE.format(group_name=group_name[:100], name=name[:60], relationship_tier=relationship_tier, message=message[:1400], mood_summary=mood_summary[:500], time=time_text, is_late_night=late, relevant_memory_snippet=memory[:700] or "none", conversation_context=conversation_context[:900] or "none")
         messages: list[dict[str, str]] = [{"role": "system", "content": prompt}]
         messages.extend(self._dialogue_messages(recent_context))
         messages.append({"role": "user", "content": message[:1400]})
@@ -82,14 +83,14 @@ class ReplyGenerator:
             raise RuntimeError('Oracle model returned an invalid assistant response')
         return text[:900]
 
-    async def stream(self, group_name: str, name: str, relationship_tier: str, message: str, mood_summary: str, time_text: str, late: bool, memory: str, recent_context: list[str] | None = None) -> AsyncIterator[str]:
+    async def stream(self, group_name: str, name: str, relationship_tier: str, message: str, mood_summary: str, time_text: str, late: bool, memory: str, recent_context: list[str] | None = None, conversation_context: str = "") -> AsyncIterator[str]:
         """Yield real OpenAI output deltas; never synthesise a fake stream."""
         if not self.client:
             raise RuntimeError('OPENAI_API_KEY is not configured for the Oracle chat brain')
         async with _openai_sem:
             response = await self.client.chat.completions.create(
                 model=OPENAI_MODEL,
-                messages=self._messages(group_name, name, relationship_tier, message, mood_summary, time_text, late, memory, recent_context),
+                messages=self._messages(group_name, name, relationship_tier, message, mood_summary, time_text, late, memory, recent_context, conversation_context),
                 temperature=.82,
                 max_tokens=180,
                 stream=True,
@@ -99,8 +100,8 @@ class ReplyGenerator:
                 if delta:
                     yield delta
 
-    async def generate(self, group_name: str, name: str, relationship_tier: str, message: str, mood_summary: str, time_text: str, late: bool, memory: str, recent_context: list[str] | None = None) -> str:
+    async def generate(self, group_name: str, name: str, relationship_tier: str, message: str, mood_summary: str, time_text: str, late: bool, memory: str, recent_context: list[str] | None = None, conversation_context: str = "") -> str:
         parts: list[str] = []
-        async for delta in self.stream(group_name, name, relationship_tier, message, mood_summary, time_text, late, memory, recent_context):
+        async for delta in self.stream(group_name, name, relationship_tier, message, mood_summary, time_text, late, memory, recent_context, conversation_context):
             parts.append(delta)
         return self._clean(''.join(parts))
