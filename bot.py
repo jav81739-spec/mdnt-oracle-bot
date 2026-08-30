@@ -60,6 +60,21 @@ def build_application():
         from handlers import relationship_engine
         relationship_engine.register(app)
     except Exception:log.exception("RELATIONSHIP_SURFACE_REGISTRATION_FAILED")
+    async def _refresh_group_command_scope(update, context):
+        chat=getattr(update,"effective_chat",None)
+        if not chat or getattr(chat,"type","") not in ("group","supergroup"): return
+        chat_id=int(chat.id)
+        refreshed=app.bot_data.setdefault("_command_scope_refreshed",set())
+        if chat_id in refreshed:return
+        commands=app.bot_data.get("public_command_commands") or []
+        if not commands:return
+        try:
+            await startup.register_chat(chat_id,chat.type,getattr(chat,"title","") or "")
+            await app.bot.set_my_commands(commands,scope=BotCommandScopeChat(chat_id))
+            refreshed.add(chat_id)
+            log.info("COMMAND_MENU_GROUP_SCOPE_REFRESHED | count=%d",len(commands))
+        except Exception:log.exception("COMMAND_MENU_GROUP_SCOPE_REFRESH_FAILED")
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS,_refresh_group_command_scope),group=-998)
     return app
 
 async def _set_commands(app):
@@ -67,6 +82,7 @@ async def _set_commands(app):
     names=sorted(n for n in _command_names(app) if n and len(n)<=32 and n not in private)[:100]
     descriptions={"start":"Midnight Oracle","help":"Command guide","oracle":"Daily prophecy","aura":"Scan your aura","vibecheck":"Check your energy","identity":"Oracle archetype","shadow":"Meet your shadow","element":"Cosmic element","corecode":"Three core words","universe":"A message from the universe","ritual":"Today's ritual","duality":"Light and dark side","nightreport":"Tonight's night report","sigil":"Personal sigil","glitch":"Oracle system reading","checkin":"Daily check-in","streakcheck":"View your streak","vent":"Private vent","coinboard":"Group coin leaderboard","cgift":"Gift coins","rob":"Attempt a heist","tod":"Truth or Dare","wyr":"Would You Rather","nhie":"Never Have I Ever","scramble":"Word Scramble","predict":"Make a prediction","predictions":"Pending predictions","house":"Open Oracle House","truth":"Truth question","memory":"Group memory","mymemory":"What Oracle remembers","forget":"Forget a memory","quiet":"Quiet mode","wake":"Wake Oracle","weave":"Reveal a social thread","orbit":"Trace a social orbit","echo":"Find an echo","anchor":"Read an anchor","fracture":"Read a fracture","ember":"Find an ember","mirror":"Mirror reading","crossing":"Read a crossing","undertow":"Read the undertow","edict":"Oracle edict","veil":"Check the sealed veil","gaze":"Watch a relationship","release":"Release a relationship watch","graveyard":"The Quiet Graveyard"}
     commands=[BotCommand(n,descriptions.get(n,"Midnight Oracle")) for n in names]
+    app.bot_data["public_command_commands"]=commands
     scopes=(("private",BotCommandScopeAllPrivateChats()),("groups",BotCommandScopeAllGroupChats()),("default",None))
     for label,scope in scopes:
         try:
@@ -74,8 +90,6 @@ async def _set_commands(app):
             else: await app.bot.set_my_commands(commands,scope=scope)
             log.info("COMMAND_MENU_PUBLISHED | scope=%s | count=%d",label,len(commands))
         except Exception:log.exception("COMMAND_MENU_PUBLISH_FAILED | scope=%s",label)
-    # Telegram gives chat-specific command scopes higher priority than the all-group scope.
-    # Re-apply the live member menu to every discovered group so stale per-chat menus fall back to the current registry.
     try:
         registry=await startup.get_chat_registry()
         for chat_id,info in registry.items():
@@ -83,10 +97,8 @@ async def _set_commands(app):
                 try:
                     await app.bot.set_my_commands(commands,scope=BotCommandScopeChat(int(chat_id)))
                     log.info("COMMAND_MENU_GROUP_OVERRIDE_REFRESHED | count=%d",len(commands))
-                except Exception:
-                    log.exception("COMMAND_MENU_GROUP_OVERRIDE_REFRESH_FAILED")
-    except Exception:
-        log.exception("COMMAND_MENU_GROUP_SCOPE_REFRESH_FAILED")
+                except Exception:log.exception("COMMAND_MENU_GROUP_OVERRIDE_REFRESH_FAILED")
+    except Exception:log.exception("COMMAND_MENU_GROUP_SCOPE_REFRESH_FAILED")
     try:
         await app.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
         log.info("COMMAND_MENU_BUTTON_READY | menu=commands")
