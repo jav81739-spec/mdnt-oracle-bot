@@ -22,7 +22,17 @@ log=get_logger('midnight.main')
 
 async def _post_init(application:Application)->None:
     """Initialize persistence, Phase 1 engines, autonomous scheduling, and recovery."""
-    db=Database(DATABASE_PATH);await db.connect();mood=MoodEngine();mem=MemoryEngine(db);engine=FriendEngine(db,mood);router=MessageRouter(engine,mem,mood);application.bot_data.update(oracle_db=db,oracle_router=router);scheduler=OracleScheduler(application,db);scheduler.start();application.bot_data['oracle_scheduler']=scheduler;log.info('AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on')
+    db=Database(DATABASE_PATH);await db.connect();mood=MoodEngine();mem=MemoryEngine(db);engine=FriendEngine(db,mood);router=MessageRouter(engine,mem,mood);application.bot_data.update(oracle_db=db,oracle_router=router)
+    # Publish the same live member command registry used by the premium help
+    # surface.  This keeps Telegram's native DM/group menu synchronized with
+    # the handlers actually registered in this canonical application.
+    try:
+        from handlers.runtime_registry import _set_commands
+        await _set_commands(application)
+        log.info('COMMAND_SURFACE_READY | source=live_handlers')
+    except Exception:
+        log.exception('COMMAND_SURFACE_PUBLISH_FAILED')
+    scheduler=OracleScheduler(application,db);scheduler.start();application.bot_data['oracle_scheduler']=scheduler;log.info('AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on')
 async def _post_shutdown(application:Application)->None:
     """Close scheduler and SQLite resources."""
     scheduler=application.bot_data.get('oracle_scheduler');
