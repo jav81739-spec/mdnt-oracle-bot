@@ -157,7 +157,7 @@ def _register_world_surface(app):
         log.exception("INLINE_SURFACE_REGISTRATION_FAILED")
     try:
         from midnight_oracle.handlers.callback_handler import handle_callback
-        app.add_handler(CallbackQueryHandler(handle_callback, pattern=r"^(reveal_|secret:).+"), group=-19)
+        app.add_handler(CallbackQueryHandler(handle_callback, pattern=r"^(reveal_|secret:).+") , group=-19)
     except Exception:
         log.exception("CALLBACK_SURFACE_REGISTRATION_FAILED")
     try:
@@ -246,3 +246,7 @@ def _error(update,context):
 def main():
     """Start the single production polling process."""
     app=build_application(); app.post_init=_post_init; app.add_error_handler(_error); asyncio.run(startup.run(app,storage_client=_storage_client))
+
+
+if __name__ == "__main__":
+    main()
