@@ -12,6 +12,7 @@ from ..engines.joke_engine import JokeEngine
 from ..engines.group_identity_engine import GroupIdentityEngine
 from ..engines.achievement_engine import AchievementEngine
 from ..handlers.sticker_handler import StickerHandler
+from ..handlers.streaming_draft import TelegramDraftStream
 from middleware.cooldown import cooldown_seconds, is_cooling
 from middleware.recent_buffer import load_recent, save_recent
 from middleware.alert import soft_alert
@@ -21,18 +22,32 @@ class MessageRouter:
     def __init__(self, engine: FriendEngine, memory: MemoryEngine, mood: MoodEngine, replies: ReplyGenerator | None = None) -> None:
         self.engine=engine; self.memory=memory; self.mood=mood; self.replies=replies or ReplyGenerator(); self.recent={}
         db=getattr(engine,'db',None); self.jokes=JokeEngine(db) if db else None; self.identity=GroupIdentityEngine(db) if db else None; self.achievements=AchievementEngine(db) if db else None; self.stickers=StickerHandler(db) if db else None
+
     async def _announce_achievements(self,message,member,group_id,event):
         if not self.achievements:return
         try:
             user_id=int(getattr(member,'user_id',getattr(member,'id',0)))
             for key in await self.achievements.evaluate(user_id,group_id,event): await message.reply_text(await self.achievements.announce(key,member,group_id))
         except Exception as exc: await soft_alert(None,'achievement_announce',exc)
+
     async def _hidden_surprise(self,message,chat_id,user_id,text):
         try:
             if abs(hash(f'{chat_id}:{user_id}:{text[:96]}'))%37!=11:return
             choices=('🌙 _tiny midnight signal: Oracle noticed that one._','✦ _filed quietly in the midnight archives._','🖤 _some moments deserve a little extra notice._')
             await message.reply_text(choices[abs(hash(text))%len(choices)])
         except Exception as exc: await soft_alert(None,'hidden_surprise',exc)
+
+    async def _stream_private_reply(self, context, chat_id, draft_id, group_name, ctx, text, signal, recent_context):
+        stream = TelegramDraftStream(context.bot, chat_id, draft_id)
+        await stream.thinking()
+        parts: list[str] = []
+        async for delta in self.replies.stream(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet,recent_context):
+            parts.append(delta)
+            await stream.push(''.join(parts))
+        reply = self.replies._clean(''.join(parts))
+        await stream.finish()
+        return reply
+
     async def handle(self,update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
         try:
             message=update.effective_message; chat=update.effective_chat; user=update.effective_user
@@ -53,7 +68,12 @@ class MessageRouter:
             if private:
                 try: await context.bot.send_chat_action(chat_id=group_id,action='typing')
                 except Exception: pass
-                reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet,recent_context); await message.reply_text(reply); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(f'{ctx.sender_name}: {text}'); recent.append(f'Oracle: {reply}'); await save_recent(storage_client,str(group_id),recent); await self._hidden_surprise(message,group_id,user.id,text); return
+                draft_id = int((message.message_id << 1) | 1)
+                try:
+                    reply=await self._stream_private_reply(context,group_id,draft_id,group_name,ctx,text,signal,recent_context)
+                except Exception:
+                    reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet,recent_context)
+                await message.reply_text(reply); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(f'{ctx.sender_name}: {text}'); recent.append(f'Oracle: {reply}'); await save_recent(storage_client,str(group_id),recent); await self._hidden_surprise(message,group_id,user.id,text); return
             if self.jokes:
                 await self.jokes.observe(text,user.id,group_id); callback=await self.jokes.detect_callback_opportunity(text,group_id)
                 if callback and not direct and not await db.cooldown_active('group',str(group_id),'ambient'):
@@ -77,6 +97,7 @@ class MessageRouter:
             await save_recent(storage_client,str(group_id),recent)
         except Exception as exc:
             application=getattr(context,'application',None); storage_client=getattr(application,'bot_data',{}).get('storage_client') if application else None; await soft_alert(storage_client,'message_router',exc)
+
     @staticmethod
     def _is_direct_summon(text,context,message):
         low=text.casefold().strip(); username=str(getattr(getattr(context,'bot',None),'username','') or '').casefold()
