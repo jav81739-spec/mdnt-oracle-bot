@@ -62,4 +62,4 @@ jobs:
           BOT_TOKEN: test-token
           GROUP_CHAT_ID: '0'
           OWNER_ID: '0'
-        run: pytest -q
+        run: python -m unittest discover -s tests -v
