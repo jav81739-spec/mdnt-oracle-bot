@@ -17,8 +17,8 @@ class AIService:
     def __post_init__(self):
         self.api_key = self.api_key or os.getenv("GEMINI_API_KEY", "")
         configured = os.getenv("GEMINI_MODEL", "").strip()
-        retired = {"gemini-2.0-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite"}
-        self.model = self.model or (configured if configured and configured not in retired else "gemini-3.6-flash")
+        retired = {"gemini-2.0-flash", "gemini-3.5-flash-lite"}
+        self.model = self.model or (configured if configured and configured not in retired else "gemini-3.7-flash")
         self._client = None
         self._client_lock = asyncio.Lock()
 
@@ -42,10 +42,10 @@ class AIService:
         payload = {"contents":[{"role":"user","parts":[{"text":prompt[:12000]}]}],"generationConfig":{"maxOutputTokens":300}}
         last = None
         for attempt in range(self.retries + 1):
+            response = None
             try:
                 response = await client.post(url, json=payload, timeout=timeout or self.timeout)
                 if response.status_code == 404:
-                    # Do not expose provider/model failures to members.
                     raise AIUnavailable("provider unavailable")
                 if response.status_code == 429 or response.status_code >= 500:
                     response.raise_for_status()
