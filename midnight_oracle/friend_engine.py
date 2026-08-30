@@ -34,16 +34,22 @@ class FriendEngine:
             text=(message.text or message.caption or '').strip()
             if not text:return EngineDecision(False,None,'no_text')
             if context.group_id=='0':return EngineDecision(False,None,'not_a_group')
-            uid=message.from_user.id if message.from_user else 0;signal=self.mood.observe(uid,int(context.group_id),text);score,reasons=self._score(text,context,signal)
+            uid=message.from_user.id if message.from_user else 0
+            low=text.casefold();late_care=context.is_late_night and self._contains(low,self._TIRED+self._FRUSTRATED+self._VULNERABLE+self._LONELY+self._LOW_MOOD)
+            signal=self.mood.observe(uid,int(context.group_id),text);score,reasons=self._score(text,context,signal)
             allowed,reason=await self.cooldowns.can_ambient_reply(int(context.group_id),uid)
             if not allowed:return EngineDecision(False,None,reason)
             if self._last_sender.get(context.group_id)==context.sender:return EngineDecision(False,None,'same_sender_twice')
             now=context.now or time.time();bucket=self._hourly.setdefault(context.group_id,[]);bucket[:]=[x for x in bucket if now-x<3600]
             if len(bucket)>=MAX_AMBIENT_REPLIES_PER_HOUR:return EngineDecision(False,None,'hourly_cap')
-            late_care=context.is_late_night and (self._contains(text.casefold(),self._TIRED+self._FRUSTRATED+self._VULNERABLE+self._LONELY+self._LOW_MOOD))
             if score<ENGAGEMENT_THRESHOLD and not late_care:return EngineDecision(False,None,'score_below_threshold')
             if not late_care and self.rng.random()>AMBIENT_ENGAGEMENT_RATE:return EngineDecision(False,None,'probabilistic_silence')
-            reply=await self.replies.generate(context.group_name or 'Midnight Oracle',context.sender_name,context.relationship_tier,text,signal.summary(),str(context.hour),context.is_late_night,context.memory_snippet);bucket.append(now);self._last_sender[context.group_id]=context.sender;await self.cooldowns.set('group',context.group_id,'ambient',PER_GROUP_COOLDOWN_SECONDS);await self.cooldowns.set('member',f'{context.group_id}:{context.sender}','ambient',PER_MEMBER_COOLDOWN_SECONDS);return EngineDecision(True,reply,'engaged:'+','.join(reasons))
+            reply=await self.replies.generate(context.group_name or 'Midnight Oracle',context.sender_name,context.relationship_tier,text,signal.summary(),str(context.hour),context.is_late_night,context.memory_snippet)
+            bucket.append(now);self._last_sender[context.group_id]=context.sender
+            try:
+                await self.cooldowns.set('group',context.group_id,'ambient',PER_GROUP_COOLDOWN_SECONDS);await self.cooldowns.set('member',f'{context.group_id}:{context.sender}','ambient',PER_MEMBER_COOLDOWN_SECONDS)
+            except Exception:pass
+            return EngineDecision(True,reply,'engaged:'+','.join(reasons))
         except Exception:return EngineDecision(False,None,'engine_error')
     def _score(self,text:str,context:GroupContext,signal)->tuple[int,list[str]]:
         low=text.casefold();score,reasons=0,[];emotion=self._contains(low,self._TIRED+self._FRUSTRATED+self._VULNERABLE+self._LONELY+self._LOW_MOOD)
