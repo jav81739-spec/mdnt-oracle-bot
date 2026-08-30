@@ -21,7 +21,7 @@ class ChatContext:
     reply_to_text: str
 
 
-def analyze_message(text: str, *, direct_address: bool, reply_to_message=None) -> ChatContext:
+def analyze_message(text: str, *, direct_address: bool = False, reply_to_message=None) -> ChatContext:
     """Extract small, safe-to-pass conversational hints from an update."""
     value = (text or "").strip()
     low = value.casefold()
