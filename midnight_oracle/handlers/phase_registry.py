@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import CallbackQueryHandler, CommandHandler, InlineQueryHandler, MessageHandler, PollAnswerHandler, PollHandler, filters
+from telegram.ext import CallbackQueryHandler, CommandHandler, InlineQueryHandler, PollAnswerHandler, PollHandler, filters
 
 
 def register_phase_surfaces(app) -> None:
@@ -28,7 +28,7 @@ def register_phase_surfaces(app) -> None:
         import logging
         logging.getLogger("midnight.phase_registry").exception("SHIP_REGISTRATION_FAILED")
 
-    from .world_handler import start_game, game_callback, handle_game_message, handle_poll_answer, handle_poll
+    from .world_handler import start_game, game_callback, handle_poll_answer, handle_poll
     from .callback_handler import handle_callback
     from .inline_handler import handle_inline
     from .prediction_handler import predict, predictions
@@ -42,7 +42,6 @@ def register_phase_surfaces(app) -> None:
     app.add_handler(CallbackQueryHandler(game_callback, pattern=r"^game:"), group=-30)
     app.add_handler(CallbackQueryHandler(handle_callback, pattern=r"^(?:reveal_|secret:).+"), group=-29)
     app.add_handler(InlineQueryHandler(handle_inline), group=-30)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_game_message), group=-29)
     app.add_handler(CommandHandler("house", house), group=-30)
 
 
