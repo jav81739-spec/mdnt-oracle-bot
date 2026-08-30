@@ -12,7 +12,6 @@ except Exception:_storage_client=None
 import startup;startup.init(_storage_client)
 from telegram import BotCommand,BotCommandScopeAllGroupChats,BotCommandScopeAllPrivateChats,MenuButtonCommands
 from telegram.ext import Application,CommandHandler
-import legacy_bot
 from midnight_oracle.database import Database
 from midnight_oracle.friend_engine import FriendEngine as Phase1FriendEngine
 from midnight_oracle.memory_engine import MemoryEngine as Phase1MemoryEngine
@@ -42,6 +41,10 @@ def build_application():
         from handlers.relationship_engine import register
         register(app)
     except Exception:log.exception("RELATIONSHIP_SURFACE_REGISTRATION_FAILED")
+    try:
+        from handlers.social_command_surface import register
+        added=register(app);log.info("SOCIAL_COMMAND_SURFACE_READY | added=%d",len(added))
+    except Exception:log.exception("SOCIAL_COMMAND_SURFACE_REGISTRATION_FAILED")
     return app
 
 async def _post_init(app):
@@ -57,8 +60,7 @@ async def _post_init(app):
     for module,fn in (("handlers.friend_engine","register"),("handlers.owner_console_v2","register"),("handlers.memorial","register")):
         try:getattr(__import__(module,fromlist=[fn]),fn)(app)
         except Exception:log.exception("SURFACE_REGISTRATION_FAILED | %s",module)
-    _ensure_member_help(app);await _set_commands(app)
-    log.info("AUTONOMOUS_CANONICAL_READY | phase1_5=on | v2_surface=on | scheduler=on | social=on | world=on")
+    _ensure_member_help(app);await _set_commands(app);log.info("AUTONOMOUS_CANONICAL_READY | phase1_5=on | v2_surface=on | scheduler=on | social=on | world=on")
 
 async def _set_commands(app):
     _ensure_member_help(app);names=sorted(n for n in _command_names(app) if n and len(n)<=32 and n not in ADMIN_ONLY_COMMANDS)
