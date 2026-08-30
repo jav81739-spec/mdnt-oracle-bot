@@ -47,7 +47,6 @@ async def auto_reply(update,context):
         async with _ai_slots:
             reply_text=await core_generate_reply(msg.text,persona,history)
     except AIUnavailable:
-        # Provider outage is invisible: use the local conversational layer.
         reply_text=_local_chat(msg.text,history)
         log.info("CHAT_PROVIDER_COOLDOWN | chat=%s | local_engine=true",cid)
     except Exception:
@@ -108,3 +107,29 @@ async def maybe_react_to_message(update,context):
     if not update.message or not chat_enabled.get(str(update.effective_chat.id),False) or _random.random()>0.08:return
     try: await context.bot.set_message_reaction(chat_id=update.effective_chat.id,message_id=update.message.message_id,reaction=_random.choice(REACTION_EMOJIS))
     except Exception: pass
+
+
+# Compatibility surface retained for the established legacy runtime.
+async def send_text_with_gif(update, context, text: str, term: str | None = None):
+    """Send text and, when available, a matching GIF without requiring a provider."""
+    if update.message:
+        await update.message.reply_text(text)
+    if term:
+        url = await get_gif_url(term)
+        if url:
+            await context.bot.send_animation(update.effective_chat.id, url)
+
+
+async def send_mood_gif(update, context):
+    """Compatibility wrapper for the existing random-GIF command surface."""
+    return await send_random_gif(update, context)
+
+
+async def gif_reply(update, context):
+    """Compatibility wrapper for legacy GIF replies."""
+    return await send_random_gif(update, context)
+
+
+async def sticker_reply(update, context):
+    """Compatibility wrapper for legacy sticker replies."""
+    return await send_random_sticker(update, context)
