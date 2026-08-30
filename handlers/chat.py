@@ -44,20 +44,13 @@ async def auto_reply(update,context):
     _last_reply_time[cid]=now
     persona=chat_persona.get(cid,DEFAULT_PERSONA); history=chat_history.setdefault(cid,[]); history.append({"role":"user","text":msg.text[:1000]}); del history[:-MAX_HISTORY]
     try:
-        async with _ai_slots:
-            reply_text=await core_generate_reply(msg.text,persona,history)
-    except AIUnavailable:
-        # Provider outage is invisible: use the local conversational layer.
-        reply_text=_local_chat(msg.text,history)
-        log.info("CHAT_PROVIDER_COOLDOWN | chat=%s | local_engine=true",cid)
-    except Exception:
-        reply_text=_local_chat(msg.text,history)
-        log.exception("CHAT_PROVIDER_INTERNAL_ERROR | chat=%s",cid)
+        async with _ai_slots: reply_text=await core_generate_reply(msg.text,persona,history)
+    except AIUnavailable: reply_text=_local_chat(msg.text,history); log.info("CHAT_PROVIDER_COOLDOWN | chat=%s | local_engine=true",cid)
+    except Exception: reply_text=_local_chat(msg.text,history); log.exception("CHAT_PROVIDER_INTERNAL_ERROR | chat=%s",cid)
     if not reply_text: reply_text=_local_chat(msg.text,history)
     history.append({"role":"assistant","text":reply_text[:2000]}); del history[:-MAX_HISTORY]
     try: await msg.reply_text(reply_text)
     except Exception: log.exception("CHAT_SEND_FAILED | chat=%s",cid)
-
 
 def _local_chat(text,history):
     t=(text or "").strip()
@@ -69,18 +62,13 @@ def _local_chat(text,history):
     if last and last[-1] != t: return "I'm with you. Keep going. 🌙"
     return "Hmm. Tell me more."
 
-async def generate_reply(user_text,persona,history):
-    return await core_generate_reply(user_text,persona,history)
-
+async def generate_reply(user_text,persona,history): return await core_generate_reply(user_text,persona,history)
 def ai_service_configured():
     from core.ai import service
     return bool(service.api_key)
 
-SAMPLE_STICKERS=[
-    "CAACAgUAAxkBAAEGBzJqdp9ai3sYNonxPitgXwW1HsGYLQACigEAAqMYnj7IByAbmW8_0z0E",
-]
+SAMPLE_STICKERS=["CAACAgUAAxkBAAEGBzJqdp9ai3sYNonxPitgXwW1HsGYLQACigEAAqMYnj7IByAbmW8_0z0E"]
 _recent_stickers={}; GIF_SEARCH_TERMS=["funny reaction","excited","lol","confused","celebration","facepalm"]; REACTION_EMOJIS=["👍","🔥","🎉","👀","😁"]
-
 def _pick_sticker(cid):
     recent=_recent_stickers.get(cid,[]); available=[s for s in SAMPLE_STICKERS if s not in recent] or SAMPLE_STICKERS; choice=_random.choice(available); recent.append(choice); _recent_stickers[cid]=recent[-4:]; return choice
 
@@ -103,6 +91,19 @@ async def get_gif_url(term):
 async def send_random_gif(update,context):
     url=await get_gif_url(" ".join(context.args) if context.args else _random.choice(GIF_SEARCH_TERMS))
     if url: await context.bot.send_animation(update.effective_chat.id,url)
+
+# Compatibility surface retained for the older communication layer.
+async def send_text_with_gif(update, context, text: str = ""):
+    await update.effective_message.reply_text(text or "☾ Midnight Oracle is here.")
+
+async def send_mood_gif(update, context, mood: str = ""):
+    return await send_random_gif(update, context)
+
+async def gif_reply(update, context):
+    return await send_random_gif(update, context)
+
+async def sticker_reply(update, context):
+    return await send_random_sticker(update, context)
 
 async def maybe_react_to_message(update,context):
     if not update.message or not chat_enabled.get(str(update.effective_chat.id),False) or _random.random()>0.08:return
