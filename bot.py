@@ -26,6 +26,9 @@ async def _post_init(app):
     _ready_state["ready"] = True
 
 
+legacy_bot._post_init = _post_init
+
+
 def main():
     """Delegate production startup to the established runtime exactly once."""
     return legacy_bot.main()
