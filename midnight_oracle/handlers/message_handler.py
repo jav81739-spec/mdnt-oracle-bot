@@ -46,8 +46,6 @@ class MessageRouter:
     async def _hidden_surprise(self, message, chat_id: int, user_id: int, text: str) -> None:
         """Occasional harmless delight; never affects the primary reply path."""
         try:
-            # Deliberately rare and deterministic for the same message, so retries
-            # cannot create a surprise storm. It is fully best-effort.
             if abs(hash(f"{chat_id}:{user_id}:{text[:96]}")) % 37 != 11:
                 return
             choices = (
@@ -65,7 +63,7 @@ class MessageRouter:
             message = update.effective_message
             chat = update.effective_chat
             user = update.effective_user
-            if not message or not chat or not user or user.is_bot:
+            if not message or not chat or not user or bool(getattr(user, "is_bot", False)):
                 return
 
             text = (message.text or message.caption or "").strip()
@@ -81,7 +79,8 @@ class MessageRouter:
             if is_cooling(f"{chat.id}:{user.id}", cooldown_seconds(chat.type, direct)):
                 return
 
-            storage_client = context.application.bot_data.get("storage_client")
+            application = getattr(context, "application", None)
+            storage_client = getattr(application, "bot_data", {}).get("storage_client") if application else None
             db = getattr(self.engine, "db", None)
             if not db:
                 return
@@ -177,11 +176,9 @@ class MessageRouter:
                 await self._hidden_surprise(message, group_id, user.id, text)
 
         except Exception as exc:
-            await soft_alert(
-                context.application.bot_data.get("storage_client")
-                if context and context.application else None,
-                "message_router", exc,
-            )
+            application = getattr(context, "application", None)
+            storage_client = getattr(application, "bot_data", {}).get("storage_client") if application else None
+            await soft_alert(storage_client, "message_router", exc)
 
     @staticmethod
     def _is_direct_summon(text: str, context: ContextTypes.DEFAULT_TYPE) -> bool:
