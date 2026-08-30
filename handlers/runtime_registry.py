@@ -41,10 +41,7 @@ def build_application(token, storage_client):
     app.add_handler(MessageHandler(filters.ALL, chat_registry), group=-999)
 
     try:
-        from handlers.engagement_engine import (
-            init_storage as init_engagement_storage,
-            register as register_engagement,
-        )
+        from handlers.engagement_engine import init_storage as init_engagement_storage, register as register_engagement
         init_engagement_storage(storage_client)
         register_engagement(app)
     except ModuleNotFoundError:
@@ -135,6 +132,7 @@ async def _set_commands(app):
         "roast", "cheer", "comfort", "bond", "friendship", "ship", "bestie", "duo",
         "matchmaker", "memory", "mymemory", "forget", "house", "quiet", "wake",
         "cricket", "cricketduel", "leaderboard", "dice", "darts", "basketball", "bowling", "football",
+        "mysterybox", "muse", "nightgift", "glitch",
     ]
     rank = {name: index for index, name in enumerate(priority)}
     ordered = sorted(names, key=lambda name: (rank.get(name, 10_000), name))
@@ -154,14 +152,12 @@ async def _set_commands(app):
         "cricket": "🏏 Solo cricket", "cricketduel": "🏏 Cricket duel", "leaderboard": "🏆 Leaderboard",
         "dice": "🎲 Roll the dice", "darts": "🎯 Play darts", "basketball": "🏀 Basketball",
         "bowling": "🎳 Bowling", "football": "⚽ Football",
+        "mysterybox": "🎁 Open a rare mystery", "muse": "✦ Find a spark", "nightgift": "🌙 Receive a tiny gift",
+        "glitch": "🪞 Inspect a harmless glitch",
     }
     commands = [BotCommand(name, descriptions.get(name, "☾ Midnight Oracle")) for name in visible]
 
-    scopes = (
-        ("private", BotCommandScopeAllPrivateChats()),
-        ("groups", BotCommandScopeAllGroupChats()),
-        ("default", None),
-    )
+    scopes = (("private", BotCommandScopeAllPrivateChats()), ("groups", BotCommandScopeAllGroupChats()), ("default", None))
     for label, scope in scopes:
         try:
             if scope is None:
@@ -181,7 +177,6 @@ async def _set_commands(app):
 
     if len(names) > 100:
         log.info("COMMAND_MENU_CAPPED | total_live=%d | native_menu=%d | full_archive=help", len(names), len(commands))
-
     return names
 
 
@@ -197,6 +192,7 @@ def configure_lifecycle(app, storage_client, oracle_tz):
         from handlers.homecoming import homecoming_job
         from handlers import social_engine
         from handlers.oracle_governor import install as install_oracle_governor
+        from handlers import surprise_engine
 
         init_storage(storage_client)
         install_oracle_governor(social_engine)
@@ -212,15 +208,12 @@ def configure_lifecycle(app, storage_client, oracle_tz):
 
         register_jobs(app)
         register_presence(app)
+        surprise_engine.register(app)
         help_register(app)
 
         if jq:
             jq.run_repeating(homecoming_job, interval=21600, first=30, name="hidden_homecoming")
-            jq.run_daily(
-                silence_check,
-                time=datetime.now(oracle_tz).replace(hour=2, minute=0, second=0, microsecond=0).timetz(),
-                name="silence_check",
-            )
+            jq.run_daily(silence_check, time=datetime.now(oracle_tz).replace(hour=2, minute=0, second=0, microsecond=0).timetz(), name="silence_check")
             try:
                 job_count = len(jq.jobs())
             except Exception:
