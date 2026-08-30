@@ -1,6 +1,7 @@
 name: Midnight Oracle CI
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
