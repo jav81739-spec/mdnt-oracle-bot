@@ -232,6 +232,10 @@ async def _post_init(app):
         from handlers.owner_console_v2 import register as register_owner
         register_owner(app)
     except Exception: log.exception("OWNER_CONSOLE_REGISTRATION_FAILED")
+    try:
+        from handlers.memorial import register as register_memorial
+        register_memorial(app)
+    except Exception: log.exception("MEMORIAL_SURFACE_REGISTRATION_FAILED")
     await _set_commands(app)
     log.info("AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on")
 
