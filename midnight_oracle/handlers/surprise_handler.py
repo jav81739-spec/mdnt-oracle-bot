@@ -14,6 +14,14 @@ def _seed(update: Update, salt: str = "") -> int:
     return int(hashlib.sha256(raw.encode()).hexdigest()[:12], 16)
 
 
+async def _send(update: Update, text: str) -> None:
+    """Deliver a surprise only when Telegram supplied a usable message target."""
+    message = getattr(update, "effective_message", None)
+    if message is None:
+        return
+    await message.reply_text(text, parse_mode="Markdown")
+
+
 async def mysterybox(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     choices = (
         "🗝️ *MIDNIGHT BOX — OPENED*\n\nYou found a sealed note:\n_‘Not every quiet moment is empty.’_\n\n✦ Keep this one.",
@@ -21,7 +29,7 @@ async def mysterybox(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "🪞 *MIDNIGHT BOX — STRANGE*\n\nThe Oracle found a reflection that wasn't there a second ago.\n\n_It says: ‘Look again tomorrow.’_",
         "🌌 *MIDNIGHT BOX — RARE*\n\nTonight's little discovery:\n**You were here. That counts.**\n\n✦ Archive entry saved in spirit.",
     )
-    await update.effective_message.reply_text(choices[_seed(update, 'box') % len(choices)], parse_mode='Markdown')
+    await _send(update, choices[_seed(update, 'box') % len(choices)])
 
 
 async def nightgift(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -31,7 +39,7 @@ async def nightgift(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "✦ *NIGHT GIFT*\nA free pass to do absolutely nothing for sixty seconds. No guilt attached.",
         "💌 *NIGHT GIFT*\nA reminder from the archives: _you don't have to finish everything tonight._",
     )
-    await update.effective_message.reply_text(gifts[_seed(update, 'gift') % len(gifts)], parse_mode='Markdown')
+    await _send(update, gifts[_seed(update, 'gift') % len(gifts)])
 
 
 async def muse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -42,7 +50,7 @@ async def muse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         '🧩 Ask a better question instead of forcing an easy answer.',
         '🌌 Keep one idea private until it becomes impossible to ignore.',
     )
-    await update.effective_message.reply_text(f"*ORACLE MUSE*\n\n{sparks[_seed(update, 'muse') % len(sparks)]}", parse_mode='Markdown')
+    await _send(update, f"*ORACLE MUSE*\n\n{sparks[_seed(update, 'muse') % len(sparks)]}")
 
 
 async def glitch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -51,7 +59,7 @@ async def glitch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "⚠️ *ARCHIVE GLITCH*\n\nOne midnight frame arrived out of order.\n\n`frame[-1] → frame[0] → ✦`",
         "👁️ *ARCHIVE GLITCH*\n\nThe Oracle looked back before you looked forward.\n\nNo damage detected. Probably.",
     )
-    await update.effective_message.reply_text(glitches[_seed(update, 'glitch') % len(glitches)], parse_mode='Markdown')
+    await _send(update, glitches[_seed(update, 'glitch') % len(glitches)])
 
 
 def register(app) -> None:
