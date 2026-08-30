@@ -33,18 +33,16 @@ def _register_legacy_surface(app) -> None:
         "chat": {"chat": ("toggle_chat",), "persona": ("set_persona",)},
         "games": {
             "quiz": ("quiz",), "dare": ("dare",), "rps": ("rock_paper_scissors",),
-            "riddle": ("riddle",), "riddleanswer": ("riddle_answer",),
-            "guess": ("guess_number",), "leaderboard": ("leaderboard_cmd",),
-            "dice": ("dice_game",), "darts": ("darts_game",), "basketball": ("basketball_game",),
-            "bowling": ("bowling_game",), "football": ("football_game",), "slot": ("slot_game",),
-            "hangman": ("hangman",), "hangmanguess": ("hangman_guess",),
-            "tictactoe": ("tictactoe",), "ttt": ("ttt_move",),
-            "wordchain": ("wordchain_start",), "chainword": ("chain_word",),
-            "trivia": ("trivia",), "wordle": ("wordle",), "wordleguess": ("wordle_guess",),
+            "riddle": ("riddle",), "riddleanswer": ("riddle_answer",), "guess": ("guess_number",),
+            "leaderboard": ("leaderboard_cmd",), "dice": ("dice_game",), "darts": ("darts_game",),
+            "basketball": ("basketball_game",), "bowling": ("bowling_game",), "football": ("football_game",),
+            "slot": ("slot_game",), "hangman": ("hangman",), "hangmanguess": ("hangman_guess",),
+            "tictactoe": ("tictactoe",), "ttt": ("ttt_move",), "wordchain": ("wordchain_start",),
+            "chainword": ("chain_word",), "trivia": ("trivia",), "wordle": ("wordle",), "wordleguess": ("wordle_guess",),
         },
         "moderation": {"mute": ("mute",), "unmute": ("unmute",), "ban": ("ban",), "kick": ("kick",), "warn": ("warn",), "warnings": ("check_warnings",), "clearwarns": ("clear_warnings",), "pin": ("pin",), "unpin": ("unpin",), "purge": ("purge",), "rules": ("show_rules",), "setrules": ("set_rules",), "lock": ("lock",), "unlock": ("unlock",)},
         "utility": {"id": ("get_id",), "info": ("user_info",), "remind": ("remind",), "groupinfo": ("group_info",), "afk": ("set_afk",), "report": ("report",)},
-        "aesthetic": {"aura": ("aura_command",), "vibecheck": ("vibecheck_command",), "identity": ("identity_command",), "shadow": ("shadow_command",), "element": ("element_command",), "corecode": ("corecode_command",), "universe": ("universe_command",), "ritual": ("ritual_command",), "duality": ("duality_command",), "nightreport": ("nightreport_command",), "sigil": ("sigil_command",), "glitch": ("glitch_command",), "oracle": ("oracle_command",)},
+        "aesthetic": {"aura": ("aura_command",), "vibecheck": ("vibecheck_command",), "identity": ("identity_command",), "shadow": ("shadow_command",), "element": ("element_command",), "corecode": ("corecode_command",), "universe": ("universe_command",), "ritual": ("ritual_command",), "duality": ("duality_command",), "nightreport": ("nightreport_command",), "sigil": ("sigil_command",), "glitch": ("glitch_command",)},
         "friendship": {"bestie": ("bestie",), "duo": ("duo",), "friendship": ("friendship_score",), "ship": ("ship",), "tagbestie": ("tag_bestie",), "squad": ("squad",), "loyalty": ("loyalty",), "friendshiptest": ("friendship_test",), "hug": ("hug",), "pat": ("pat",), "highfive": ("highfive",), "slap": ("slap",), "kiss": ("kiss",), "poke": ("poke",), "cuddle": ("cuddle",), "wave": ("wave",), "bite": ("bite",), "tickle": ("tickle",)},
         "fun": {"roast": ("roast",), "compliment": ("compliment",), "8ball": ("eight_ball",), "vibe": ("vibe",), "quote": ("quote",), "poll": ("poll",), "rank": ("rank",), "ratethis": ("rate_this",), "impostor": ("impostor_start",), "revealimpostor": ("impostor_reveal",)},
         "matchmaking": {"crush": ("set_crush",), "clearcrush": ("clear_crush",), "randomship": ("random_ship",), "secretadmirer": ("secret_admirer",), "matchmaker": ("matchmaker",)},
@@ -57,7 +55,7 @@ def _register_legacy_surface(app) -> None:
     }
     module_objs = {"chat":chat,"games":games,"moderation":moderation,"utility":utility,"aesthetic":aesthetic,"friendship":friendship,"fun":fun,"matchmaking":matchmaking,"stats":stats,"events":events,"economy":economy,"timecapsule":timecapsule,"marriage":marriage,"deathgames":deathgames}
     existing = {str(c).lower().lstrip("/") for hs in getattr(app,"handlers",{}).values() for h in hs for c in (getattr(h,"commands",None) or ())}
-    skip = {"start","help","oracle","truth","memory","mymemory","forget","quiet","wake","house","tod","wyr","nhie","scramble","predict","predictions","endgame"}
+    skip = {"start","help","oracle","truth","memory","mymemory","forget","quiet","wake","house","tod","wyr","nhie","scramble","predict","predictions"}
     for module_name, command_map in modules.items():
         module = module_objs[module_name]
         for command, candidates in command_map.items():
@@ -78,3 +76,17 @@ def register_legacy_surface(app) -> None:
         return
     _legacy_wrapped = True
     _register_legacy_surface(app)
+
+
+# The production entrypoint invokes handlers.friend_engine.register during post-init.
+# Wrap that registration point so the complete legacy command surface is restored
+# before the canonical Phase-1/3/4 commands are attached.
+from . import friend_engine as _friend_engine
+_original_friend_register = _friend_engine.register
+
+def _friend_register_with_legacy(app):
+    """Attach legacy commands before the existing friend-engine registration."""
+    register_legacy_surface(app)
+    return _original_friend_register(app)
+
+_friend_engine.register = _friend_register_with_legacy
