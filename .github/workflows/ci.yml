@@ -48,10 +48,14 @@ jobs:
           python - <<'PY'
           import importlib
           modules = [
+              'midnight_oracle.main',
               'midnight_oracle.friend_engine',
               'midnight_oracle.handlers.message_handler',
+              'midnight_oracle.handlers.help_command',
               'midnight_oracle.database',
               'midnight_oracle.generators.reply_generator',
+              'handlers.runtime_registry',
+              'handlers.legacy_surface',
           ]
           for name in modules:
               importlib.import_module(name)
