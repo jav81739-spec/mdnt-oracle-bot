@@ -9,7 +9,8 @@ from .memory_engine import MemoryEngine
 from .mood_engine import MoodEngine
 from .handlers.message_handler import MessageRouter
 from .handlers.callback_handler import handle_callback
-from .handlers.command_handler import start,help_command,oracle,truth,memory,mymemory,forget,quiet,wake,house
+from .handlers.command_handler import start,oracle,truth,memory,mymemory,forget,quiet,wake,house
+from .handlers.help_command import help_command
 from .handlers.inline_handler import handle_inline
 from .handlers.world_handler import start_game,end_game,game_callback,handle_game_message,handle_poll_answer,handle_poll
 from .handlers.prediction_handler import predict,predictions
@@ -43,5 +44,5 @@ def build_application()->Application:
     for name,cb in commands.items():app.add_handler(CommandHandler(name,cb))
     app.add_handler(PollAnswerHandler(handle_poll_answer));app.add_handler(PollHandler(handle_poll));app.add_handler(CallbackQueryHandler(game_callback,pattern=r'^game:'));app.add_handler(CallbackQueryHandler(handle_callback));app.add_handler(InlineQueryHandler(handle_inline));app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA,handle_webapp_data));app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_route_message));return app
 def main()->None:
-    """Start polling with all Telegram update types required by autonomous features.""";configure_logging();build_application().run_polling(allowed_updates=Update.ALL_TYPES)
+    """Start polling with all Telegram update types required for autonomous features.""";configure_logging();build_application().run_polling(allowed_updates=Update.ALL_TYPES)
 if __name__=='__main__':main()
