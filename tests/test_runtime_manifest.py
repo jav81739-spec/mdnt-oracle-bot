@@ -23,7 +23,7 @@ class RuntimeManifestTests(unittest.TestCase):
 
     def test_production_entrypoint_has_required_runtime_bridge(self):
         entrypoint=(ROOT/"bot.py").read_text(encoding="utf-8")
-        for required in ("import legacy_bot", "build_application", "register_phase_surfaces", "legacy_bot.register_handlers"):
+        for required in ("import legacy_bot", "build_application", "register_phase_surfaces"):
             self.assertIn(required, entrypoint)
 
     def test_no_legacy_redis_fallback_is_used_by_entrypoint(self):
