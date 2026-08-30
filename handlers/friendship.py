@@ -49,3 +49,7 @@ def _make_action(key):
     handler.__name__=key;return handler
 for _key in ACTIONS:
     if _key not in globals():globals()[_key]=_make_action(_key)
+
+# Keep /roast available from the member-facing social archive as well as the
+# expression surface; the implementation remains owned by the fun module.
+from handlers.fun import roast
