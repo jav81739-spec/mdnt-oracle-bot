@@ -29,6 +29,24 @@ async def handle_live_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if chat.type not in {"private", "group", "supergroup"}:
         return
 
+    # Stateful game answers have their own handler. Do not let the general
+    # conversational bridge also consume them and generate a second response.
+    if chat.type in {"group", "supergroup"}:
+        db = context.application.bot_data.get("oracle_db")
+        if db is not None:
+            try:
+                row = await db.fetchone(
+                    "SELECT state FROM game_sessions WHERE group_id=? AND game_type='word_scramble' AND is_active=1 ORDER BY id DESC LIMIT 1",
+                    (int(chat.id),),
+                )
+                if row:
+                    import json
+                    state = json.loads(row[0])
+                    if state.get("awaiting_answer"):
+                        return
+            except Exception:
+                log.exception("GAME_ROUTING_GUARD_FAILED | chat=%s", chat.id)
+
     router = context.application.bot_data.get("oracle_router")
     if router is None:
         log.error(
