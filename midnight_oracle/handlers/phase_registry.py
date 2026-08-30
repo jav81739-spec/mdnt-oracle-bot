@@ -7,7 +7,23 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, InlineQueryHandle
 
 
 def register_phase_surfaces(app) -> None:
-    """Register durable world, callback, inline, and Mini App surfaces without replacing legacy handlers."""
+    """Register live legacy commands first, then durable world and Mini App surfaces."""
+    # The rebuild entrypoint intentionally does not execute legacy_bot.main().
+    # Bridge only the command/auxiliary handlers that are actually callable;
+    # never replace the newer canonical surfaces.
+    try:
+        from handlers.legacy_surface import register_legacy_surface
+        result = register_legacy_surface(app)
+        log_added = len(result.get("added", [])) if isinstance(result, dict) else -1
+        log_skipped = len(result.get("skipped", [])) if isinstance(result, dict) else -1
+        import logging
+        logging.getLogger("midnight.phase_registry").info(
+            "LEGACY_SURFACE_WIRED | added=%s | skipped=%s", log_added, log_skipped
+        )
+    except Exception:
+        import logging
+        logging.getLogger("midnight.phase_registry").exception("LEGACY_SURFACE_WIRING_FAILED")
+
     from .world_handler import start_game, game_callback, handle_game_message, handle_poll_answer, handle_poll
     from .callback_handler import handle_callback
     from .inline_handler import handle_inline
