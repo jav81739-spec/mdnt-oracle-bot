@@ -35,7 +35,6 @@ class FriendEngine:
             if not text:return EngineDecision(False,None,'no_text')
             if context.group_id=='0':return EngineDecision(False,None,'not_a_group')
             uid=message.from_user.id if message.from_user else 0;signal=self.mood.observe(uid,int(context.group_id),text);score,reasons=self._score(text,context,signal)
-            # Check deterministic blockers before score so their reasons remain observable and tests/ops are stable.
             allowed,reason=await self.cooldowns.can_ambient_reply(int(context.group_id),uid)
             if not allowed:return EngineDecision(False,None,reason)
             if self._last_sender.get(context.group_id)==context.sender:return EngineDecision(False,None,'same_sender_twice')
@@ -54,7 +53,7 @@ class FriendEngine:
         if context.relationship_tier in {'known','close'}:score+=1;reasons.append('known')
         if '?' in text or any(w in low.split() for w in ('bhai','bro','yaar','guys','anyone','someone')):score+=1;reasons.append('outward')
         if getattr(signal,'social',0)>=.4:score+=2;reasons.append('social_fit')
-        if context.is_late_night and (emotion or self._contains(low,self._VULNERABLE)):score+=1;reasons.append('late_emotion')
+        if context.is_late_night and (emotion or self._contains(low,self._VULNERABLE)):score+=2;reasons.append('late_emotion')
         recent=' '.join(context.recent_messages).casefold()
         if self._serious(recent,low):score-=4;reasons.append('serious')
         if context.recent_messages and any(x in recent for x in ('what do you think','what should i do','help me','can someone')):score-=4;reasons.append('directed_question')
