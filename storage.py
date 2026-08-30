@@ -1,8 +1,7 @@
 """Compatibility facade used by the legacy runtime.
 
-The staged rebuild keeps the old Redis-like surface temporarily, but every
-operation is backed by the single core storage engine. New code should import
-``core.storage.storage`` directly.
+Every operation is backed by the single core storage engine. New code should
+import ``core.storage.storage`` directly.
 """
 from core.storage import storage
 
@@ -32,6 +31,9 @@ class RedisCompat:
             return False
         return await storage.set(key, current, ttl=ttl)
 
+    async def incr(self, key):
+        return await storage.incrby(key, 1)
+
     async def incrby(self, key, amount):
         return await storage.incrby(key, amount)
 
@@ -47,7 +49,6 @@ class RedisCompat:
 
 
 def _glob_match(value: str, pattern: str) -> bool:
-    """Small glob matcher retained for callers importing this helper."""
     import fnmatch
     return fnmatch.fnmatchcase(value, pattern)
 
