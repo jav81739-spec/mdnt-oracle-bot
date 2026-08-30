@@ -14,22 +14,13 @@ def register_phase_surfaces(app) -> None:
         log_added = len(result.get("added", [])) if isinstance(result, dict) else -1
         log_skipped = len(result.get("skipped", [])) if isinstance(result, dict) else -1
         import logging
-        logging.getLogger("midnight.phase_registry").info(
-            "LEGACY_SURFACE_WIRED | added=%s | skipped=%s", log_added, log_skipped
-        )
+        logging.getLogger("midnight.phase_registry").info("LEGACY_SURFACE_WIRED | added=%s | skipped=%s", log_added, log_skipped)
     except Exception:
         import logging
         logging.getLogger("midnight.phase_registry").exception("LEGACY_SURFACE_WIRING_FAILED")
 
-    # /ship is part of the preserved public friendship surface and is owned by
-    # handlers.friendship.py rather than the new world engine.
     try:
-        existing = {
-            str(command).lower().lstrip("/")
-            for handlers in getattr(app, "handlers", {}).values()
-            for handler in handlers
-            for command in (getattr(handler, "commands", None) or ())
-        }
+        existing = {str(command).lower().lstrip("/") for handlers in getattr(app, "handlers", {}).values() for handler in handlers for command in (getattr(handler, "commands", None) or ())}
         if "ship" not in existing:
             from handlers.friendship import ship
             app.add_handler(CommandHandler("ship", ship), group=-25)
@@ -61,7 +52,4 @@ async def house(update, context) -> None:
     if not url:
         await update.effective_message.reply_text("☾ Oracle House is quiet for a moment. The room will open when its window is ready.")
         return
-    await update.effective_message.reply_text(
-        "☾ Oracle House\n\nA quieter place for your memories, badges, group pulse and games.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Enter the House 🌙", web_app=WebAppInfo(url=url))]]),
-    )
+    await update.effective_message.reply_text("☾ Oracle House\n\nA quieter place for your memories, badges, group pulse and games.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Enter the House 🌙", web_app=WebAppInfo(url=url))]]))
