@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 
-from .database import Database
+from .database import Database, now_ts
 from .friend_engine import FriendEngine, GroupContext
 from .mood_engine import MoodEngine
 from .generators.reply_generator import ReplyGenerator
@@ -59,7 +59,7 @@ class FriendEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cooldown_blocks(self):
         """A persistent group cooldown blocks the next ambient response."""
-        await self.db.set_cooldown("group", "99", "ambient", 99999)
+        await self.db.set_cooldown("group", "99", "ambient", now_ts() + 99999)
         result = await self.engine.process_message(self.message("yaar thak gaya"), self.ctx())
         self.assertFalse(result.should_reply)
         self.assertEqual(result.reason, "group_cooldown")
