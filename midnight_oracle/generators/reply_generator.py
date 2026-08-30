@@ -1,11 +1,13 @@
 """OpenAI-backed conversational brain for Midnight Oracle's human chat."""
 from __future__ import annotations
 import asyncio
+import random
 from collections.abc import AsyncIterator
 from openai import AsyncOpenAI
-from ..config import OPENAI_API_KEY, OPENAI_MODEL
+from ..config import OPENAI_API_KEY, OPENAI_MODEL, FALLBACK_REPLIES
 
 _openai_sem = asyncio.Semaphore(5)
+_fallback_rng = random.SystemRandom()
 
 SYSTEM_TEMPLATE = """You are Midnight Oracle — a calm, warm, slightly mysterious AI friend living inside {group_name}.
 
@@ -49,7 +51,7 @@ OUTPUT
 """
 
 class ReplyGenerator:
-    """Generate context-aware Oracle replies without a canned/Gemini fallback."""
+    """Generate context-aware Oracle replies with a safe local fallback."""
     def __init__(self, client: AsyncOpenAI | None = None) -> None:
         self.client = client or (AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None)
 
@@ -82,8 +84,12 @@ class ReplyGenerator:
             raise RuntimeError('Oracle model returned an invalid assistant response')
         return text[:900]
 
+    @staticmethod
+    def _fallback() -> str:
+        return _fallback_rng.choice(FALLBACK_REPLIES)
+
     async def stream(self, group_name: str, name: str, relationship_tier: str, message: str, mood_summary: str, time_text: str, late: bool, memory: str, recent_context: list[str] | None = None) -> AsyncIterator[str]:
-        """Yield real OpenAI output deltas; never synthesise a fake stream."""
+        """Yield real OpenAI output deltas; callers may fall back on provider failure."""
         if not self.client:
             raise RuntimeError('OPENAI_API_KEY is not configured for the Oracle chat brain')
         async with _openai_sem:
@@ -100,7 +106,10 @@ class ReplyGenerator:
                     yield delta
 
     async def generate(self, group_name: str, name: str, relationship_tier: str, message: str, mood_summary: str, time_text: str, late: bool, memory: str, recent_context: list[str] | None = None) -> str:
-        parts: list[str] = []
-        async for delta in self.stream(group_name, name, relationship_tier, message, mood_summary, time_text, late, memory, recent_context):
-            parts.append(delta)
-        return self._clean(''.join(parts))
+        try:
+            parts: list[str] = []
+            async for delta in self.stream(group_name, name, relationship_tier, message, mood_summary, time_text, late, memory, recent_context):
+                parts.append(delta)
+            return self._clean(''.join(parts))
+        except Exception:
+            return self._fallback()
