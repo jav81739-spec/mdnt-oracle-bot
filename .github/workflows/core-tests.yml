@@ -1,6 +1,13 @@
 name: Midnight Core Tests
 
 on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: "Branch or commit SHA to verify"
+        required: true
+        default: "main"
+        type: string
   pull_request:
   push:
     branches: [main, 'rebuild/**']
@@ -10,10 +17,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target_ref || github.ref }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: pip
