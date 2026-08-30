@@ -14,15 +14,20 @@ async def _store_set(key,value,ttl=0):
     try:
         if _storage is None:return False
         result=_storage.setex(key,ttl,value) if ttl else _storage.set(key,value)
-        if asyncio.iscoroutine(result):await result
-        return True
+        return bool(await result if asyncio.iscoroutine(result) else result)
+    except Exception:return False
+async def _store_setnx(key,value,ttl):
+    try:
+        if _storage is None:return False
+        method=getattr(_storage,"setnx",None)
+        if method is not None:
+            result=method(key,value,ttl);return bool(await result if asyncio.iscoroutine(result) else result)
+        return False
     except Exception:return False
 async def _store_delete(key):
     try:
         if _storage is None:return False
-        result=_storage.delete(key)
-        if asyncio.iscoroutine(result):await result
-        return True
+        result=_storage.delete(key);return bool(await result if asyncio.iscoroutine(result) else result)
     except Exception:return False
 async def _refresh_lease():await _store_set(_LEASE_KEY,json.dumps({"instance":_INSTANCE_ID,"ts":time.time()}),_LEASE_TTL)
 async def _acquire_lease():
@@ -33,7 +38,7 @@ async def _acquire_lease():
             if owner==_INSTANCE_ID:await _refresh_lease();return True
             if age<_LEASE_TTL:return False
         except Exception:pass
-    return await _store_set(_LEASE_KEY,json.dumps({"instance":_INSTANCE_ID,"ts":time.time()}),_LEASE_TTL)
+    return await _store_setnx(_LEASE_KEY,json.dumps({"instance":_INSTANCE_ID,"ts":time.time()}),_LEASE_TTL)
 async def _release_lease():
     raw=await _store_get(_LEASE_KEY)
     try:
@@ -92,11 +97,23 @@ def _install_live_runtime_bridges(application):
         if not application.bot_data.get("_midnight_human_bridge_registered"):
             application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,handle_live_chat),group=-40);application.bot_data["_midnight_human_bridge_registered"]=True
     except Exception:log.exception("LIVE_CHAT_BRIDGE_INSTALL_FAILED")
+async def _stop_oracle_scheduler():
+    scheduler=(_app.bot_data.get("oracle_scheduler") if _app else None)
+    if scheduler is not None:
+        try:
+            result=scheduler.scheduler.shutdown(wait=False)
+            if asyncio.iscoroutine(result):await result
+        except Exception:log.exception("ORACLE_SCHEDULER_SHUTDOWN_FAILED")
+    db=(_app.bot_data.get("oracle_db") if _app else None)
+    if db is not None:
+        try:await db.close()
+        except Exception:log.exception("ORACLE_DATABASE_CLOSE_FAILED")
 async def _graceful_shutdown():
     global _shutting_down
     if _shutting_down:return
     _shutting_down=True
     if _lease_task and not _lease_task.done():_lease_task.cancel()
+    await _stop_oracle_scheduler()
     if _app:
         try:
             if _app.updater and _app.updater.running:await _app.updater.stop()
