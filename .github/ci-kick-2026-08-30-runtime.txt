@@ -1,0 +1,1 @@
+CI verification marker — runtime fixes only; no production behavior encoded here.
