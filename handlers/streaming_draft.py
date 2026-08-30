@@ -54,9 +54,9 @@ class TelegramDraftStream:
         return bool(result)
 
     async def thinking(self) -> bool:
-        """Show Telegram's native Thinking… placeholder."""
+        """Show a valid visible native Telegram thinking placeholder."""
         async with self._lock:
-            return await self._post("", can_stop=True)
+            return await self._post("Thinking…", can_stop=True)
 
     async def push(self, text: str, *, force: bool = False) -> bool:
         """Publish a new partial response when batching thresholds permit."""
