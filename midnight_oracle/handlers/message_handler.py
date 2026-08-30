@@ -43,6 +43,22 @@ class MessageRouter:
         except Exception as exc:
             await soft_alert(None, "achievement_announce", exc)
 
+    async def _hidden_surprise(self, message, chat_id: int, user_id: int, text: str) -> None:
+        """Occasional harmless delight; never affects the primary reply path."""
+        try:
+            # Deliberately rare and deterministic for the same message, so retries
+            # cannot create a surprise storm. It is fully best-effort.
+            if abs(hash(f"{chat_id}:{user_id}:{text[:96]}")) % 37 != 11:
+                return
+            choices = (
+                "🌙 _tiny midnight signal: Oracle noticed that one._",
+                "✦ _filed quietly in the midnight archives._",
+                "🖤 _some moments deserve a little extra notice._",
+            )
+            await message.reply_text(choices[abs(hash(text)) % len(choices)])
+        except Exception as exc:
+            await soft_alert(None, "hidden_surprise", exc)
+
     async def handle(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Process both private and group text without a canned/Gemini fallback."""
         try:
@@ -70,7 +86,6 @@ class MessageRouter:
             if not db:
                 return
 
-            # DMs do not have a group profile, but still receive the same human brain.
             group_id = chat.id
             group_name = chat.title or "Midnight Oracle" if group else "Midnight Oracle DM"
             await db.upsert_member(user.id, group_id, user.username or "", user.first_name or "friend")
@@ -88,8 +103,6 @@ class MessageRouter:
                 (" | ".join(list(profile.themes[:2]) + list(profile.worries[:1]))) or "none",
             )
 
-            # A DM is always a deliberate conversation. It never falls through to
-            # the ambient/local-response engine.
             if private:
                 reply = await self.replies.generate(
                     group_name, ctx.sender_name, ctx.relationship_tier, text,
@@ -99,6 +112,7 @@ class MessageRouter:
                 await self.memory.observe(user.id, group_id, ctx.sender_name, text, True)
                 recent.append(text)
                 await save_recent(storage_client, str(group_id), recent)
+                await self._hidden_surprise(message, group_id, user.id, text)
                 return
 
             if self.jokes:
@@ -109,6 +123,7 @@ class MessageRouter:
                     await self.memory.observe(user.id, group_id, ctx.sender_name, text, True)
                     recent.append(text)
                     await save_recent(storage_client, str(group_id), recent)
+                    await self._hidden_surprise(message, group_id, user.id, text)
                     return
 
             if self.identity:
@@ -124,6 +139,7 @@ class MessageRouter:
                 recent.append(text)
                 await save_recent(storage_client, str(group_id), recent)
                 await self._announce_achievements(message, user, group_id, "oracle_reply")
+                await self._hidden_surprise(message, group_id, user.id, text)
                 return
 
             if self.stickers:
@@ -140,11 +156,9 @@ class MessageRouter:
                     await self.memory.observe(user.id, group_id, ctx.sender_name, text, True)
                     recent.append(text)
                     await save_recent(storage_client, str(group_id), recent)
+                    await self._hidden_surprise(message, group_id, user.id, text)
                     return
 
-            # The friend engine decides whether Oracle should speak. When it does,
-            # the actual spoken response comes from the real AI brain — never from
-            # a canned local/Gemini fallback.
             decision = await self.engine.process_message(message, ctx)
             await self.memory.observe(
                 user.id, group_id, ctx.sender_name, text,
@@ -160,6 +174,7 @@ class MessageRouter:
                 )
                 await message.reply_text(reply)
                 await self._announce_achievements(message, user, group_id, "oracle_reply")
+                await self._hidden_surprise(message, group_id, user.id, text)
 
         except Exception as exc:
             await soft_alert(
