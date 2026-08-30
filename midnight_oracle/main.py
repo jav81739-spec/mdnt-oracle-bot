@@ -2,7 +2,7 @@
 from __future__ import annotations
 from telegram import Update
 from telegram.ext import Application,CallbackQueryHandler,CommandHandler,MessageHandler,InlineQueryHandler,PollAnswerHandler,PollHandler,ContextTypes,filters
-from .config import BOT_TOKEN,DATABASE_PATH
+from .config import BOT_TOKEN,DATABASE_PATH,TIMEZONE
 from .database import Database
 from .friend_engine import FriendEngine
 from .memory_engine import MemoryEngine
@@ -18,21 +18,32 @@ from .handlers.webapp_handler import handle_webapp_data
 from .handlers.surprise_handler import mysterybox,nightgift,muse,glitch
 from .scheduler import OracleScheduler
 from .utils.logger import configure_logging,get_logger
+from storage import redis_client
 log=get_logger('midnight.main')
 
 async def _post_init(application:Application)->None:
-    """Initialize persistence, Phase 1 engines, autonomous scheduling, and recovery."""
-    db=Database(DATABASE_PATH);await db.connect();mood=MoodEngine();mem=MemoryEngine(db);engine=FriendEngine(db,mood);router=MessageRouter(engine,mem,mood);application.bot_data.update(oracle_db=db,oracle_router=router)
-    # Publish the same live member command registry used by the premium help
-    # surface.  This keeps Telegram's native DM/group menu synchronized with
-    # the handlers actually registered in this canonical application.
+    """Initialize persistence, live command publication, autonomous scheduling, and recovery."""
+    db=Database(DATABASE_PATH);await db.connect();mood=MoodEngine();mem=MemoryEngine(db);engine=FriendEngine(db,mood);router=MessageRouter(engine,mem,mood);application.bot_data.update(oracle_db=db,oracle_router=router,storage_client=redis_client)
     try:
         from handlers.runtime_registry import _set_commands
         await _set_commands(application)
         log.info('COMMAND_SURFACE_READY | source=live_handlers')
     except Exception:
         log.exception('COMMAND_SURFACE_PUBLISH_FAILED')
-    scheduler=OracleScheduler(application,db);scheduler.start();application.bot_data['oracle_scheduler']=scheduler;log.info('AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on')
+
+    # The preserved social engine is part of the production surface. Give it
+    # the same durable Redis-compatible storage used by the legacy layer and
+    # register its autonomous jobs exactly once after every command handler is
+    # installed. Its jobs remain rate-limited/idempotent internally.
+    try:
+        from handlers import social_engine
+        social_engine.init_storage(redis_client)
+        social_engine.register_jobs(application)
+        log.info('SOCIAL_ENGINE_READY | autonomous_jobs=registered')
+    except Exception:
+        log.exception('SOCIAL_ENGINE_START_FAILED')
+
+    scheduler=OracleScheduler(application,db,timezone=TIMEZONE);scheduler.start();application.bot_data['oracle_scheduler']=scheduler;log.info('AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on')
 async def _post_shutdown(application:Application)->None:
     """Close scheduler and SQLite resources."""
     scheduler=application.bot_data.get('oracle_scheduler');
@@ -52,9 +63,6 @@ def build_application()->Application:
     if not BOT_TOKEN:raise RuntimeError('BOT_TOKEN is required')
     app=Application.builder().token(BOT_TOKEN).post_init(_post_init).post_shutdown(_post_shutdown).build();commands={'start':start,'help':help_command,'oracle':oracle,'truth':truth,'memory':memory,'mymemory':mymemory,'forget':forget,'quiet':quiet,'wake':wake,'house':house,'tod':start_game,'wyr':start_game,'nhie':start_game,'scramble':start_game,'predict':predict,'predictions':predictions,'endgame':end_game,'mysterybox':mysterybox,'nightgift':nightgift,'muse':muse,'glitch':glitch}
     for name,cb in commands.items():app.add_handler(CommandHandler(name,cb))
-    # Wire the preserved live command surface after canonical commands exist.
-    # legacy_surface only adds commands that are not already owned by the
-    # rebuild and skips missing callbacks, so the canonical handlers above win.
     try:
         from handlers.legacy_surface import register_legacy_surface
         result=register_legacy_surface(app)
