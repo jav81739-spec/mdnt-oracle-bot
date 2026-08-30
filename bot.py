@@ -63,12 +63,9 @@ def _ensure_member_help(app):
     existing=_command_names(app)
     try:
         from handlers.help_command import help_command, start_command
-        if "help" not in existing:
-            app.add_handler(CommandHandler("help",help_command),group=-1)
-        if "start" not in existing:
-            app.add_handler(CommandHandler("start",start_command),group=-1)
-    except Exception:
-        log.exception("MEMBER_HELP_REGISTRATION_FAILED")
+        if "help" not in existing: app.add_handler(CommandHandler("help",help_command),group=-1)
+        if "start" not in existing: app.add_handler(CommandHandler("start",start_command),group=-1)
+    except Exception: log.exception("MEMBER_HELP_REGISTRATION_FAILED")
 
 def build_application():
     app=Application.builder().token(TOKEN).build()
@@ -79,21 +76,49 @@ def build_application():
         from handlers import relationship_engine
         relationship_engine.register(app)
     except Exception:log.exception("RELATIONSHIP_SURFACE_REGISTRATION_FAILED")
+
     async def _refresh_group_command_scope(update, context):
         chat=getattr(update,"effective_chat",None)
         if not chat or getattr(chat,"type","") not in ("group","supergroup"): return
-        chat_id=int(chat.id)
-        refreshed=app.bot_data.setdefault("_command_scope_refreshed",set())
+        chat_id=int(chat.id);refreshed=app.bot_data.setdefault("_command_scope_refreshed",set())
         if chat_id in refreshed:return
         commands=app.bot_data.get("public_command_commands") or []
         if not commands:return
         try:
             await startup.register_chat(chat_id,chat.type,getattr(chat,"title","") or "")
-            await app.bot.set_my_commands(commands,scope=BotCommandScopeChat(chat_id))
-            refreshed.add(chat_id)
+            await app.bot.set_my_commands(commands,scope=BotCommandScopeChat(chat_id));refreshed.add(chat_id)
             log.info("COMMAND_MENU_GROUP_SCOPE_REFRESHED | count=%d",len(commands))
         except Exception:log.exception("COMMAND_MENU_GROUP_SCOPE_REFRESH_FAILED")
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS,_refresh_group_command_scope),group=-998)
+
+    async def _live_human_chat(update, context):
+        """Canonical live text bridge. Commands remain handled by command handlers."""
+        message=getattr(update,"effective_message",None);chat=getattr(update,"effective_chat",None);user=getattr(update,"effective_user",None)
+        if not message or not chat or not user or user.is_bot:return
+        text=(message.text or message.caption or "").strip()
+        if not text or text.startswith("/"):return
+        router=app.bot_data.get("oracle_router")
+        if router is None:
+            log.error("LIVE_CHAT_ROUTER_MISSING | chat=%s",getattr(chat,"id","?"));return
+        try:
+            await router.handle(update,context)
+        except Exception:
+            log.exception("LIVE_CHAT_ROUTER_FAILED | chat=%s | user=%s",chat.id,user.id)
+
+    async def _track_social_member(update, context):
+        """Populate the autonomous member registry from real group activity."""
+        message=getattr(update,"effective_message",None);chat=getattr(update,"effective_chat",None);user=getattr(update,"effective_user",None)
+        if not message or not chat or not user or user.is_bot or chat.type not in ("group","supergroup"):return
+        try:
+            from handlers import social_engine
+            await social_engine.register_member(chat.id,user.id,user.first_name or "friend",user.username or "")
+            await social_engine.bump_msg_count(chat.id,user.id)
+        except Exception:log.exception("SOCIAL_MEMBER_TRACK_FAILED | chat=%s | user=%s",chat.id,user.id)
+
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS,_refresh_group_command_scope),group=-1000)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_live_human_chat),group=-900)
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,_track_social_member),group=-899)
+    log.info("LIVE_CHAT_BRIDGE_REGISTERED | dm=on | groups=on | trigger=on | fallback=off")
+    log.info("SOCIAL_MEMBER_TRACKER_REGISTERED | groups=on")
     return app
 
 async def _set_commands(app):
@@ -103,16 +128,11 @@ async def _set_commands(app):
         from handlers.help_command import SECTIONS, HINTS
         priority=[name for _,commands in SECTIONS for name in commands]
     except Exception:
-        priority=[]
-        HINTS={}
-    priority=["start","help"]+priority
-    rank={name:index for index,name in enumerate(priority)}
-    ordered=sorted(names,key=lambda name:(rank.get(name,10_000),name))
-    visible=ordered[:100]
-    descriptions={name:HINTS.get(name,"Midnight Oracle") for name in visible}
-    commands=[BotCommand(name,descriptions.get(name,"Midnight Oracle")) for name in visible]
-    app.bot_data["public_command_commands"]=commands
-    app.bot_data["public_command_names"]=names
+        priority=[];HINTS={}
+    priority=["start","help"]+priority;rank={name:index for index,name in enumerate(priority)}
+    ordered=sorted(names,key=lambda name:(rank.get(name,10_000),name));visible=ordered[:100]
+    commands=[BotCommand(name,HINTS.get(name,"Midnight Oracle")) for name in visible]
+    app.bot_data["public_command_commands"]=commands;app.bot_data["public_command_names"]=names
     scopes=(("private",BotCommandScopeAllPrivateChats()),("groups",BotCommandScopeAllGroupChats()),("default",None))
     for label,scope in scopes:
         try:
@@ -124,25 +144,17 @@ async def _set_commands(app):
         registry=await startup.get_chat_registry()
         for chat_id,info in registry.items():
             if info.get("type") in ("group","supergroup"):
-                try:
-                    await app.bot.set_my_commands(commands,scope=BotCommandScopeChat(int(chat_id)))
-                    log.info("COMMAND_MENU_GROUP_OVERRIDE_REFRESHED | count=%d",len(commands))
+                try: await app.bot.set_my_commands(commands,scope=BotCommandScopeChat(int(chat_id)));log.info("COMMAND_MENU_GROUP_OVERRIDE_REFRESHED | count=%d",len(commands))
                 except Exception:log.exception("COMMAND_MENU_GROUP_SCOPE_REFRESH_FAILED")
     except Exception:log.exception("COMMAND_MENU_GROUP_SCOPE_REFRESH_FAILED")
-    try:
-        await app.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
-        log.info("COMMAND_MENU_BUTTON_READY | menu=commands")
+    try: await app.bot.set_chat_menu_button(menu_button=MenuButtonCommands());log.info("COMMAND_MENU_BUTTON_READY | menu=commands")
     except Exception:log.exception("COMMAND_MENU_BUTTON_FAILED")
     if OWNER_ID:
         try:
-            owner_names=sorted(n for n in _command_names(app) if n in {"ownerstatus","ownerstats"})
-            owner_menu=list(commands)
-            seen={c.command for c in owner_menu}
+            owner_names=sorted(n for n in _command_names(app) if n in {"ownerstatus","ownerstats"});owner_menu=list(commands);seen={c.command for c in owner_menu}
             for n in owner_names:
-                if n not in seen and len(owner_menu)<100:
-                    owner_menu.append(BotCommand(n,"Private Oracle control"));seen.add(n)
-            await app.bot.set_my_commands(owner_menu,scope=BotCommandScopeChat(OWNER_ID))
-            log.info("COMMAND_MENU_OWNER_REFRESHED | member=%d | owner=%d",len(commands),len(owner_names))
+                if n not in seen and len(owner_menu)<100:owner_menu.append(BotCommand(n,"Private Oracle control"));seen.add(n)
+            await app.bot.set_my_commands(owner_menu,scope=BotCommandScopeChat(OWNER_ID));log.info("COMMAND_MENU_OWNER_REFRESHED | member=%d | owner=%d",len(commands),len(owner_names))
         except Exception:log.exception("owner command menu setup failed")
 
 async def _post_init(app):
