@@ -1,6 +1,6 @@
 """Midnight Oracle — canonical production entrypoint.
 
-The repaired Phase 1–5 runtime lives in ``midnight_oracle.main``.  The root
+The repaired Phase 1–5 runtime lives in ``midnight_oracle.main``. The root
 entrypoint must launch that runtime directly; delegating to the legacy runtime
 bypassed the repaired engine and left Telegram with the wrong handler stack.
 """
@@ -12,6 +12,10 @@ import logging
 from telegram import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
 
 import startup
+try:
+    from storage import redis_client as _storage_client
+except Exception:
+    _storage_client = None
 from midnight_oracle.main import build_application as _build_application
 
 log = logging.getLogger("midnight.entrypoint")
@@ -34,7 +38,6 @@ async def _publish_commands(app):
     commands = [BotCommand(name, "Midnight Oracle") for name in names]
     if not commands:
         raise RuntimeError("Canonical runtime registered zero Telegram commands")
-
     await app.bot.set_my_commands(commands)
     await app.bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
     await app.bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats())
@@ -43,7 +46,6 @@ async def _publish_commands(app):
 
 async def _post_init(app):
     """Run the canonical Phase 1–5 initializer, then verify command registration."""
-    # midnight_oracle.main installs its own post_init during build_application().
     canonical_post_init = app.post_init
     if canonical_post_init is not None:
         await canonical_post_init(app)
@@ -60,7 +62,8 @@ def build_application():
 
 async def _run():
     app = build_application()
-    await startup.run(app)
+    startup.init(_storage_client)
+    await startup.run(app, storage_client=_storage_client)
 
 
 def main() -> None:
