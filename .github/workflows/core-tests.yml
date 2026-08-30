@@ -3,9 +3,9 @@ name: Midnight Core Tests
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: "Branch or commit to verify"
-        required: false
+      target_ref:
+        description: "Branch or commit SHA to verify"
+        required: true
         default: "main"
         type: string
   pull_request:
@@ -19,7 +19,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.target_ref || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
