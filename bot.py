@@ -17,7 +17,7 @@ try:
 except Exception:
     _storage_client=None
 import startup; startup.init(_storage_client)
-from telegram import BotCommand
+from telegram import BotCommand, BotCommandScopeChat
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, PollAnswerHandler, PollHandler, InlineQueryHandler, filters
 import legacy_bot
 from midnight_oracle.database import Database
@@ -174,6 +174,10 @@ def build_application():
         from handlers.social_engine import track_member
         app.add_handler(MessageHandler(filters.ALL,track_member),group=-998)
     except Exception: log.exception("member tracker registration failed")
+    try:
+        from handlers.maintenance_guard import register as register_maintenance
+        register_maintenance(app)
+    except Exception: log.exception("maintenance guard registration failed")
     _register_world_surface(app)
     try:
         register_phase_surfaces(app)
@@ -186,8 +190,9 @@ def build_application():
     return app
 
 async def _set_commands(app):
-    """Publish the complete public command surface to Telegram without exposing private controls."""
-    names=sorted([n for n in _command_names(app) if n and len(n)<=32])[:100]
+    """Publish a compact public menu; keep private owner commands out of the global menu."""
+    private={"ownerstatus","ownerstats"}
+    names=sorted([n for n in _command_names(app) if n and len(n)<=32 and n not in private])[:100]
     descriptions={
         "start":"Midnight Oracle", "help":"Command guide", "oracle":"Daily prophecy", "aura":"Scan your aura",
         "vibecheck":"Check your energy", "identity":"Oracle archetype", "shadow":"Meet your shadow", "element":"Cosmic element",
@@ -200,6 +205,11 @@ async def _set_commands(app):
     commands=[BotCommand(n,descriptions.get(n,"Midnight Oracle")) for n in names]
     try: await app.bot.set_my_commands(commands)
     except Exception: log.exception("command menu setup failed")
+    if OWNER_ID:
+        try:
+            owner_names=sorted([n for n in _command_names(app) if n in private])
+            await app.bot.set_my_commands([BotCommand(n,"Private Oracle control") for n in owner_names],scope=BotCommandScopeChat(OWNER_ID))
+        except Exception: log.exception("owner command menu setup failed")
 
 async def _post_init(app):
     """Initialize production services, durable world scheduling, and canonical command surfaces exactly once."""
@@ -218,6 +228,10 @@ async def _post_init(app):
         from handlers.friend_engine import register
         register(app)
     except Exception: log.exception("FRIEND_ENGINE_REGISTRATION_FAILED")
+    try:
+        from handlers.owner_console_v2 import register as register_owner
+        register_owner(app)
+    except Exception: log.exception("OWNER_CONSOLE_REGISTRATION_FAILED")
     await _set_commands(app)
     log.info("AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on")
 
@@ -228,5 +242,3 @@ def _error(update,context):
 def main():
     """Start the single production polling process."""
     app=build_application(); app.post_init=_post_init; app.add_error_handler(_error); asyncio.run(startup.run(app,storage_client=_storage_client))
-
-if __name__=="__main__": main()
