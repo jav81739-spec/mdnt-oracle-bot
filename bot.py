@@ -74,6 +74,19 @@ async def _set_commands(app):
             else: await app.bot.set_my_commands(commands,scope=scope)
             log.info("COMMAND_MENU_PUBLISHED | scope=%s | count=%d",label,len(commands))
         except Exception:log.exception("COMMAND_MENU_PUBLISH_FAILED | scope=%s",label)
+    # Telegram gives chat-specific command scopes higher priority than the all-group scope.
+    # Re-apply the live member menu to every discovered group so stale per-chat menus fall back to the current registry.
+    try:
+        registry=await startup.get_chat_registry()
+        for chat_id,info in registry.items():
+            if info.get("type") in ("group","supergroup"):
+                try:
+                    await app.bot.set_my_commands(commands,scope=BotCommandScopeChat(int(chat_id)))
+                    log.info("COMMAND_MENU_GROUP_OVERRIDE_REFRESHED | count=%d",len(commands))
+                except Exception:
+                    log.exception("COMMAND_MENU_GROUP_OVERRIDE_REFRESH_FAILED")
+    except Exception:
+        log.exception("COMMAND_MENU_GROUP_SCOPE_REFRESH_FAILED")
     try:
         await app.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
         log.info("COMMAND_MENU_BUTTON_READY | menu=commands")
@@ -81,7 +94,13 @@ async def _set_commands(app):
     if OWNER_ID:
         try:
             owner_names=sorted(n for n in _command_names(app) if n in private)
-            await app.bot.set_my_commands([BotCommand(n,"Private Oracle control") for n in owner_names],scope=BotCommandScopeChat(OWNER_ID))
+            owner_menu=list(commands)
+            seen={c.command for c in owner_menu}
+            for n in owner_names:
+                if n not in seen and len(owner_menu)<100:
+                    owner_menu.append(BotCommand(n,"Private Oracle control"));seen.add(n)
+            await app.bot.set_my_commands(owner_menu,scope=BotCommandScopeChat(OWNER_ID))
+            log.info("COMMAND_MENU_OWNER_REFRESHED | member=%d | owner=%d",len(commands),len(owner_names))
         except Exception:log.exception("owner command menu setup failed")
 
 async def _post_init(app):
