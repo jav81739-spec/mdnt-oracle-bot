@@ -28,6 +28,12 @@ from midnight_oracle.generators.reply_generator import ReplyGenerator
 from midnight_oracle.handlers.message_handler import MessageRouter
 from midnight_oracle.handlers.phase_registry import register_phase_surfaces
 
+ADMIN_ONLY_COMMANDS={
+    "broadcast","announce","midnightmap","ownerstatus","ownerstats","setcommands","reload",
+    "shutdown","restart","admin","moderation","mute","unmute","ban","kick","warn","clearwarns",
+    "pin","unpin","purge","setrules","lock","unlock","groupinfo","setwelcome","setgoodbye",
+}
+
 if hasattr(legacy_bot,"GROUP_CHAT_ID") and legacy_bot.GROUP_CHAT_ID==0: legacy_bot.GROUP_CHAT_ID=GROUP_CHAT_ID
 _friend_recent: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=8))
 _phase1_db: Database | None = None
@@ -52,10 +58,23 @@ def _command_names(app):
                 if value:names.add(value)
     return names
 
+def _ensure_member_help(app):
+    """Make the premium member /help and /start handlers part of this live entrypoint."""
+    existing=_command_names(app)
+    try:
+        from handlers.help_command import help_command, start_command
+        if "help" not in existing:
+            app.add_handler(CommandHandler("help",help_command),group=-1)
+        if "start" not in existing:
+            app.add_handler(CommandHandler("start",start_command),group=-1)
+    except Exception:
+        log.exception("MEMBER_HELP_REGISTRATION_FAILED")
+
 def build_application():
     app=Application.builder().token(TOKEN).build()
     app.bot_data["storage_client"]=_storage_client
     register_phase_surfaces(app)
+    _ensure_member_help(app)
     try:
         from handlers import relationship_engine
         relationship_engine.register(app)
@@ -78,17 +97,28 @@ def build_application():
     return app
 
 async def _set_commands(app):
-    private={"ownerstatus","ownerstats"}
-    names=sorted(n for n in _command_names(app) if n and len(n)<=32 and n not in private)[:100]
-    descriptions={"start":"Midnight Oracle","help":"Command guide","oracle":"Daily prophecy","aura":"Scan your aura","vibecheck":"Check your energy","identity":"Oracle archetype","shadow":"Meet your shadow","element":"Cosmic element","corecode":"Three core words","universe":"A message from the universe","ritual":"Today's ritual","duality":"Light and dark side","nightreport":"Tonight's night report","sigil":"Personal sigil","glitch":"Oracle system reading","checkin":"Daily check-in","streakcheck":"View your streak","vent":"Private vent","coinboard":"Group coin leaderboard","cgift":"Gift coins","rob":"Attempt a heist","tod":"Truth or Dare","wyr":"Would You Rather","nhie":"Never Have I Ever","scramble":"Word Scramble","predict":"Make a prediction","predictions":"Pending predictions","house":"Open Oracle House","truth":"Truth question","memory":"Group memory","mymemory":"What Oracle remembers","forget":"Forget a memory","quiet":"Quiet mode","wake":"Wake Oracle","weave":"Reveal a social thread","orbit":"Trace a social orbit","echo":"Find an echo","anchor":"Read an anchor","fracture":"Read a fracture","ember":"Find an ember","mirror":"Mirror reading","crossing":"Read a crossing","undertow":"Read the undertow","edict":"Oracle edict","veil":"Check the sealed veil","gaze":"Watch a relationship","release":"Release a relationship watch","graveyard":"The Quiet Graveyard"}
-    commands=[BotCommand(n,descriptions.get(n,"Midnight Oracle")) for n in names]
+    _ensure_member_help(app)
+    names=sorted(n for n in _command_names(app) if n and len(n)<=32 and n not in ADMIN_ONLY_COMMANDS)
+    try:
+        from handlers.help_command import SECTIONS, HINTS
+        priority=[name for _,commands in SECTIONS for name in commands]
+    except Exception:
+        priority=[]
+        HINTS={}
+    priority=["start","help"]+priority
+    rank={name:index for index,name in enumerate(priority)}
+    ordered=sorted(names,key=lambda name:(rank.get(name,10_000),name))
+    visible=ordered[:100]
+    descriptions={name:HINTS.get(name,"Midnight Oracle") for name in visible}
+    commands=[BotCommand(name,descriptions.get(name,"Midnight Oracle")) for name in visible]
     app.bot_data["public_command_commands"]=commands
+    app.bot_data["public_command_names"]=names
     scopes=(("private",BotCommandScopeAllPrivateChats()),("groups",BotCommandScopeAllGroupChats()),("default",None))
     for label,scope in scopes:
         try:
             if scope is None: await app.bot.set_my_commands(commands)
             else: await app.bot.set_my_commands(commands,scope=scope)
-            log.info("COMMAND_MENU_PUBLISHED | scope=%s | count=%d",label,len(commands))
+            log.info("COMMAND_MENU_PUBLISHED | scope=%s | count=%d | total_live=%d",label,len(commands),len(names))
         except Exception:log.exception("COMMAND_MENU_PUBLISH_FAILED | scope=%s",label)
     try:
         registry=await startup.get_chat_registry()
@@ -97,7 +127,7 @@ async def _set_commands(app):
                 try:
                     await app.bot.set_my_commands(commands,scope=BotCommandScopeChat(int(chat_id)))
                     log.info("COMMAND_MENU_GROUP_OVERRIDE_REFRESHED | count=%d",len(commands))
-                except Exception:log.exception("COMMAND_MENU_GROUP_OVERRIDE_REFRESH_FAILED")
+                except Exception:log.exception("COMMAND_MENU_GROUP_SCOPE_REFRESH_FAILED")
     except Exception:log.exception("COMMAND_MENU_GROUP_SCOPE_REFRESH_FAILED")
     try:
         await app.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
@@ -105,7 +135,7 @@ async def _set_commands(app):
     except Exception:log.exception("COMMAND_MENU_BUTTON_FAILED")
     if OWNER_ID:
         try:
-            owner_names=sorted(n for n in _command_names(app) if n in private)
+            owner_names=sorted(n for n in _command_names(app) if n in {"ownerstatus","ownerstats"})
             owner_menu=list(commands)
             seen={c.command for c in owner_menu}
             for n in owner_names:
@@ -134,7 +164,7 @@ async def _post_init(app):
         from handlers.memorial import register as register_memorial
         register_memorial(app)
     except Exception:log.exception("MEMORIAL_SURFACE_REGISTRATION_FAILED")
-    await _set_commands(app);log.info("AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on")
+    _ensure_member_help(app);await _set_commands(app);log.info("AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on")
 
 def _error(update,context):log.error("TELEGRAM_HANDLER_ERROR | update=%s | error=%r",getattr(update,"update_id","?"),context.error,exc_info=context.error)
 def main():
