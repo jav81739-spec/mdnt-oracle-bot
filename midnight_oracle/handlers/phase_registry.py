@@ -8,6 +8,18 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, InlineQueryHandle
 
 def register_phase_surfaces(app) -> None:
     """Register live legacy commands first, then durable world and Mini App surfaces."""
+    # The production entrypoint imports legacy_bot before calling this registry.
+    # Bind the canonical Death Games V2 module here, after that import has
+    # completed, so the compatibility module reference is not lost to the
+    # handlers-package circular import during legacy_bot initialization.
+    try:
+        import legacy_bot as _legacy_bot
+        from handlers import deathgames_v2 as _deathgames_v2
+        _legacy_bot.deathgames = _deathgames_v2
+    except Exception:
+        import logging
+        logging.getLogger("midnight.phase_registry").exception("DEATHGAMES_V2_BIND_FAILED")
+
     try:
         from handlers.legacy_surface import register_legacy_surface
         result = register_legacy_surface(app)
