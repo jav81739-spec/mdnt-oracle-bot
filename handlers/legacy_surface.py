@@ -60,13 +60,21 @@ def _add_command(app, existing, command, target, callback_name, *, group=0):
 def _assert_no_duplicate_declarations(module_commands, direct):
     owners = {}
     for module, commands in module_commands.items():
-        for command in commands:
-            previous = owners.setdefault(command, module)
-            if previous != module:
-                raise RuntimeError(f"COMMAND_OWNER_COLLISION: /{command}: {previous} vs {module}")
-    for command in direct:
-        if command in owners:
-            raise RuntimeError(f"COMMAND_OWNER_COLLISION: /{command}: {owners[command]} vs legacy_bot")
+        for command, callback_name in commands.items():
+            previous = owners.get(command)
+            if previous is None:
+                owners[command] = (module, callback_name)
+                continue
+            previous_module, previous_callback = previous
+            if previous_callback != callback_name:
+                raise RuntimeError(f"COMMAND_OWNER_COLLISION: /{command}: {previous_module}.{previous_callback} vs {module}.{callback_name}")
+    for command, callback_name in direct.items():
+        previous = owners.get(command)
+        if previous is None:
+            continue
+        previous_module, previous_callback = previous
+        if previous_callback != callback_name:
+            raise RuntimeError(f"COMMAND_OWNER_COLLISION: /{command}: {previous_module}.{previous_callback} vs legacy_bot.{callback_name}")
 
 def register_legacy_surface(app):
     existing = {str(command).lower().lstrip("/") for hs in getattr(app, "handlers", {}).values() for handler in hs for command in (getattr(handler, "commands", None) or ())}
