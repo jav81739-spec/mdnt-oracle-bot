@@ -13,7 +13,7 @@ import startup
 import legacy_bot
 startup.init(_storage_client)
 from telegram import BotCommand,BotCommandScopeAllGroupChats,BotCommandScopeAllPrivateChats,MenuButtonCommands
-from telegram.ext import Application,CommandHandler,MessageHandler
+from telegram.ext import Application,CommandHandler,MessageHandler,filters
 from midnight_oracle.database import Database
 from midnight_oracle.friend_engine import FriendEngine as Phase1FriendEngine
 from midnight_oracle.memory_engine import MemoryEngine as Phase1MemoryEngine
@@ -33,16 +33,22 @@ def _ensure_member_help(app):
         if "start" not in existing:app.add_handler(CommandHandler("start",start_command),group=-1)
     except Exception:log.exception("MEMBER_HELP_REGISTRATION_FAILED")
 
+async def _route_message(update,context):
+    """Route non-command human messages through the canonical Phase 1–5 Oracle router."""
+    chat=getattr(update,"effective_chat",None)
+    if chat and chat.type not in {"private","group","supergroup"}:return
+    router=context.application.bot_data.get("oracle_router")
+    if router:await router.handle(update,context)
+
 def build_application():
     app=Application.builder().token(TOKEN).build();app.bot_data["storage_client"]=_storage_client;register_phase_surfaces(app);_ensure_member_help(app)
-    try:
-        from handlers.legacy_surface import register_legacy_surface
-        result=register_legacy_surface(app);log.info("LEGACY_SURFACE_WIRED | added=%d | skipped=%d",len(result.get("added",[])),len(result.get("skipped",[])))
-    except Exception:log.exception("LEGACY_SURFACE_REGISTRATION_FAILED")
     try:
         from handlers.relationship_engine import register
         register(app)
     except Exception:log.exception("RELATIONSHIP_SURFACE_REGISTRATION_FAILED")
+    # The phase registry owns legacy-surface registration. Keep one registration
+    # path only so a second validation pass cannot create duplicate handlers.
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_route_message),group=-50)
     return app
 
 async def _post_init(app):
