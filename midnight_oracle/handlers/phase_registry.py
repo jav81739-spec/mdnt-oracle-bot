@@ -1,23 +1,55 @@
 """Additive Phase 2-4 Telegram registrations for Midnight Oracle."""
 from __future__ import annotations
 
+import logging
 import os
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import CallbackQueryHandler, CommandHandler, InlineQueryHandler, PollAnswerHandler, PollHandler, filters
+from telegram.ext import CallbackQueryHandler, CommandHandler, InlineQueryHandler, PollAnswerHandler, PollHandler
+
+log = logging.getLogger("midnight.phase_registry")
 
 
 def register_phase_surfaces(app) -> None:
-    """Register live legacy commands first, then durable world and Mini App surfaces."""
+    """Register canonical core commands first, then legacy and durable surfaces."""
+    # These commands belong to the Phase-1/Oracle runtime, not legacy_bot.
+    # Register them before legacy_surface so its reserved-command filter cannot
+    # accidentally leave the public core surface without handlers.
+    try:
+        from .command_handler import start, oracle, truth, memory, mymemory, forget, quiet, wake, house
+        existing = {
+            str(command).lower().lstrip("/")
+            for handlers in getattr(app, "handlers", {}).values()
+            for handler in handlers
+            for command in (getattr(handler, "commands", None) or ())
+        }
+        core = {
+            "oracle": oracle,
+            "truth": truth,
+            "memory": memory,
+            "mymemory": mymemory,
+            "forget": forget,
+            "quiet": quiet,
+            "wake": wake,
+            "house": house,
+        }
+        for name, callback in core.items():
+            if name not in existing:
+                app.add_handler(CommandHandler(name, callback), group=-35)
+                existing.add(name)
+        log.info("CORE_COMMANDS_WIRED | count=%d", len(core))
+    except Exception:
+        log.exception("CORE_COMMAND_WIRING_FAILED")
+
     try:
         from handlers.legacy_surface import register_legacy_surface
         result = register_legacy_surface(app)
         log_added = len(result.get("added", [])) if isinstance(result, dict) else -1
         log_skipped = len(result.get("skipped", [])) if isinstance(result, dict) else -1
-        import logging
-        logging.getLogger("midnight.phase_registry").info("LEGACY_SURFACE_WIRED | added=%s | skipped=%s", log_added, log_skipped)
+        log.info("LEGACY_SURFACE_WIRED | added=%s | skipped=%s", log_added, log_skipped)
     except Exception:
-        import logging
-        logging.getLogger("midnight.phase_registry").exception("LEGACY_SURFACE_WIRING_FAILED")
+        # Legacy registration is additive. A broken optional legacy callback
+        # must never prevent the canonical Phase-1 core commands from working.
+        log.exception("LEGACY_SURFACE_WIRING_FAILED")
 
     try:
         existing = {str(command).lower().lstrip("/") for handlers in getattr(app, "handlers", {}).values() for handler in handlers for command in (getattr(handler, "commands", None) or ())}
@@ -25,8 +57,7 @@ def register_phase_surfaces(app) -> None:
             from handlers.friendship import ship
             app.add_handler(CommandHandler("ship", ship), group=-25)
     except Exception:
-        import logging
-        logging.getLogger("midnight.phase_registry").exception("SHIP_REGISTRATION_FAILED")
+        log.exception("SHIP_REGISTRATION_FAILED")
 
     from .world_handler import start_game, game_callback, handle_poll_answer, handle_poll
     from .callback_handler import handle_callback
