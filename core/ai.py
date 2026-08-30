@@ -17,7 +17,7 @@ class AIService:
     def __post_init__(self):
         self.api_key = self.api_key or os.getenv("GEMINI_API_KEY", "")
         configured = os.getenv("GEMINI_MODEL", "").strip()
-        retired = {"gemini-2.0-flash", "gemini-3.5-flash-lite"}
+        retired = {"gemini-3.5-flash-lite"}
         self.model = self.model or (configured if configured and configured not in retired else "gemini-3.7-flash")
         self._client = None
         self._client_lock = asyncio.Lock()
