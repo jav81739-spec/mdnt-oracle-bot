@@ -13,7 +13,7 @@ import startup
 import legacy_bot
 startup.init(_storage_client)
 from telegram import BotCommand,BotCommandScopeAllGroupChats,BotCommandScopeAllPrivateChats,MenuButtonCommands
-from telegram.ext import Application,CommandHandler
+from telegram.ext import Application,CommandHandler,MessageHandler
 from midnight_oracle.database import Database
 from midnight_oracle.friend_engine import FriendEngine as Phase1FriendEngine
 from midnight_oracle.memory_engine import MemoryEngine as Phase1MemoryEngine
