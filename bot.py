@@ -16,8 +16,9 @@ try:
     from storage import redis_client as _storage_client
 except Exception:
     _storage_client=None
-import startup; startup.init(_storage_client)
-from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, MenuButtonCommands
+import startup
+startup.init(_storage_client)
+from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, MenuButtonCommands, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, PollAnswerHandler, PollHandler, InlineQueryHandler, filters
 import legacy_bot
 from midnight_oracle.database import Database
@@ -28,12 +29,7 @@ from midnight_oracle.generators.reply_generator import ReplyGenerator
 from midnight_oracle.handlers.message_handler import MessageRouter
 from midnight_oracle.handlers.phase_registry import register_phase_surfaces
 
-ADMIN_ONLY_COMMANDS={
-    "broadcast","announce","midnightmap","ownerstatus","ownerstats","setcommands","reload",
-    "shutdown","restart","admin","moderation","mute","unmute","ban","kick","warn","clearwarns",
-    "pin","unpin","purge","setrules","lock","unlock","groupinfo","setwelcome","setgoodbye",
-}
-
+ADMIN_ONLY_COMMANDS={"broadcast","announce","midnightmap","ownerstatus","ownerstats","setcommands","reload","shutdown","restart","admin","moderation","mute","unmute","ban","kick","warn","clearwarns","pin","unpin","purge","setrules","lock","unlock","groupinfo","setwelcome","setgoodbye"}
 if hasattr(legacy_bot,"GROUP_CHAT_ID") and legacy_bot.GROUP_CHAT_ID==0: legacy_bot.GROUP_CHAT_ID=GROUP_CHAT_ID
 _friend_recent: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=8))
 _phase1_db: Database | None = None
@@ -76,7 +72,6 @@ def build_application():
         from handlers import relationship_engine
         relationship_engine.register(app)
     except Exception:log.exception("RELATIONSHIP_SURFACE_REGISTRATION_FAILED")
-
     async def _refresh_group_command_scope(update, context):
         chat=getattr(update,"effective_chat",None)
         if not chat or getattr(chat,"type","") not in ("group","supergroup"): return
@@ -89,9 +84,7 @@ def build_application():
             await app.bot.set_my_commands(commands,scope=BotCommandScopeChat(chat_id));refreshed.add(chat_id)
             log.info("COMMAND_MENU_GROUP_SCOPE_REFRESHED | count=%d",len(commands))
         except Exception:log.exception("COMMAND_MENU_GROUP_SCOPE_REFRESH_FAILED")
-
     async def _live_human_chat(update, context):
-        """Canonical live text bridge. Commands remain handled by command handlers."""
         message=getattr(update,"effective_message",None);chat=getattr(update,"effective_chat",None);user=getattr(update,"effective_user",None)
         if not message or not chat or not user or user.is_bot:return
         text=(message.text or message.caption or "").strip()
@@ -99,13 +92,9 @@ def build_application():
         router=app.bot_data.get("oracle_router")
         if router is None:
             log.error("LIVE_CHAT_ROUTER_MISSING | chat=%s",getattr(chat,"id","?"));return
-        try:
-            await router.handle(update,context)
-        except Exception:
-            log.exception("LIVE_CHAT_ROUTER_FAILED | chat=%s | user=%s",chat.id,user.id)
-
+        try: await router.handle(update,context)
+        except Exception:log.exception("LIVE_CHAT_ROUTER_FAILED | chat=%s | user=%s",chat.id,user.id)
     async def _track_social_member(update, context):
-        """Populate the autonomous member registry from real group activity."""
         message=getattr(update,"effective_message",None);chat=getattr(update,"effective_chat",None);user=getattr(update,"effective_user",None)
         if not message or not chat or not user or user.is_bot or chat.type not in ("group","supergroup"):return
         try:
@@ -113,7 +102,6 @@ def build_application():
             await social_engine.register_member(chat.id,user.id,user.first_name or "friend",user.username or "")
             await social_engine.bump_msg_count(chat.id,user.id)
         except Exception:log.exception("SOCIAL_MEMBER_TRACK_FAILED | chat=%s | user=%s",chat.id,user.id)
-
     app.add_handler(MessageHandler(filters.ChatType.GROUPS,_refresh_group_command_scope),group=-1000)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_live_human_chat),group=-900)
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,_track_social_member),group=-899)
@@ -121,7 +109,7 @@ def build_application():
     log.info("SOCIAL_MEMBER_TRACKER_REGISTERED | groups=on")
     return app
 
-async def _set_commands(app):
+def _set_commands(app):
     _ensure_member_help(app)
     names=sorted(n for n in _command_names(app) if n and len(n)<=32 and n not in ADMIN_ONLY_COMMANDS)
     try:
@@ -179,6 +167,16 @@ async def _post_init(app):
     _ensure_member_help(app);await _set_commands(app);log.info("AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on")
 
 def _error(update,context):log.error("TELEGRAM_HANDLER_ERROR | update=%s | error=%r",getattr(update,"update_id","?"),context.error,exc_info=context.error)
+
+def _enable_all_update_types(app):
+    """Keep every registered Telegram surface reachable by the polling loop."""
+    original=app.updater.start_polling
+    async def start_polling(*args,**kwargs):
+        kwargs["allowed_updates"]=Update.ALL_TYPES
+        return await original(*args,**kwargs)
+    app.updater.start_polling=start_polling
+    log.info("TELEGRAM_UPDATE_SURFACE_READY | allowed_updates=ALL_TYPES")
+
 def main():
-    app=build_application();app.post_init=_post_init;app.add_error_handler(_error);asyncio.run(startup.run(app,storage_client=_storage_client))
+    app=build_application();_enable_all_update_types(app);app.post_init=_post_init;app.add_error_handler(_error);asyncio.run(startup.run(app,storage_client=_storage_client))
 if __name__=="__main__":main()
