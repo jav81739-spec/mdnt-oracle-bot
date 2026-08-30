@@ -42,6 +42,15 @@ def build_application()->Application:
     if not BOT_TOKEN:raise RuntimeError('BOT_TOKEN is required')
     app=Application.builder().token(BOT_TOKEN).post_init(_post_init).post_shutdown(_post_shutdown).build();commands={'start':start,'help':help_command,'oracle':oracle,'truth':truth,'memory':memory,'mymemory':mymemory,'forget':forget,'quiet':quiet,'wake':wake,'house':house,'tod':start_game,'wyr':start_game,'nhie':start_game,'scramble':start_game,'predict':predict,'predictions':predictions,'endgame':end_game,'mysterybox':mysterybox,'nightgift':nightgift,'muse':muse,'glitch':glitch}
     for name,cb in commands.items():app.add_handler(CommandHandler(name,cb))
+    # Wire the preserved live command surface after canonical commands exist.
+    # legacy_surface only adds commands that are not already owned by the
+    # rebuild and skips missing callbacks, so the canonical handlers above win.
+    try:
+        from handlers.legacy_surface import register_legacy_surface
+        result=register_legacy_surface(app)
+        log.info('LEGACY_SURFACE_WIRED | added=%d | skipped=%d',len(result.get('added',[])),len(result.get('skipped',[])))
+    except Exception:
+        log.exception('LEGACY_SURFACE_WIRING_FAILED')
     app.add_handler(PollAnswerHandler(handle_poll_answer));app.add_handler(PollHandler(handle_poll));app.add_handler(CallbackQueryHandler(game_callback,pattern=r'^game:'));app.add_handler(CallbackQueryHandler(handle_callback));app.add_handler(InlineQueryHandler(handle_inline));app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA,handle_webapp_data));app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_route_message));return app
 def main()->None:
     """Start polling with all Telegram update types required for autonomous features.""";configure_logging();build_application().run_polling(allowed_updates=Update.ALL_TYPES)
