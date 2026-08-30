@@ -17,7 +17,7 @@ try:
 except Exception:
     _storage_client=None
 import startup; startup.init(_storage_client)
-from telegram import BotCommand, BotCommandScopeChat
+from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, PollAnswerHandler, PollHandler, InlineQueryHandler, filters
 import legacy_bot
 from midnight_oracle.database import Database
@@ -66,7 +66,13 @@ async def _set_commands(app):
     private={"ownerstatus","ownerstats"}
     names=sorted(n for n in _command_names(app) if n and len(n)<=32 and n not in private)[:100]
     descriptions={"start":"Midnight Oracle","help":"Command guide","oracle":"Daily prophecy","aura":"Scan your aura","vibecheck":"Check your energy","identity":"Oracle archetype","shadow":"Meet your shadow","element":"Cosmic element","corecode":"Three core words","universe":"A message from the universe","ritual":"Today's ritual","duality":"Light and dark side","nightreport":"Tonight's night report","sigil":"Personal sigil","glitch":"Oracle system reading","checkin":"Daily check-in","streakcheck":"View your streak","vent":"Private vent","coinboard":"Group coin leaderboard","cgift":"Gift coins","rob":"Attempt a heist","tod":"Truth or Dare","wyr":"Would You Rather","nhie":"Never Have I Ever","scramble":"Word Scramble","predict":"Make a prediction","predictions":"Pending predictions","house":"Open Oracle House","truth":"Truth question","memory":"Group memory","mymemory":"What Oracle remembers","forget":"Forget a memory","quiet":"Quiet mode","wake":"Wake Oracle","weave":"Reveal a social thread","orbit":"Trace a social orbit","echo":"Find an echo","anchor":"Read an anchor","fracture":"Read a fracture","ember":"Find an ember","mirror":"Mirror reading","crossing":"Read a crossing","undertow":"Read the undertow","edict":"Oracle edict","veil":"Check the sealed veil","gaze":"Watch a relationship","release":"Release a relationship watch","graveyard":"The Quiet Graveyard"}
-    try:await app.bot.set_my_commands([BotCommand(n,descriptions.get(n,"Midnight Oracle")) for n in names])
+    commands=[BotCommand(n,descriptions.get(n,"Midnight Oracle")) for n in names]
+    try:
+        await app.bot.set_my_commands(commands,scope=BotCommandScopeAllPrivateChats())
+        await app.bot.set_my_commands(commands,scope=BotCommandScopeAllGroupChats())
+        # Keep the default scope aligned too, so clients that don't use a chat-specific scope still receive the menu.
+        await app.bot.set_my_commands(commands)
+        log.info("COMMAND_MENU_PUBLISHED | public=%d | scopes=private,groups,default",len(commands))
     except Exception:log.exception("command menu setup failed")
     if OWNER_ID:
         try:
