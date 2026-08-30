@@ -1,4 +1,4 @@
-"""Standalone Midnight Oracle entry point with durable social workflows."""
+"""Canonical Midnight Oracle entry point: Phase runtime + complete V2 ecosystem."""
 from __future__ import annotations
 from telegram import Update
 from telegram.ext import Application,CallbackQueryHandler,CommandHandler,MessageHandler,InlineQueryHandler,PollAnswerHandler,PollHandler,ContextTypes,filters
@@ -22,73 +22,58 @@ from storage import redis_client
 log=get_logger('midnight.main')
 
 async def _post_init(application:Application)->None:
-    """Initialize persistence, live command publication, autonomous scheduling, and recovery."""
     db=Database(DATABASE_PATH);await db.connect();mood=MoodEngine();mem=MemoryEngine(db);engine=FriendEngine(db,mood);router=MessageRouter(engine,mem,mood);application.bot_data.update(oracle_db=db,oracle_router=router,storage_client=redis_client)
     try:
         from handlers.runtime_registry import _set_commands
         await _set_commands(application)
-        log.info('COMMAND_SURFACE_READY | source=live_handlers')
-    except Exception:
-        log.exception('COMMAND_SURFACE_PUBLISH_FAILED')
+        log.info('COMMAND_SURFACE_READY | source=canonical_runtime_registry')
+    except Exception:log.exception('COMMAND_SURFACE_PUBLISH_FAILED')
     try:
         from handlers import social_engine
-        social_engine.init_storage(redis_client)
-        social_engine.register_jobs(application)
+        social_engine.init_storage(redis_client);social_engine.register_jobs(application)
         log.info('SOCIAL_ENGINE_READY | autonomous_jobs=registered')
-    except Exception:
-        log.exception('SOCIAL_ENGINE_START_FAILED')
-    scheduler=OracleScheduler(application,db,timezone=TIMEZONE);scheduler.start();application.bot_data['oracle_scheduler']=scheduler;log.info('AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on')
+    except Exception:log.exception('SOCIAL_ENGINE_START_FAILED')
+    scheduler=OracleScheduler(application,db,timezone=TIMEZONE);scheduler.start();application.bot_data['oracle_scheduler']=scheduler
+    log.info('AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on')
 
 async def _post_shutdown(application:Application)->None:
-    """Close scheduler and SQLite resources."""
-    scheduler=application.bot_data.get('oracle_scheduler');
+    scheduler=application.bot_data.get('oracle_scheduler')
     if scheduler and scheduler.scheduler.running:scheduler.scheduler.shutdown(wait=False)
-    db=application.bot_data.get('oracle_db');
+    db=application.bot_data.get('oracle_db')
     if db:await db.close()
 
 async def _track_group_activity(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    """Keep every active group/member visible to both autonomous engines."""
-    chat=update.effective_chat; user=update.effective_user
+    chat=update.effective_chat;user=update.effective_user
     if not chat or chat.type not in {'group','supergroup'} or not user or user.is_bot:return
     db=context.application.bot_data.get('oracle_db')
     if not db:return
     try:
-        await db.execute(
-            "INSERT INTO group_profile(group_id,group_name,timezone,created_at) VALUES(?,?,?,?) "
-            "ON CONFLICT(group_id) DO UPDATE SET group_name=excluded.group_name",
-            (chat.id,chat.title or '',str(TIMEZONE),now_ts()),
-        )
+        await db.execute("INSERT INTO group_profile(group_id,group_name,timezone,created_at) VALUES(?,?,?,?) ON CONFLICT(group_id) DO UPDATE SET group_name=excluded.group_name",(chat.id,chat.title or '',str(TIMEZONE),now_ts()))
         from handlers.social_engine import register_member,bump_msg_count
-        await register_member(chat.id,user.id,user.first_name or 'Unknown',user.username or '')
-        await bump_msg_count(chat.id,user.id)
-    except Exception:
-        log.exception('GROUP_ACTIVITY_TRACKING_FAILED | chat_id=%s',chat.id)
+        await register_member(chat.id,user.id,user.first_name or 'Unknown',user.username or '');await bump_msg_count(chat.id,user.id)
+    except Exception:log.exception('GROUP_ACTIVITY_TRACKING_FAILED | chat_id=%s',chat.id)
 
 async def _route_message(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    """Route text first to active games, then to the ambient friend engine."""
     if update.effective_chat and update.effective_chat.type in {'group','supergroup'}:
         await handle_game_message(update,context)
         row=await context.application.bot_data['oracle_db'].fetchone("SELECT game_type FROM game_sessions WHERE group_id=? AND is_active=1 LIMIT 1",(update.effective_chat.id,))
         if row and row['game_type']=='word_scramble':return
-    router=context.application.bot_data.get('oracle_router');
+    router=context.application.bot_data.get('oracle_router')
     if router:await router.handle(update,context)
 
 def build_application()->Application:
-    """Construct the single-process Telegram application with all lifecycle handlers."""
     if not BOT_TOKEN:raise RuntimeError('BOT_TOKEN is required')
-    app=Application.builder().token(BOT_TOKEN).post_init(_post_init).post_shutdown(_post_shutdown).build();commands={'start':start,'help':help_command,'oracle':oracle,'truth':truth,'memory':memory,'mymemory':mymemory,'forget':forget,'quiet':quiet,'wake':wake,'house':house,'tod':start_game,'wyr':start_game,'nhie':start_game,'scramble':start_game,'predict':predict,'predictions':predictions,'endgame':end_game,'mysterybox':mysterybox,'nightgift':nightgift,'muse':muse,'glitch':glitch}
+    app=Application.builder().token(BOT_TOKEN).post_init(_post_init).post_shutdown(_post_shutdown).build()
+    commands={'start':start,'help':help_command,'oracle':oracle,'truth':truth,'memory':memory,'mymemory':mymemory,'forget':forget,'quiet':quiet,'wake':wake,'house':house,'tod':start_game,'wyr':start_game,'nhie':start_game,'scramble':start_game,'predict':predict,'predictions':predictions,'endgame':end_game,'mysterybox':mysterybox,'nightgift':nightgift,'muse':muse,'glitch':glitch}
     for name,cb in commands.items():app.add_handler(CommandHandler(name,cb))
     try:
         from handlers.legacy_surface import register_legacy_surface
-        result=register_legacy_surface(app)
-        log.info('LEGACY_SURFACE_WIRED | added=%d | skipped=%d',len(result.get('added',[])),len(result.get('skipped',[])))
-    except Exception:
-        log.exception('LEGACY_SURFACE_WIRING_FAILED')
-    # Track group/member activity before command/chat handlers so autonomous
-    # features have durable recipients even when the update is a command.
+        result=register_legacy_surface(app);log.info('LEGACY_SURFACE_WIRED | added=%d | skipped=%d',len(result.get('added',[])),len(result.get('skipped',[])))
+    except Exception:log.exception('LEGACY_SURFACE_WIRING_FAILED')
     app.add_handler(MessageHandler(filters.ALL,_track_group_activity),group=-1000)
     app.add_handler(PollAnswerHandler(handle_poll_answer));app.add_handler(PollHandler(handle_poll));app.add_handler(CallbackQueryHandler(game_callback,pattern=r'^game:'));app.add_handler(CallbackQueryHandler(handle_callback));app.add_handler(InlineQueryHandler(handle_inline));app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA,handle_webapp_data));app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_route_message));return app
 
 def main()->None:
-    """Start polling with all Telegram update types required for autonomous features.""";configure_logging();build_application().run_polling(allowed_updates=Update.ALL_TYPES)
+    configure_logging();build_application().run_polling(allowed_updates=Update.ALL_TYPES)
+
 if __name__=='__main__':main()
