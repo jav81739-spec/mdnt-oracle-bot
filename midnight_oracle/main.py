@@ -1,5 +1,6 @@
-"""Canonical Midnight Oracle entry point: Phase runtime + complete V2 ecosystem."""
+"""Canonical Midnight Oracle entry point: Phase 1–5 runtime + complete V2 ecosystem."""
 from __future__ import annotations
+import asyncio
 from telegram import Update
 from telegram.ext import Application,CallbackQueryHandler,CommandHandler,MessageHandler,InlineQueryHandler,PollAnswerHandler,PollHandler,ContextTypes,filters
 from .config import BOT_TOKEN,DATABASE_PATH,TIMEZONE
@@ -25,12 +26,12 @@ async def _post_init(application:Application)->None:
     db=Database(DATABASE_PATH);await db.connect();mood=MoodEngine();mem=MemoryEngine(db);engine=FriendEngine(db,mood);router=MessageRouter(engine,mem,mood);application.bot_data.update(oracle_db=db,oracle_router=router,storage_client=redis_client)
     try:
         from handlers.runtime_registry import _set_commands
-        await _set_commands(application)
-        log.info('COMMAND_SURFACE_READY | source=canonical_runtime_registry')
+        await _set_commands(application);log.info('COMMAND_SURFACE_READY | source=canonical_runtime_registry')
     except Exception:log.exception('COMMAND_SURFACE_PUBLISH_FAILED')
     try:
         from handlers import social_engine
-        social_engine.init_storage(redis_client);social_engine.register_jobs(application)
+        if not application.bot_data.get('_midnight_social_jobs_registered'):
+            social_engine.init_storage(redis_client);social_engine.register_jobs(application);application.bot_data['_midnight_social_jobs_registered']=True
         log.info('SOCIAL_ENGINE_READY | autonomous_jobs=registered')
     except Exception:log.exception('SOCIAL_ENGINE_START_FAILED')
     scheduler=OracleScheduler(application,db,timezone=TIMEZONE);scheduler.start();application.bot_data['oracle_scheduler']=scheduler
@@ -56,8 +57,10 @@ async def _track_group_activity(update:Update,context:ContextTypes.DEFAULT_TYPE)
 async def _route_message(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
     if update.effective_chat and update.effective_chat.type in {'group','supergroup'}:
         await handle_game_message(update,context)
-        row=await context.application.bot_data['oracle_db'].fetchone("SELECT game_type FROM game_sessions WHERE group_id=? AND is_active=1 LIMIT 1",(update.effective_chat.id,))
-        if row and row['game_type']=='word_scramble':return
+        db=context.application.bot_data.get('oracle_db')
+        if db:
+            row=await db.fetchone("SELECT game_type FROM game_sessions WHERE group_id=? AND is_active=1 LIMIT 1",(update.effective_chat.id,))
+            if row and row['game_type']=='word_scramble':return
     router=context.application.bot_data.get('oracle_router')
     if router:await router.handle(update,context)
 
@@ -74,6 +77,9 @@ def build_application()->Application:
     app.add_handler(PollAnswerHandler(handle_poll_answer));app.add_handler(PollHandler(handle_poll));app.add_handler(CallbackQueryHandler(game_callback,pattern=r'^game:'));app.add_handler(CallbackQueryHandler(handle_callback));app.add_handler(InlineQueryHandler(handle_inline));app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA,handle_webapp_data));app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_route_message));return app
 
 def main()->None:
-    configure_logging();build_application().run_polling(allowed_updates=Update.ALL_TYPES)
+    """Run through the canonical startup manager so only one polling owner exists."""
+    configure_logging()
+    from startup import run as run_startup
+    asyncio.run(run_startup(build_application(),redis_client))
 
 if __name__=='__main__':main()
