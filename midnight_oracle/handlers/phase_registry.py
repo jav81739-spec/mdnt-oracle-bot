@@ -8,9 +8,6 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, InlineQueryHandle
 
 def register_phase_surfaces(app) -> None:
     """Register live legacy commands first, then durable world and Mini App surfaces."""
-    # The rebuild entrypoint intentionally does not execute legacy_bot.main().
-    # Bridge only the command/auxiliary handlers that are actually callable;
-    # never replace the newer canonical surfaces.
     try:
         from handlers.legacy_surface import register_legacy_surface
         result = register_legacy_surface(app)
@@ -23,6 +20,22 @@ def register_phase_surfaces(app) -> None:
     except Exception:
         import logging
         logging.getLogger("midnight.phase_registry").exception("LEGACY_SURFACE_WIRING_FAILED")
+
+    # /ship is part of the preserved public friendship surface and is owned by
+    # handlers.friendship.py rather than the new world engine.
+    try:
+        existing = {
+            str(command).lower().lstrip("/")
+            for handlers in getattr(app, "handlers", {}).values()
+            for handler in handlers
+            for command in (getattr(handler, "commands", None) or ())
+        }
+        if "ship" not in existing:
+            from handlers.friendship import ship
+            app.add_handler(CommandHandler("ship", ship), group=-25)
+    except Exception:
+        import logging
+        logging.getLogger("midnight.phase_registry").exception("SHIP_REGISTRATION_FAILED")
 
     from .world_handler import start_game, game_callback, handle_game_message, handle_poll_answer, handle_poll
     from .callback_handler import handle_callback
