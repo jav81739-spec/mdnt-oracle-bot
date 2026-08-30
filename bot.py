@@ -43,176 +43,57 @@ def _is_direct_summon(update, text: str, bot_username: str = "") -> bool:
     if getattr(message.chat,"type","") == "private": return True
     low=(text or "").casefold()
     if bot_username and f"@{bot_username.casefold()}" in low: return True
-    if re.search(r"\b(?:midnight|oracle)\b", low): return True
-    replied=getattr(message,"reply_to_message",None); replied_user=getattr(replied,"from_user",None)
-    return bool(getattr(replied_user,"is_bot",False))
+    return bool(re.search(r"\b(oracle|midnight)\b",low))
 
-
-async def _phase1_direct_reply(update, context, text: str, bot_username: str) -> bool:
-    """Generate a direct or private reply through the configured reply generator."""
-    if _phase1_replies is None: return False
-    message=getattr(update,"effective_message",None); user=getattr(update,"effective_user",None); chat=getattr(update,"effective_chat",None)
-    if not message or not user or not chat: return False
-    now=datetime.now(ORACLE_TZ); gid=chat.id; tier="new"; memory_snippet="none"
-    if _phase1_db and chat.type in {"group","supergroup"}:
-        row=await _phase1_db.fetchone("SELECT relationship_tier FROM members WHERE user_id=? AND group_id=?",(user.id,gid)); tier=str(row[0]) if row else "new"
-        memories=await _phase1_db.memories(user.id,gid,limit=3); memory_snippet=" | ".join(memories[:3])
-    try: await context.bot.send_chat_action(chat_id=gid,action="typing")
-    except Exception: pass
-    reply=await _phase1_replies.generate(chat.title or "Midnight Oracle",user.first_name or "friend",tier,text,_phase1_engine.mood.group_mood(gid).summary() if _phase1_engine and chat.type in {"group","supergroup"} else "private conversation",str(now.hour),now.hour>=23 or now.hour<3,memory_snippet)
-    await message.reply_text(reply); return True
-
-
-async def _resilient_ai_handler(update, context):
-    """Own the complete text decision path while yielding to active durable games and social engines."""
-    message=getattr(update,"effective_message",None) or getattr(update,"message",None); text=(getattr(message,"text",None) or "").strip(); bot_username=""
-    if not message or not text or text.startswith("/"): return
-    chat_type=getattr(message.chat,"type","")
-    if chat_type in {"group","supergroup"} and _phase1_db is not None:
-        try:
-            from midnight_oracle.handlers.world_handler import handle_game_message
-            active=await _phase1_db.fetchone("SELECT game_type FROM game_sessions WHERE group_id=? AND is_active=1 LIMIT 1",(message.chat.id,))
-            if active and active["game_type"]=="word_scramble":
-                await handle_game_message(update,context)
-                return
-            router=context.application.bot_data.get("oracle_router")
-            if router:
-                await router.handle(update,context)
-                return
-        except Exception:
-            log.exception("DURABLE_SOCIAL_MESSAGE_FAILURE")
-            return
-    try: bot_username=await legacy_bot._get_bot_username(context.bot)
-    except Exception: pass
-    direct=_is_direct_summon(update,text,bot_username)
-    if direct or chat_type == "private":
-        try:
-            if await _phase1_direct_reply(update,context,text,bot_username): return
-        except Exception: log.exception("OPENAI_DIRECT_REPLY_FAILURE")
-        return
-    if chat_type not in {"group","supergroup"} or _phase1_engine is None: return
-    try:
-        uid=message.from_user.id if message.from_user else 0; gid=message.chat.id; now=datetime.now(ORACLE_TZ); recent=list(_friend_recent[str(gid)]); tier="new"; memory_snippet="none"
-        if _phase1_db:
-            row=await _phase1_db.fetchone("SELECT relationship_tier,interaction_count FROM members WHERE user_id=? AND group_id=?",(uid,gid)); tier=str(row[0]) if row else "new"
-            memories=await _phase1_db.memories(uid,gid,limit=3); memory_snippet=" | ".join(memories[:3]); await _phase1_db.upsert_member(uid,gid,getattr(message.from_user,"username","") or "",getattr(message.from_user,"first_name","") or "friend")
-        ctx=Phase1GroupContext(str(uid),str(gid),recent,now.hour,now.hour>=23 or now.hour<3,message.chat.title or "",tier,message.from_user.first_name if message.from_user else "friend",now.timestamp(),memory_snippet)
-        decision=await _phase1_engine.process_message(message,ctx); _friend_recent[str(gid)].append(text)
-        if _phase1_memory and message.from_user: await _phase1_memory.observe(uid,gid,message.from_user.first_name or "friend",text,decision.should_reply)
-        if decision.should_reply and decision.reply_text:
-            try: await context.bot.send_chat_action(chat_id=gid,action="typing")
-            except Exception: pass
-            await message.reply_text(decision.reply_text); log.info("AUTONOMOUS_JOB_ENTERED | mode=ambient_friend | group=%s | sender=%s | reason=%s",gid,uid,decision.reason)
-        else: log.info("AUTONOMOUS_JOB_SKIPPED | group=%s | sender=%s | reason=%s",gid,uid,decision.reason)
-    except Exception: log.exception("PHASE1_FRIEND_ENGINE_FAILURE | ambient_silence=true")
-
-legacy_bot.handle_ai_message=_resilient_ai_handler
-
-
-async def _registry(update,context):
-    """Record chat/member activity without changing command behaviour."""
-    chat=getattr(update,"effective_chat",None)
-    if chat and chat.type in ("group","supergroup","channel"):
-        try: await startup.register_chat(chat.id,chat.type,chat.title or "")
-        except Exception: log.debug("chat registration skipped",exc_info=True)
-    user=getattr(update,"effective_user",None); msg=getattr(update,"effective_message",None)
-    if user and chat and msg and getattr(msg,"text",None):
-        try:
-            from handlers.member_memory import remember
-            await remember(chat.id,user.id,user.first_name or "friend",user.username or "",msg.text)
-        except Exception: log.debug("member memory update skipped",exc_info=True)
 
 def _command_names(app):
-    """Return command names already registered on the application."""
-    out=set()
-    for hs in getattr(app,"handlers",{}).values():
-        for h in hs:
-            cs=getattr(h,"commands",None)
-            if cs: out.update(str(c).lower().lstrip("/") for c in cs)
-    return out
+    """Collect unique live command names from every registered Telegram handler."""
+    names=set()
+    for handlers in getattr(app,"handlers",{}).values():
+        for handler in handlers:
+            for command in (getattr(handler,"commands",None) or ()):
+                value=str(command).strip().lstrip("/").casefold()
+                if value: names.add(value)
+    return names
 
-def _has_ai_handler(app):
-    """Return whether the application contains the protected AI handler."""
-    for hs in getattr(app,"handlers",{}).values():
-        for h in hs:
-            cb=getattr(h,"callback",None)
-            if cb is _resilient_ai_handler or getattr(cb,"__name__","") in {"handle_ai_message","_resilient_ai_handler"}: return True
-    return False
-
-def _register_world_surface(app):
-    """Register the durable Phase 3 world handlers without replacing the legacy command stack."""
-    try:
-        from midnight_oracle.handlers.world_handler import start_game, game_callback, handle_poll_answer, handle_poll
-        for command in ("tod", "wyr", "nhie", "scramble"):
-            app.add_handler(CommandHandler(command, start_game), group=-20)
-        app.add_handler(PollAnswerHandler(handle_poll_answer), group=-20)
-        app.add_handler(PollHandler(handle_poll), group=-20)
-        app.add_handler(CallbackQueryHandler(game_callback, pattern=r"^game:"), group=-20)
-    except Exception:
-        log.exception("WORLD_SURFACE_REGISTRATION_FAILED")
-    try:
-        from midnight_oracle.handlers.inline_handler import handle_inline
-        app.add_handler(InlineQueryHandler(handle_inline), group=-20)
-    except Exception:
-        log.exception("INLINE_SURFACE_REGISTRATION_FAILED")
-    try:
-        from midnight_oracle.handlers.callback_handler import handle_callback
-        app.add_handler(CallbackQueryHandler(handle_callback, pattern=r"^(reveal_|secret:).+") , group=-19)
-    except Exception:
-        log.exception("CALLBACK_SURFACE_REGISTRATION_FAILED")
-    try:
-        from midnight_oracle.handlers.prediction_handler import predict, predictions
-        app.add_handler(CommandHandler("predict", predict), group=-20)
-        app.add_handler(CommandHandler("predictions", predictions), group=-20)
-    except Exception:
-        log.exception("PREDICTION_SURFACE_REGISTRATION_FAILED")
 
 def build_application():
-    """Construct the production Telegram application with legacy commands and durable Phase 1–5 surfaces."""
-    app=Application.builder().token(TOKEN).build(); app.add_handler(MessageHandler(filters.ALL,_registry),group=-999)
+    app=Application.builder().token(TOKEN).build()
+    register_phase_surfaces(app)
     try:
-        from handlers.social_engine import track_member
-        app.add_handler(MessageHandler(filters.ALL,track_member),group=-998)
-    except Exception: log.exception("member tracker registration failed")
-    try:
-        from handlers.maintenance_guard import register as register_maintenance
-        register_maintenance(app)
-    except Exception: log.exception("maintenance guard registration failed")
-    _register_world_surface(app)
-    try:
-        register_phase_surfaces(app)
-        log.info("PHASE_SURFACE_REGISTRY_READY | public_world=on | mini_app=on")
-    except Exception:
-        log.exception("PHASE_SURFACE_REGISTRY_FAILED")
-    if hasattr(legacy_bot,"register_handlers"): legacy_bot.register_handlers(app)
-    elif hasattr(legacy_bot,"_register_handlers"): legacy_bot._register_handlers(app)
-    if not _has_ai_handler(app): app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_resilient_ai_handler),group=10)
+        from handlers import relationship_engine
+        relationship_engine.register(app)
+    except Exception: log.exception("RELATIONSHIP_SURFACE_REGISTRATION_FAILED")
     return app
 
+
 async def _set_commands(app):
-    """Publish a compact public menu; keep private owner commands out of the global menu."""
+    """Publish one flat, live command menu; keep private owner controls private."""
     private={"ownerstatus","ownerstats"}
-    names=sorted([n for n in _command_names(app) if n and len(n)<=32 and n not in private])[:100]
+    names=sorted(n for n in _command_names(app) if n and len(n)<=32 and n not in private)
+    # Telegram allows at most 100 commands in a BotCommand list. Keep the menu
+    # deterministic so users see the same flat surface in DMs and groups.
+    names=names[:100]
     descriptions={
         "start":"Midnight Oracle", "help":"Command guide", "oracle":"Daily prophecy", "aura":"Scan your aura",
         "vibecheck":"Check your energy", "identity":"Oracle archetype", "shadow":"Meet your shadow", "element":"Cosmic element",
         "corecode":"Three core words", "universe":"A message from the universe", "ritual":"Today's ritual", "duality":"Light and dark side",
         "nightreport":"Tonight's night report", "sigil":"Personal sigil", "glitch":"Oracle system reading", "checkin":"Daily check-in",
-        "streakcheck":"View your streak", "vent":"Anonymous vent", "coinboard":"Group coin leaderboard", "cgift":"Gift coins", "rob":"Attempt a heist",
+        "streakcheck":"View your streak", "vent":"Private vent", "coinboard":"Group coin leaderboard", "cgift":"Gift coins", "rob":"Attempt a heist",
         "tod":"Truth or Dare", "wyr":"Would You Rather", "nhie":"Never Have I Ever", "scramble":"Word Scramble", "predict":"Make a prediction", "predictions":"Pending predictions",
         "house":"Open Oracle House", "truth":"Truth question", "memory":"Group memory", "mymemory":"What Oracle remembers", "forget":"Forget a memory", "quiet":"Quiet mode", "wake":"Wake Oracle",
+        "weave":"Reveal a social thread", "orbit":"Trace a social orbit", "echo":"Find an echo", "anchor":"Read an anchor", "fracture":"Read a fracture", "ember":"Find an ember", "mirror":"Mirror reading", "crossing":"Read a crossing", "undertow":"Read the undertow", "edict":"Oracle edict", "veil":"Check the sealed veil", "gaze":"Watch a relationship", "release":"Release a relationship watch", "graveyard":"The Quiet Graveyard",
     }
     commands=[BotCommand(n,descriptions.get(n,"Midnight Oracle")) for n in names]
     try: await app.bot.set_my_commands(commands)
     except Exception: log.exception("command menu setup failed")
     if OWNER_ID:
         try:
-            owner_names=sorted([n for n in _command_names(app) if n in private])
+            owner_names=sorted(n for n in _command_names(app) if n in private)
             await app.bot.set_my_commands([BotCommand(n,"Private Oracle control") for n in owner_names],scope=BotCommandScopeChat(OWNER_ID))
         except Exception: log.exception("owner command menu setup failed")
 
 async def _post_init(app):
-    """Initialize production services, durable world scheduling, and canonical command surfaces exactly once."""
     global _phase1_db,_phase1_engine,_phase1_memory,_phase1_replies
     try:
         _phase1_db=Database(os.getenv("ORACLE_DATABASE_PATH","midnight_oracle.sqlite3")); await _phase1_db.connect()
@@ -240,13 +121,10 @@ async def _post_init(app):
     log.info("AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on")
 
 def _error(update,context):
-    """Log Telegram handler failures without leaking provider details to users."""
     log.error("TELEGRAM_HANDLER_ERROR | update=%s | error=%r",getattr(update,"update_id","?"),context.error,exc_info=context.error)
 
 def main():
-    """Start the single production polling process."""
     app=build_application(); app.post_init=_post_init; app.add_error_handler(_error); asyncio.run(startup.run(app,storage_client=_storage_client))
-
 
 if __name__ == "__main__":
     main()
