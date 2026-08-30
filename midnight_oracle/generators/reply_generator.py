@@ -1,6 +1,7 @@
 """OpenAI-backed conversational brain for Midnight Oracle's human chat."""
 from __future__ import annotations
 import asyncio
+from collections.abc import AsyncIterator
 from openai import AsyncOpenAI
 from ..config import OPENAI_API_KEY, OPENAI_MODEL
 
@@ -54,7 +55,6 @@ class ReplyGenerator:
 
     @staticmethod
     def _dialogue_messages(recent_context: list[str] | None) -> list[dict[str, str]]:
-        """Turn the compact recent buffer into real user/assistant turns."""
         messages: list[dict[str, str]] = []
         for item in (recent_context or [])[-8:]:
             line = str(item).strip()
@@ -68,16 +68,39 @@ class ReplyGenerator:
             messages.append({'role': role, 'content': content})
         return messages
 
-    async def generate(self, group_name: str, name: str, relationship_tier: str, message: str, mood_summary: str, time_text: str, late: bool, memory: str, recent_context: list[str] | None = None) -> str:
-        if not self.client:
-            raise RuntimeError("OPENAI_API_KEY is not configured for the Oracle chat brain")
+    def _messages(self, group_name: str, name: str, relationship_tier: str, message: str, mood_summary: str, time_text: str, late: bool, memory: str, recent_context: list[str] | None) -> list[dict[str, str]]:
         prompt = SYSTEM_TEMPLATE.format(group_name=group_name[:100], name=name[:60], relationship_tier=relationship_tier, message=message[:1400], mood_summary=mood_summary[:500], time=time_text, is_late_night=late, relevant_memory_snippet=memory[:700] or "none")
         messages: list[dict[str, str]] = [{"role": "system", "content": prompt}]
         messages.extend(self._dialogue_messages(recent_context))
         messages.append({"role": "user", "content": message[:1400]})
+        return messages
+
+    @staticmethod
+    def _clean(text: str) -> str:
+        text = (text or '').strip().replace('```', '')
+        if not text or text.startswith('I') or 'As an AI' in text:
+            raise RuntimeError('Oracle model returned an invalid assistant response')
+        return text[:900]
+
+    async def stream(self, group_name: str, name: str, relationship_tier: str, message: str, mood_summary: str, time_text: str, late: bool, memory: str, recent_context: list[str] | None = None) -> AsyncIterator[str]:
+        """Yield real OpenAI output deltas; never synthesise a fake stream."""
+        if not self.client:
+            raise RuntimeError('OPENAI_API_KEY is not configured for the Oracle chat brain')
         async with _openai_sem:
-            response = await self.client.chat.completions.create(model=OPENAI_MODEL, messages=messages, temperature=.82, max_tokens=180)
-        text = (response.choices[0].message.content or "").strip()
-        if not text or text.startswith("I") or "As an AI" in text:
-            raise RuntimeError("Oracle model returned an invalid assistant response")
-        return text.replace("```", "")[:900]
+            response = await self.client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=self._messages(group_name, name, relationship_tier, message, mood_summary, time_text, late, memory, recent_context),
+                temperature=.82,
+                max_tokens=180,
+                stream=True,
+            )
+            async for chunk in response:
+                delta = chunk.choices[0].delta.content if chunk.choices else None
+                if delta:
+                    yield delta
+
+    async def generate(self, group_name: str, name: str, relationship_tier: str, message: str, mood_summary: str, time_text: str, late: bool, memory: str, recent_context: list[str] | None = None) -> str:
+        parts: list[str] = []
+        async for delta in self.stream(group_name, name, relationship_tier, message, mood_summary, time_text, late, memory, recent_context):
+            parts.append(delta)
+        return self._clean(''.join(parts))
