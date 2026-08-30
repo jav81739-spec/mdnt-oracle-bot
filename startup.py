@@ -294,6 +294,21 @@ def _install_jobqueue_compat() -> None:
         raise
 
 
+async def _verify_command_menu(application) -> None:
+    """Read back Telegram's command state after publication and fail visibly on mismatch."""
+    try:
+        from telegram import BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats
+        checks = (
+            ("private", BotCommandScopeAllPrivateChats()),
+            ("groups", BotCommandScopeAllGroupChats()),
+        )
+        for label, scope in checks:
+            commands = await application.bot.get_my_commands(scope=scope)
+            log.info("COMMAND_MENU_VERIFIED | scope=%s | count=%d | commands=%s", label, len(commands), ",".join(c.command for c in commands))
+    except Exception as exc:
+        log.exception("COMMAND_MENU_VERIFY_FAILED | %r", exc)
+
+
 async def run(application, storage_client=None):
     """Own the complete Telegram lifecycle, including every update type needed by durable games."""
     global _storage, _app, _lease_task
@@ -315,6 +330,8 @@ async def run(application, storage_client=None):
         if application.post_init is not None:
             await application.post_init(application)
         await application.start()
+        await application.bot.get_me()
+        await _verify_command_menu(application)
         await application.updater.start_polling(
             drop_pending_updates=True,
             allowed_updates=["message", "edited_message", "callback_query", "chat_member", "my_chat_member", "poll_answer", "poll", "inline_query"]
