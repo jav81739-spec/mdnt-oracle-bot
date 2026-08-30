@@ -7,7 +7,6 @@ import legacy_bot
 from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule, marriage, deathgames
 log = logging.getLogger("midnight.legacy_surface")
 
-# Commands which can change group state, spend/transfer value, or expose owner controls.
 _PROTECTED = {"broadcast","announce","midnightmap","ownerstatus","ownerstats","setcommands","reload","shutdown","restart","admin","moderation","mute","unmute","ban","warn","clearwarns","pin","unpin","purge","setrules","lock","unlock","groupinfo","setwelcome","setgoodbye","rob","withdraw","deposit","buy","gift","cgift","kill","vote","endgame","startround","deathgame"}
 _OWNER_ONLY = {"broadcast","announce","midnightmap","ownerstatus","ownerstats","setcommands","reload","shutdown","restart"}
 
@@ -76,11 +75,11 @@ def register_legacy_surface(app):
     module_commands = {
       "chat":{"chat":"toggle_chat","persona":"set_persona"},
       "games":{"quiz":"quiz","dare":"dare","rps":"rock_paper_scissors","riddle":"riddle","riddleanswer":"riddle_answer","guess":"guess_number","leaderboard":"leaderboard_cmd","dice":"dice_game","darts":"darts_game","basketball":"basketball_game","bowling":"bowling_game","football":"football_game","slot":"slot_game","hangman":"hangman","hangmanguess":"hangman_guess","tictactoe":"tictactoe","ttt":"ttt_move","wordchain":"wordchain_start","chainword":"chain_word","trivia":"trivia_category","wordle":"wordle","wordleguess":"wordle_guess"},
-      "moderation":{"mute":"mute","unmute":"unmute","ban":"ban","kick":"kick","slap":"slap","warn":"warn","rules":"show_rules","warnings":"check_warnings","clearwarns":"clear_warnings","pin":"pin","unpin":"unpin","purge":"purge","setrules":"set_rules","lock":"lock","unlock":"unlock"},
+      "moderation":{"mute":"mute","unmute":"unmute","ban":"ban","warn":"warn","rules":"show_rules","warnings":"check_warnings","clearwarns":"clear_warnings","pin":"pin","unpin":"unpin","purge":"purge","setrules":"set_rules","lock":"lock","unlock":"unlock"},
       "utility":{"id":"get_id","info":"user_info","remind":"remind","groupinfo":"group_info","afk":"set_afk","report":"report"},
       "aesthetic":{"aura":"aura_command","identity":"identity_command","vibecheck":"vibecheck_command","shadow":"shadow_command","element":"element_command","corecode":"corecode_command","universe":"universe_command","ritual":"ritual_command","duality":"duality_command","glitch":"glitch_command","nightreport":"nightreport_command","sigil":"sigil_command"},
       "friendship":{"hug":"hug","kiss":"kiss","pat":"pat","kick":"kick","slap":"slap","punch":"punch","highfive":"highfive","cuddle":"cuddle","poke":"poke","bonk":"bonk","bite":"bite","wave":"wave","wink":"wink","dance":"dance","roast":"roast","cheer":"cheer","comfort":"comfort","tickle":"tickle","salute":"salute","stare":"stare","handshake":"handshake","fistbump":"fistbump","shoulderpat":"shoulderpat","cheers":"cheers","bestie":"bestie","duo":"duo","friendship":"friendship_score","tagbestie":"tag_bestie","squad":"squad","loyalty":"loyalty","randomship":"random_ship","matchmaker":"matchmaker","friendshiptest":"friendship_test","ship":"ship"},
-      "fun":{"roast":"roast","compliment":"compliment","8ball":"eight_ball","vibe":"vibe","quote":"quote","poll":"poll","ratethis":"rate_this","impostor":"impostor_start","revealimpostor":"impostor_reveal"},
+      "fun":{"compliment":"compliment","8ball":"eight_ball","vibe":"vibe","quote":"quote","poll":"poll","ratethis":"rate_this","impostor":"impostor_start","revealimpostor":"impostor_reveal"},
       "matchmaking":{"crush":"set_crush","clearcrush":"clear_crush","secretadmirer":"secret_admirer"},
       "stats":{"stats":"stats","topactive":"top_active","msgcount":"msg_count"},
       "events":{"joined":"show_joined","left":"show_left","setwelcome":"set_welcome","setgoodbye":"set_goodbye","invite":"get_invite"},
@@ -89,10 +88,6 @@ def register_legacy_surface(app):
       "marriage":{"marry":"marry","accept":"accept","divorce":"divorce","profile":"profile","work":"work","chests":"chests","shop":"shop","buy":"buy","inventory":"inventory","gift":"gift","settings":"settings"},
       "deathgames":{"survive":"survive","revive":"revive","deathstatus":"deathstatus","roulette":"roulette","joingame":"joingame","startround":"startround","kill":"kill","vote":"vote","endgame":"endgame"}}
     direct = {"gif":"giphy_command","checkin":"checkin_command","streakcheck":"streakcheck_command","vent":"vent_command","cgift":"cgift_command","coinboard":"coinboard_command","rob":"eng_rob_command","oraclehour":"oraclehour_command","enter":"enter_command","eventcheck":"eventcheck_command","wallet":"wallet_command","deposit":"deposit_command","withdraw":"withdraw_command","fastmath":"fastmath_command","wordbomb":"wordbomb_command","mysterybox":"mysterybox_command","duel":"duel_command","confess":"confess_command","rank":"rank_command","muse":"muse_command","bond":"bond_command","signal":"signal_command","couples":"couples_command","bondstatus":"bondstatus_command","verdict":"verdict_command","hotseat":"hotseat_command","silence":"silence_command","cricket":"cricket_command","call":"cricket_predict_command","cpredict":"cricket_predict_command","cbet":"cricket_bet_command","cwin":"cricket_win_command","ctournament":"cricket_tournament_command","cpick":"cricket_pick_command","cplay":"cricket_play_command","broadcast":"broadcast_command","announce":"announce_command","deathgame":"deathgame_start"}
-    # /kick and /slap are interaction commands in the Help surface; moderation ownership
-    # is deliberately kept separate under unique admin-only command names.
-    module_commands["moderation"].pop("kick", None)
-    module_commands["moderation"].pop("slap", None)
     _assert_no_duplicate_declarations(module_commands, direct)
     added = []
     for mn, commands in module_commands.items():
