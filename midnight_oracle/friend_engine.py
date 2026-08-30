@@ -61,7 +61,7 @@ class FriendEngine:
         if context.relationship_tier in {'known','close'}:score+=1;reasons.append('known')
         if '?' in text or any(w in low.split() for w in ('bhai','bro','yaar','guys','anyone','someone')):score+=1;reasons.append('outward')
         if getattr(signal,'social',0)>=.4:score+=2;reasons.append('social_fit')
-        if context.is_late_night and (emotion or self._contains(low,self._VULNERABLE)):score+=2;reasons.append('late_emotion')
+        if context.is_late_night and (emotion or self._contains(low,self._VULNERABLE)):score+=3;reasons.append('late_emotion')
         recent=' '.join(context.recent_messages).casefold()
         if self._serious(recent,low):score-=4;reasons.append('serious')
         if context.recent_messages and any(x in recent for x in ('what do you think','what should i do','help me','can someone')):score-=4;reasons.append('directed_question')
