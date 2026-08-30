@@ -91,12 +91,16 @@ async def _verify_command_menu(application):
         for scope in (BotCommandScopeAllPrivateChats(),BotCommandScopeAllGroupChats()):await application.bot.get_my_commands(scope=scope)
     except Exception:log.exception("COMMAND_MENU_VERIFY_FAILED")
 def _install_live_runtime_bridges(application):
-    try:
-        from telegram.ext import MessageHandler,filters
-        from handlers.live_chat_bridge import handle_live_chat
-        if not application.bot_data.get("_midnight_human_bridge_registered"):
-            application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,handle_live_chat),group=-40);application.bot_data["_midnight_human_bridge_registered"]=True
-    except Exception:log.exception("LIVE_CHAT_BRIDGE_INSTALL_FAILED")
+    """The bot entrypoint owns the single live-chat MessageHandler.
+
+    startup is responsible for lifecycle/lease management only. Installing a
+    second text handler here caused the same update to traverse the Oracle
+    router twice and made command/chat behaviour dependent on handler order.
+    """
+    if application.bot_data.get("_midnight_human_bridge_registered"):
+        log.info("LIVE_CHAT_BRIDGE_ALREADY_REGISTERED | owner=bot")
+    else:
+        log.info("LIVE_CHAT_BRIDGE_DELEGATED | owner=bot_entrypoint")
 async def _stop_oracle_scheduler():
     scheduler=(_app.bot_data.get("oracle_scheduler") if _app else None)
     if scheduler is not None:
