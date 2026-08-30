@@ -18,7 +18,8 @@ def test_draft_stream_throttles_small_updates():
         stream = TelegramDraftStream(bot, 123, 7)
         assert await stream.thinking() is True
         assert bot.calls[-1][0] == "sendMessageDraft"
-        assert bot.calls[-1][1]["text"] == ""
+        assert bot.calls[-1][1]["text"] == "Thinking…"
+        assert bot.calls[-1][1]["text"]
         assert bot.calls[-1][1]["can_stop"] is True
 
         assert await stream.push("short") is False
