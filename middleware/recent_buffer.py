@@ -11,7 +11,9 @@ async def load_recent(storage_client, gid: str) -> deque[str]:
         if isinstance(raw, bytes):
             raw = raw.decode("utf-8", "ignore")
         values = json.loads(raw) if raw else []
-        return deque((str(v) for v in values)[-8:], maxlen=8)
+        if not isinstance(values, list):
+            values = []
+        return deque([str(v) for v in values[-8:]], maxlen=8)
     except Exception:
         return deque(maxlen=8)
 
