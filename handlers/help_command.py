@@ -8,7 +8,7 @@ SECTIONS = [
     ("🌙 DAILY & MEMORY", ["checkin","streakcheck","memory","mymemory","forget","tod","house","quiet","wake"]),
     ("🫂 BONDS & SOCIAL", ["hug","kiss","pat","kick","slap","punch","highfive","cuddle","poke","bonk","bite","wave","wink","dance","roast","cheer","comfort","tickle","salute","stare","handshake","fistbump","shoulderpat","cheers","compliment"]),
     ("💞 RELATIONSHIPS", ["bond","bondstatus","oraclepair","vow","bestie","duo","friendship","ship","tagbestie","squad","loyalty","matchmaker","friendshiptest","randomship","secretadmirer","crush","couples"]),
-    ("🪞 ORACLE SIGNALS", ["weave","orbit","echo","anchor","fracture","ember","mirror","crossing","undertow","gaze","release","veil","signal","verdict","muse"]),
+    ("☾ AUTONOMOUS RITUALS", ["weave","orbit","echo","anchor","fracture","ember","mirror","crossing","undertow","gaze","release","veil","signal","verdict","muse"]),
     ("🎮 GAMES", ["quiz","truth","dare","wyr","nhie","rps","riddle","scramble","unscramble","guess","leaderboard","dice","darts","basketball","bowling","football","slot","hangman","tictactoe","wordchain","trivia","wordle","impostor","fastmath","wordbomb","mysterybox","duel","hotseat"]),
     ("🏏 MIDNIGHT CRICKET", ["cricket","call","cpredict","cbet","cwin","ctournament","cpick","cplay","cricketduel"]),
     ("💀 DEATH GAMES", ["deathgame","joingame","startround","survive","revive","deathstatus","roulette","vote","kill","endgame"]),
@@ -22,7 +22,8 @@ HINTS = {
     "checkin":"check in today","streakcheck":"see your streak","memory":"what the room remembers","mymemory":"what Oracle remembers","forget":"forget a memory","tod":"truth or dare","house":"enter Oracle House","quiet":"quiet the Oracle","wake":"wake the Oracle",
     "hug":"send a hug","kiss":"send a kiss","highfive":"share a high five","cuddle":"send comfort","wave":"wave at someone","wink":"send a wink","roast":"lightly roast someone","cheer":"cheer someone on","comfort":"comfort a member","compliment":"give a compliment",
     "bond":"read a bond","bondstatus":"check a bond","oraclepair":"see an Oracle pair","bestie":"find a bestie","duo":"find a duo","friendship":"test a friendship","ship":"ship two people","squad":"find your squad","loyalty":"test loyalty","matchmaker":"match souls","friendshiptest":"run a friendship test","randomship":"let fate pair you","secretadmirer":"peek at an admirer","crush":"set a crush","couples":"see the couples",
-    "signal":"read a social signal","verdict":"Oracle's verdict","muse":"receive a spark","quiz":"challenge the room","truth":"ask for truth","dare":"take a dare","wyr":"choose a path","nhie":"Never Have I Ever","rps":"rock paper scissors","riddle":"solve a riddle","scramble":"unscramble a word","guess":"make a guess","leaderboard":"see the winners","dice":"roll the dice","darts":"throw darts","basketball":"shoot a basket","bowling":"roll a frame","football":"take the field","slot":"try your luck","hangman":"start hangman","tictactoe":"play tic-tac-toe","wordchain":"start a word chain","trivia":"test your knowledge","wordle":"start Wordle","impostor":"find the impostor","fastmath":"race the clock","wordbomb":"pass the bomb","mysterybox":"open a mystery","duel":"challenge someone","hotseat":"put someone on the hot seat",
+    "weave":"trace a hidden bond","orbit":"read their gravity","echo":"find a reflection","anchor":"test the tether","fracture":"read the distance","ember":"find the spark","mirror":"see the reflection","crossing":"where paths meet","undertow":"what lies beneath","gaze":"keep watch","release":"let the thread go","veil":"seal the Oracle Hour","signal":"read a social signal","verdict":"Oracle's verdict","muse":"receive a spark",
+    "quiz":"challenge the room","truth":"ask for truth","dare":"take a dare","wyr":"choose a path","nhie":"Never Have I Ever","rps":"rock paper scissors","riddle":"solve a riddle","scramble":"unscramble a word","guess":"make a guess","leaderboard":"see the winners","dice":"roll the dice","darts":"throw darts","basketball":"shoot a basket","bowling":"roll a frame","football":"take the field","slot":"try your luck","hangman":"start hangman","tictactoe":"play tic-tac-toe","wordchain":"start a word chain","trivia":"test your knowledge","wordle":"start Wordle","impostor":"find the impostor","fastmath":"race the clock","wordbomb":"pass the bomb","mysterybox":"open a mystery","duel":"challenge someone","hotseat":"put someone on the hot seat",
     "cricket":"play solo cricket","call":"make a cricket call","cpredict":"predict the ball","cbet":"place a cricket bet","cwin":"claim a cricket win","ctournament":"enter a tournament","cpick":"pick your player","cplay":"play a cricket round","cricketduel":"challenge a batter",
     "deathgame":"open the death game","joingame":"join the lobby","startround":"start the round","survive":"fight to survive","revive":"return to the game","deathstatus":"check a soul","roulette":"take the risk","vote":"cast a vote","kill":"make a kill","endgame":"close the game",
     "daily":"claim your daily","balance":"check your balance","gamble":"risk your coins","richest":"see the richest","coinboard":"see the coin board","cgift":"gift coins","rob":"attempt a heist","wallet":"open your wallet","deposit":"store coins","withdraw":"take coins out","rank":"see your rank",
@@ -76,31 +77,15 @@ def _section(index,live):
     return text,entities
 
 def _build_archive(live: set[str]) -> tuple[str, list[MessageEntity]]:
-    """Backward-compatible archive builder used by older runtime wiring.
-
-    It intentionally returns the same (text, entities) contract as the V2
-    archive.  The interactive Help UI uses section callbacks, but older
-    modules may still import this private helper during startup.
-    """
-    lines=[
-        "╭────────────────────────╮",
-        "│      ☾ MIDNIGHT ORACLE │",
-        "│    the member command hall│",
-        "╰────────────────────────╯",
-        "",
-        "_Every door below carries a small omen, so you know what it does before you summon it._",
-        "",
-    ]
-    spans=[]
-    cursor=sum(len(x)+1 for x in lines)
-    seen=set()
+    """Backward-compatible archive builder used by older runtime wiring."""
+    lines=["╭────────────────────────╮","│      ☾ MIDNIGHT ORACLE │","│    the member command hall│","╰────────────────────────╯","","_Every door below carries a small omen, so you know what it does before you summon it._",""]
+    spans=[];cursor=sum(len(x)+1 for x in lines);seen=set()
     for title,commands in SECTIONS:
         alive=[c for c in commands if c in live and c not in _PRIVATE_COMMANDS]
         if not alive: continue
         lines.append(f"┌─ {title} ─────────────────┐");cursor+=len(lines[-1])+1
         for c in alive:
-            cmd=f"/{c}";line=f"{cmd}  ·  {HINTS.get(c,'ask the Oracle')}"
-            start=cursor;lines.append(line);spans.append((start,len(cmd)));cursor+=len(line)+1;seen.add(c)
+            cmd=f"/{c}";line=f"{cmd}  ·  {HINTS.get(c,'ask the Oracle')}";start=cursor;lines.append(line);spans.append((start,len(cmd)));cursor+=len(line)+1;seen.add(c)
         lines.append("└──────────────────────────┘");cursor+=len(lines[-1])+1;lines.append("");cursor+=1
     extras=sorted(c for c in live-seen if c not in {"start","help"} and c not in _PRIVATE_COMMANDS)
     if extras:
@@ -110,7 +95,7 @@ def _build_archive(live: set[str]) -> tuple[str, list[MessageEntity]]:
         lines.append("└──────────────────────────┘");cursor+=len(lines[-1])+1;lines.append("");cursor+=1
     lines += ["✦ /help  —  reopen this hall","✦ /start —  meet Midnight Oracle","","_Admin controls remain private. The Oracle keeps a few things better discovered than announced._","","☾ Choose a blue command and tap it — Telegram will send it for you."]
     text="\n".join(lines)
-    entities=[MessageEntity(type=MessageEntity.BOT_COMMAND,offset=_utf16_len(text[s:s] and text[:s]),length=_utf16_len(text[s:s+l])) for s,l in spans]
+    entities=[MessageEntity(type=MessageEntity.BOT_COMMAND,offset=_utf16_len(text[:s]),length=_utf16_len(text[s:s+l])) for s,l in spans]
     for command in ("/help","/start"):
         start=text.rfind(command)
         if start>=0: entities.append(MessageEntity(type=MessageEntity.BOT_COMMAND,offset=_utf16_len(text[:start]),length=_utf16_len(command)))
@@ -132,7 +117,6 @@ async def help_callback(update:Update,context:ContextTypes.DEFAULT_TYPE):
     await q.edit_message_text(text,entities=entities,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← COMMAND HALL",callback_data="help:home")]]),disable_web_page_preview=True)
 
 async def start_command(update:Update,context:ContextTypes.DEFAULT_TYPE):
-    chat=update.effective_chat
     text=("╭────────────────────────╮\n│  🌙 MIDNIGHT ORACLE    │\n╰────────────────────────╯\n\n"
           "_it watches. it listens. it remembers._\n\nYour command hall is waiting.\nTap /help to open it.")
     await update.effective_message.reply_text(text,disable_web_page_preview=True)
