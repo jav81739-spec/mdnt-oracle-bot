@@ -36,17 +36,22 @@ async def set_persona(update,context):
 async def auto_reply(update,context):
     cid=str(update.effective_chat.id); msg=update.effective_message
     if not msg or not getattr(msg,"text",None): return
+    text=msg.text.strip(); username=getattr(context.bot,"username",None)
+    mentioned=bool(username and f"@{username}".casefold() in text.casefold())
+    replied=bool(msg.reply_to_message and msg.reply_to_message.from_user and msg.reply_to_message.from_user.id==context.bot.id)
+    explicitly_summoned=mentioned or replied or "midnight" in text.casefold() or "oracle" in text.casefold()
+    if not chat_enabled.get(cid,False) and not explicitly_summoned:return
     now=time.monotonic()
     if now-_last_reply_time.get(cid,0)<COOLDOWN_SECONDS:return
     _last_reply_time[cid]=now
-    persona=chat_persona.get(cid,DEFAULT_PERSONA); history=chat_history.setdefault(cid,[]); history.append({"role":"user","text":msg.text[:1000]}); del history[:-MAX_HISTORY]
+    persona=chat_persona.get(cid,DEFAULT_PERSONA); history=chat_history.setdefault(cid,[]); history.append({"role":"user","text":text[:1000]}); del history[:-MAX_HISTORY]
     try:
-        async with _ai_slots: reply_text=await core_generate_reply(msg.text,persona,history)
+        async with _ai_slots: reply_text=await core_generate_reply(text,persona,history)
     except AIUnavailable:
-        reply_text=_local_chat(msg.text,history); log.info("CHAT_PROVIDER_COOLDOWN | chat=%s | local_engine=true",cid)
+        reply_text=_local_chat(text,history); log.info("CHAT_PROVIDER_COOLDOWN | chat=%s | local_engine=true",cid)
     except Exception:
-        reply_text=_local_chat(msg.text,history); log.exception("CHAT_PROVIDER_INTERNAL_ERROR | chat=%s",cid)
-    if not reply_text: reply_text=_local_chat(msg.text,history)
+        reply_text=_local_chat(text,history); log.exception("CHAT_PROVIDER_INTERNAL_ERROR | chat=%s",cid)
+    if not reply_text: reply_text=_local_chat(text,history)
     history.append({"role":"assistant","text":reply_text[:2000]}); del history[:-MAX_HISTORY]
     try: await msg.reply_text(reply_text,reply_to_message_id=msg.message_id)
     except Exception: log.exception("CHAT_SEND_FAILED | chat=%s",cid)
