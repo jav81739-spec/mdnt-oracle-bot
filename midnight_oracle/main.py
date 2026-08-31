@@ -11,7 +11,7 @@ from .mood_engine import MoodEngine
 from .handlers.message_handler import MessageRouter
 from .handlers.callback_handler import handle_callback
 from .handlers.command_handler import start,oracle,truth,memory,mymemory,forget,quiet,wake,house
-from .handlers.help_command import help_command
+from .handlers.help_command import help_command,help_callback
 from .handlers.inline_handler import handle_inline
 from .handlers.world_handler import start_game,end_game,game_callback,handle_game_message,handle_poll_answer,handle_poll
 from .handlers.prediction_handler import predict,predictions
@@ -69,7 +69,6 @@ def build_application()->Application:
     app=Application.builder().token(BOT_TOKEN).post_init(_post_init).post_shutdown(_post_shutdown).build()
     commands={'start':start,'help':help_command,'oracle':oracle,'truth':truth,'memory':memory,'mymemory':mymemory,'forget':forget,'quiet':quiet,'wake':wake,'house':house,'tod':start_game,'wyr':start_game,'nhie':start_game,'scramble':start_game,'predict':predict,'predictions':predictions,'endgame':end_game,'mysterybox':mysterybox,'nightgift':nightgift,'muse':muse,'glitch':glitch}
     for name,cb in commands.items():
-        # Keep the member command surface ahead of auxiliary handlers.
         group=-1 if name in {'help','start'} else 0
         app.add_handler(CommandHandler(name,cb),group=group)
     try:
@@ -77,7 +76,7 @@ def build_application()->Application:
         result=register_legacy_surface(app);log.info('LEGACY_SURFACE_WIRED | added=%d | skipped=%d',len(result.get('added',[])),len(result.get('skipped',[])))
     except Exception:log.exception('LEGACY_SURFACE_WIRING_FAILED')
     app.add_handler(MessageHandler(filters.ALL,_track_group_activity),group=-1000)
-    app.add_handler(PollAnswerHandler(handle_poll_answer));app.add_handler(PollHandler(handle_poll));app.add_handler(CallbackQueryHandler(game_callback,pattern=r'^game:'));app.add_handler(CallbackQueryHandler(handle_callback));app.add_handler(InlineQueryHandler(handle_inline));app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA,handle_webapp_data));app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_route_message));return app
+    app.add_handler(PollAnswerHandler(handle_poll_answer));app.add_handler(PollHandler(handle_poll));app.add_handler(CallbackQueryHandler(game_callback,pattern=r'^game:'));app.add_handler(CallbackQueryHandler(help_callback,pattern=r'^help:'));app.add_handler(CallbackQueryHandler(handle_callback));app.add_handler(InlineQueryHandler(handle_inline));app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA,handle_webapp_data));app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_route_message));return app
 
 def main()->None:
     """Run through the canonical startup manager so only one polling owner exists."""
