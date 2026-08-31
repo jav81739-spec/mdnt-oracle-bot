@@ -44,8 +44,12 @@ def _live(application):
         for h in group:
             for command in getattr(h,"commands",()) or ():
                 name=str(command).lower().lstrip("/")
-                if name and len(name)<=32 and name not in _PRIVATE_COMMANDS: live.add(name)
+                if name and len(name)<=32 and name not in _PRIVATE_COMMANDS:
+                    live.add(name)
     return live
+
+# Compatibility name used by the legacy/canonical help bridge.
+_live_member_commands = _live
 
 def _home():
     return ("╭────────────────────────────╮\n"
@@ -86,7 +90,8 @@ def _build_archive(live: set[str]) -> tuple[str, list[MessageEntity]]:
         lines.append(f"┌─ {title} ─────────────────┐");cursor+=len(lines[-1])+1
         for c in alive:
             cmd=f"/{c}";line=f"{cmd}  ·  {HINTS.get(c,'ask the Oracle')}";start=cursor;lines.append(line);spans.append((start,len(cmd)));cursor+=len(line)+1;seen.add(c)
-        lines.append("└──────────────────────────┘");cursor+=len(lines[-1])+1;lines.append("");cursor+=1
+        lines.append("└──────────────────────────┘");cursor+=len(lines[-1])+1;lines.append("")
+        cursor+=1
     extras=sorted(c for c in live-seen if c not in {"start","help"} and c not in _PRIVATE_COMMANDS)
     if extras:
         lines.append("┌─ ✦ MORE MEMBER COMMANDS ─┐");cursor+=len(lines[-1])+1
