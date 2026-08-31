@@ -93,8 +93,10 @@ async def _route_message(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
 def build_application()->Application:
     if not BOT_TOKEN:raise RuntimeError('BOT_TOKEN is required')
     app=Application.builder().token(BOT_TOKEN).post_init(_post_init).post_shutdown(_post_shutdown).build()
-    commands={'start':start,'help':help_command,'oracle':oracle,'truth':truth,'memory':memory,'mymemory':mymemory,'forget':forget,'quiet':quiet,'wake':wake,'house':house,'tod':start_game,'wyr':start_game,'nhie':start_game,'scramble':start_game,'predict':predict,'predictions':predictions,'endgame':end_game,'mysterybox':mysterybox,'nightgift':nightgift,'muse':muse,'glitch':glitch}
+    commands={'start':start,'help':help_command,'oracle':oracle,'truth':truth,'memory':memory,'mymemory':mymemory,'forget':forget,'quiet':quiet,'wake':wake,'house':house,'tod':start_game,'wyr':start_game,'nhie':start_game,'scramble':start_game,'unscramble':None,'predict':predict,'predictions':predictions,'endgame':end_game,'mysterybox':mysterybox,'nightgift':nightgift,'muse':muse,'glitch':glitch}
     for name,cb in commands.items():
+        if name=='unscramble':
+            from handlers.games import unscramble as cb
         group=-1 if name in {'help','start'} else 0
         app.add_handler(CommandHandler(name,cb),group=group)
     try:
@@ -103,6 +105,11 @@ def build_application()->Application:
     except Exception:log.exception('LEGACY_SURFACE_WIRING_FAILED')
     from core.v2_unique import register as register_v2_unique
     register_v2_unique(app)
+    try:
+        from handlers.relationship_engine import register as register_relationships
+        register_relationships(app)
+        log.info('RELATIONSHIP_SURFACE_WIRED')
+    except Exception:log.exception('RELATIONSHIP_SURFACE_WIRING_FAILED')
     from core.v2_autonomous_commands import register as register_v2_autonomous_commands
     register_v2_autonomous_commands(app)
     from core.error_handling import install_error_handler
