@@ -23,7 +23,7 @@ from storage import redis_client
 log=get_logger('midnight.main')
 
 async def _post_init(application:Application)->None:
-    db=Database(DATABASE_PATH);await db.connect();mood=MoodEngine();mem=MemoryEngine(db);engine=FriendEngine(db,mood);router=MessageRouter(engine,mem,mood);application.bot_data.update(oracle_db=db,oracle_router=router,storage_client=redis_client)
+    db=Database(DATABASE_PATH);await db.connect();mood=MoodEngine();mem=MemoryEngine(db);engine=FriendEngine(db,mood);router=MessageRouter(engine,mem,mood);application.bot_data.update(oracle_db=db,oracle_router=router,storage_client=redis_client,oracle_atmosphere={})
     try:
         from handlers.runtime_registry import _set_commands
         await _set_commands(application);log.info('COMMAND_SURFACE_READY | source=canonical_runtime_registry')
@@ -33,8 +33,7 @@ async def _post_init(application:Application)->None:
         if house_url:
             await application.bot.set_chat_menu_button(menu_button=MenuButtonWebApp('☾ Oracle House',web_app=WebAppInfo(url=house_url)))
             log.info('ORACLE_HOUSE_MENU_READY | webapp=configured')
-        else:
-            log.info('ORACLE_HOUSE_MENU_SKIPPED | webapp_url=not_configured')
+        else:log.info('ORACLE_HOUSE_MENU_SKIPPED | webapp_url=not_configured')
     except Exception:log.exception('ORACLE_HOUSE_MENU_FAILED')
     try:
         from handlers import chat,social_engine
@@ -46,7 +45,7 @@ async def _post_init(application:Application)->None:
     try:
         from core.oracle_pulse import install as install_oracle_pulse
         install_oracle_pulse(application)
-        log.info('ORACLE_PULSE_READY | interval=90m | content=original_gossip_or_story | member_memory=excluded')
+        log.info('ORACLE_PULSE_READY | decision_interval=15m | content=contextual_original_gossip_or_story | member_memory=excluded')
     except Exception:log.exception('ORACLE_PULSE_INSTALL_FAILED')
     scheduler=OracleScheduler(application,db,timezone=TIMEZONE);scheduler.start();application.bot_data['oracle_scheduler']=scheduler
     log.info('ORACLE_INTELLIGENCE_READY | friend_engine=on | memory=short+long | scheduler=on | social=on | pulse=on | world=on')
@@ -66,6 +65,9 @@ async def _track_group_activity(update:Update,context:ContextTypes.DEFAULT_TYPE)
         await db.execute("INSERT INTO group_profile(group_id,group_name,timezone,created_at) VALUES(?,?,?,?) ON CONFLICT(group_id) DO UPDATE SET group_name=excluded.group_name",(chat.id,chat.title or '',str(TIMEZONE),now_ts()))
         from handlers.social_engine import register_member,bump_msg_count
         await register_member(chat.id,user.id,user.first_name or 'Unknown',user.username or '');await bump_msg_count(chat.id,user.id)
+        text=(update.effective_message.text or '').strip() if update.effective_message else ''
+        if text and not text.startswith('/'):
+            atmosphere=context.application.bot_data.setdefault('oracle_atmosphere',{});items=atmosphere.setdefault(str(chat.id),[]);items.append({'text':text[:500],'ts':now_ts()});del items[:-16]
     except Exception:log.exception('GROUP_ACTIVITY_TRACKING_FAILED | chat_id=%s',chat.id)
 
 async def _route_message(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
@@ -112,8 +114,7 @@ def build_application()->Application:
     register_v2_unique(app)
     try:
         from handlers.relationship_engine import register as register_relationships
-        register_relationships(app)
-        log.info('RELATIONSHIP_SURFACE_WIRED')
+        register_relationships(app);log.info('RELATIONSHIP_SURFACE_WIRED')
     except Exception:log.exception('RELATIONSHIP_SURFACE_WIRING_FAILED')
     from core.v2_autonomous_commands import register as register_v2_autonomous_commands
     register_v2_autonomous_commands(app)
