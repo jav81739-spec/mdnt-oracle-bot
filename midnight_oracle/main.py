@@ -69,6 +69,13 @@ async def _route_message(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
         replied=getattr(getattr(update.effective_message,'reply_to_message',None),'from_user',None) if update.effective_message else None
         bot_id=getattr(context.bot,'id',None)
         direct=bool(replied and bot_id and getattr(replied,'id',None)==bot_id) or bool(username and f'@{username}' in low) or low in {'oracle','midnight'} or any(low==p or low.startswith(p+' ') for p in ('hey oracle','hello oracle','hi oracle','oracle suno','oracle bhai','oracle bro','oracle listen','hey midnight','hello midnight','hi midnight','midnight suno','midnight bhai','midnight bro'))
+        try:
+            from core.storage import storage
+            trigger=await storage.load(f'v2:autonomous:trigger:{chat.id}',None)
+            if isinstance(trigger,str) and trigger and (low==trigger or low.startswith(trigger+' ')):
+                direct=True
+        except Exception:
+            pass
         if not direct:
             try:
                 from handlers.chat import chat_enabled
