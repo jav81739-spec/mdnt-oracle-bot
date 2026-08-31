@@ -1,11 +1,13 @@
-"""Oracle Pulse: decision-based spontaneous presence for Midnight Oracle."""
+"""Oracle Pulse: canonical decision-to-delivery presence pipeline."""
 from __future__ import annotations
 
 import time
 
+from .oracle_delivery import deliver
 from .oracle_freshness import FreshnessGovernor
-from .oracle_mind import generate_contextual_piece
+from .oracle_mind import generate_contextual_piece, language_hint
 from .oracle_presence import decide_presence
+from .oracle_strategy import build_strategy
 from midnight_oracle.utils.logger import get_logger
 
 log = get_logger("midnight.oracle_pulse")
@@ -15,12 +17,12 @@ ACTIVE_WINDOW = 6 * 3600
 
 
 def _log(message: str, *args) -> None:
-    """Emit a compact stage marker without exposing message/member content."""
+    """Emit compact stage markers without exposing message/member content."""
     log.info(message, *args)
 
 
 async def pulse_callback(context) -> None:
-    """Run the complete Presence pipeline for every registered group."""
+    """Run Presence → Strategy → Mind → Freshness → Social delivery."""
     application = context.application
     db = application.bot_data.get("oracle_db")
     if not db:
@@ -65,7 +67,11 @@ async def pulse_callback(context) -> None:
                 last_delivery=last_delivery,
                 cooldown_seconds=DELIVERY_COOLDOWN,
             )
-            _log("ORACLE_PULSE_STAGE | stage=decision | chat=%s | speak=%s | strategy=%s", group_id, decision.speak, decision.strategy)
+            contract = build_strategy(decision, language_hint(items))
+            _log(
+                "ORACLE_PULSE_STAGE | stage=decision | chat=%s | speak=%s | strategy=%s | interaction=%s",
+                group_id, decision.speak, contract.strategy, contract.interaction,
+            )
             if not decision.speak:
                 continue
 
@@ -73,16 +79,17 @@ async def pulse_callback(context) -> None:
             for attempt in range(6):
                 piece = await generate_contextual_piece(
                     items,
-                    seed=f"{group_id}:{int(now // CHECK_INTERVAL)}:{decision.strategy}:{attempt}",
+                    seed=f"{group_id}:{int(now // CHECK_INTERVAL)}:{contract.strategy}:{attempt}",
+                    strategy=contract.strategy,
                 )
                 if freshness.accept(
                     group_id,
                     piece.kind,
                     piece.text,
-                    theme=decision.reason,
-                    media="none",
-                    pair="none",
-                    strategy=decision.strategy,
+                    theme=contract.reason,
+                    media=contract.media_intent,
+                    pair=contract.target_policy,
+                    strategy=contract.strategy,
                 ):
                     accepted = piece
                     break
@@ -91,19 +98,15 @@ async def pulse_callback(context) -> None:
                 continue
 
             _log("ORACLE_PULSE_STAGE | stage=generation | chat=%s | accepted=true | kind=%s", group_id, accepted.kind)
-            try:
-                await application.bot.send_message(
-                    group_id,
-                    accepted.text,
-                    disable_web_page_preview=True,
-                )
-                await db.execute(
-                    "INSERT INTO scheduled_log(group_id,schedule_type,sent_at,had_interaction) VALUES(?,?,?,0)",
-                    (group_id, f"pulse:{accepted.kind}", now),
-                )
-                _log("ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=true", group_id)
-            except Exception:
-                log.exception("ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=false", group_id)
+            delivered = await deliver(application, group_id, accepted.text)
+            if not delivered:
+                _log("ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=false", group_id)
+                continue
+            await db.execute(
+                "INSERT INTO scheduled_log(group_id,schedule_type,sent_at,had_interaction) VALUES(?,?,?,0)",
+                (group_id, f"pulse:{accepted.kind}", now),
+            )
+            _log("ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=true", group_id)
         except Exception:
             log.exception("ORACLE_PULSE_STAGE | stage=runtime_error | chat=%s", group_id)
             continue
