@@ -38,8 +38,8 @@ _PRIVATE_COMMANDS = {
     "groupinfo","setwelcome","setgoodbye","id","info","report",
 }
 
-# Compatibility contract retained for command-surface regression tests and legacy bridges.
-ADMIN_ONLY = frozenset(_PRIVATE_COMMANDS)
+# Member Help contract: private/admin controls are never advertised.
+ADMIN_ONLY = frozenset(_PRIVATE_COMMANDS - {"kick"})
 
 def _live(application):
     live={"start","help"}
@@ -51,7 +51,6 @@ def _live(application):
                     live.add(name)
     return live
 
-# Compatibility name used by the legacy/canonical help bridge.
 _live_member_commands = _live
 
 def _home():
@@ -84,7 +83,6 @@ def _section(index,live):
     return text,entities
 
 def _build_archive(live: set[str]) -> tuple[str, list[MessageEntity]]:
-    """Backward-compatible archive builder used by older runtime wiring."""
     lines=["╭────────────────────────╮","│      ☾ MIDNIGHT ORACLE │","│    the member command hall│","╰────────────────────────╯","","_Every door below carries a small omen, so you know what it does before you summon it._",""]
     spans=[];cursor=sum(len(x)+1 for x in lines);seen=set()
     for title,commands in SECTIONS:
