@@ -6,16 +6,19 @@ regression suite rely on, without starting any service merely by importing it.
 """
 from __future__ import annotations
 
+import asyncio
 import legacy_bot
+import startup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes
 
 from handlers import deathgames_v2 as _deathgames_v2
+from midnight_oracle.handlers.phase_registry import register_phase_surfaces
 from midnight_oracle.main import (
     _post_init,
     _post_shutdown,
     build_application as _canonical_build_application,
-    main as _canonical_main,
 )
+from storage import redis_client
 
 legacy_bot.deathgames = _deathgames_v2
 
@@ -36,7 +39,9 @@ def build_application() -> Application:
 
 def main() -> None:
     """Run the canonical startup manager exactly once."""
-    _canonical_main()
+    # Keep the historical startup contract visible at this production boundary;
+    # ``startup.run`` remains the sole lifecycle/polling owner.
+    asyncio.run(startup.run(build_application(), redis_client))
 
 
 if __name__ == "__main__":
