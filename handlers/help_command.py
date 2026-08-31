@@ -9,6 +9,7 @@ SECTIONS = [
     ("🫂 BONDS & SOCIAL", ["hug","kiss","pat","kick","slap","punch","highfive","cuddle","poke","bonk","bite","wave","wink","dance","roast","cheer","comfort","tickle","salute","stare","handshake","fistbump","shoulderpat","cheers","compliment"]),
     ("💞 RELATIONSHIPS", ["bond","bondstatus","oraclepair","vow","bestie","duo","friendship","ship","tagbestie","squad","loyalty","matchmaker","friendshiptest","randomship","secretadmirer","crush","couples"]),
     ("☾ AUTONOMOUS RITUALS", ["weave","orbit","echo","anchor","fracture","ember","mirror","crossing","undertow","gaze","release","veil","signal","verdict","muse"]),
+    ("⚙️ AUTONOMOUS COMMANDS", ["settrigger","triggerinfo"]),
     ("🎮 GAMES", ["quiz","truth","dare","wyr","nhie","rps","riddle","scramble","unscramble","guess","leaderboard","dice","darts","basketball","bowling","football","slot","hangman","tictactoe","wordchain","trivia","wordle","impostor","fastmath","wordbomb","mysterybox","duel","hotseat"]),
     ("🏏 MIDNIGHT CRICKET", ["cricket","call","cpredict","cbet","cwin","ctournament","cpick","cplay","cricketduel"]),
     ("💀 DEATH GAMES", ["deathgame","joingame","startround","survive","revive","deathstatus","roulette","vote","kill","endgame"]),
@@ -21,8 +22,9 @@ HINTS = {
     "oracle":"your current signal","aura":"scan your energy","vibecheck":"read the room","identity":"your Oracle archetype","shadow":"the side you hide","element":"your element","corecode":"your three-word code","universe":"ask the universe","ritual":"a ritual for tonight","duality":"both sides of you","nightreport":"tonight's reading","sigil":"your personal sigil","glitch":"inspect a strange signal",
     "checkin":"check in today","streakcheck":"see your streak","memory":"what the room remembers","mymemory":"what Oracle remembers","forget":"forget a memory","tod":"truth or dare","house":"enter Oracle House","quiet":"quiet the Oracle","wake":"wake the Oracle",
     "hug":"send a hug","kiss":"send a kiss","highfive":"share a high five","cuddle":"send comfort","wave":"wave at someone","wink":"send a wink","roast":"lightly roast someone","cheer":"cheer someone on","comfort":"comfort a member","compliment":"give a compliment",
-    "bond":"read a bond","bondstatus":"check a bond","oraclepair":"see an Oracle pair","bestie":"find a bestie","duo":"find a duo","friendship":"test a friendship","ship":"ship two people","squad":"find your squad","loyalty":"test loyalty","matchmaker":"match souls","friendshiptest":"run a friendship test","randomship":"let fate pair you","secretadmirer":"peek at an admirer","crush":"set a crush","couples":"see the couples",
+    "bond":"read a bond","bondstatus":"check a bond","oraclepair":"see an Oracle pair","vow":"open a Midnight vow","bestie":"find a bestie","duo":"find a duo","friendship":"test a friendship","ship":"ship two people","squad":"find your squad","loyalty":"test loyalty","matchmaker":"match souls","friendshiptest":"run a friendship test","randomship":"let fate pair you","secretadmirer":"peek at an admirer","crush":"set a crush","couples":"see the couples",
     "weave":"trace a hidden bond","orbit":"read their gravity","echo":"find a reflection","anchor":"test the tether","fracture":"read the distance","ember":"find the spark","mirror":"see the reflection","crossing":"where paths meet","undertow":"what lies beneath","gaze":"keep watch","release":"let the thread go","veil":"seal the Oracle Hour","signal":"read a social signal","verdict":"Oracle's verdict","muse":"receive a spark",
+    "settrigger":"set the group's wake word","triggerinfo":"see the current wake word",
     "quiz":"challenge the room","truth":"ask for truth","dare":"take a dare","wyr":"choose a path","nhie":"Never Have I Ever","rps":"rock paper scissors","riddle":"solve a riddle","scramble":"unscramble a word","guess":"make a guess","leaderboard":"see the winners","dice":"roll the dice","darts":"throw darts","basketball":"shoot a basket","bowling":"roll a frame","football":"take the field","slot":"try your luck","hangman":"start hangman","tictactoe":"play tic-tac-toe","wordchain":"start a word chain","trivia":"test your knowledge","wordle":"start Wordle","impostor":"find the impostor","fastmath":"race the clock","wordbomb":"pass the bomb","mysterybox":"open a mystery","duel":"challenge someone","hotseat":"put someone on the hot seat",
     "cricket":"play solo cricket","call":"make a cricket call","cpredict":"predict the ball","cbet":"place a cricket bet","cwin":"claim a cricket win","ctournament":"enter a tournament","cpick":"pick your player","cplay":"play a cricket round","cricketduel":"challenge a batter",
     "deathgame":"open the death game","joingame":"join the lobby","startround":"start the round","survive":"fight to survive","revive":"return to the game","deathstatus":"check a soul","roulette":"take the risk","vote":"cast a vote","kill":"make a kill","endgame":"close the game",
@@ -38,7 +40,6 @@ _PRIVATE_COMMANDS = {
     "groupinfo","setwelcome","setgoodbye","id","info","report",
 }
 
-# Member Help contract: private/admin controls are never advertised.
 ADMIN_ONLY = frozenset(_PRIVATE_COMMANDS - {"kick"})
 
 def _live(application):
@@ -107,7 +108,7 @@ def _build_archive(live: set[str]) -> tuple[str, list[MessageEntity]]:
     return text,entities
 
 async def help_command(update:Update,context:ContextTypes.DEFAULT_TYPE):
-    await update.effective_message.reply_text(_home(),reply_markup=_keyboard(),disable_web_page_preview=True)
+    await update.effective_message.reply_text(_home(),reply_markup=_keyboard(),disable_web_page_preview=True,reply_to_message_id=update.effective_message.message_id)
 
 async def help_callback(update:Update,context:ContextTypes.DEFAULT_TYPE):
     q=update.callback_query;await q.answer()
@@ -124,7 +125,7 @@ async def help_callback(update:Update,context:ContextTypes.DEFAULT_TYPE):
 async def start_command(update:Update,context:ContextTypes.DEFAULT_TYPE):
     text=("╭────────────────────────╮\n│  🌙 MIDNIGHT ORACLE    │\n╰────────────────────────╯\n\n"
           "_it watches. it listens. it remembers._\n\nYour command hall is waiting.\nTap /help to open it.")
-    await update.effective_message.reply_text(text,disable_web_page_preview=True)
+    await update.effective_message.reply_text(text,disable_web_page_preview=True,reply_to_message_id=update.effective_message.message_id)
 
 def register(app):
     app.add_handler(CommandHandler("help",help_command),group=-1)
