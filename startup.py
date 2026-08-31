@@ -91,16 +91,18 @@ async def _verify_command_menu(application):
         for scope in (BotCommandScopeAllPrivateChats(),BotCommandScopeAllGroupChats()):await application.bot.get_my_commands(scope=scope)
     except Exception:log.exception("COMMAND_MENU_VERIFY_FAILED")
 def _install_live_runtime_bridges(application):
-    """The bot entrypoint owns the single live-chat MessageHandler.
-
-    startup is responsible for lifecycle/lease management only. Installing a
-    second text handler here caused the same update to traverse the Oracle
-    router twice and made command/chat behaviour dependent on handler order.
-    """
+    """Startup owns lifecycle; activate the autonomous registry dispatcher once."""
     if application.bot_data.get("_midnight_human_bridge_registered"):
         log.info("LIVE_CHAT_BRIDGE_ALREADY_REGISTERED | owner=bot")
     else:
         log.info("LIVE_CHAT_BRIDGE_DELEGATED | owner=bot_entrypoint")
+    if not application.bot_data.get("_midnight_autonomous_scheduler_registered"):
+        try:
+            from handlers.autonomous_scheduler import register as register_autonomous_scheduler
+            if register_autonomous_scheduler(application):
+                log.info("AUTONOMOUS_SCHEDULER_ACTIVE | delivery=chat_registry")
+        except Exception:
+            log.exception("AUTONOMOUS_SCHEDULER_REGISTRATION_FAILED")
 async def _stop_oracle_scheduler():
     scheduler=(_app.bot_data.get("oracle_scheduler") if _app else None)
     if scheduler is not None:
