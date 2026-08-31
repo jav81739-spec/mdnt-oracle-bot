@@ -33,27 +33,36 @@ def generate_story(seed:str|None=None)->CreativePiece:
 
 def _language_hint(items:list[dict[str,Any]])->str:
     joined=" ".join(str(x.get("text","")) for x in items[-10:]).lower()
-    hindi=sum(1 for token in (" hai "," hain "," yaar "," bhai "," kya "," nahi "," nahi "," tum "," mujhe "," aaj "," kal "," bas "," suno ") if token in f" {joined} ")
+    hindi=sum(1 for token in (" hai "," hain "," yaar "," bhai "," kya "," nahi "," tum "," mujhe "," aaj "," kal "," bas "," suno ") if token in f" {joined} ")
     latin=len(re.findall(r"\b(the|and|is|are|what|why|how|this|that|you|we|I)\b",joined))
     if hindi>latin:return "natural Hinglish; Hindi/English mix, not translation"
     if hindi and latin:return "balanced natural Hinglish/English mix"
     return "natural English"
 
-async def generate_contextual_piece(context_items:list[dict[str,Any]], seed:str|None=None)->CreativePiece:
-    """Generate a fresh room-relevant story/gossip idea without using member memory."""
+def language_hint(items:list[dict[str,Any]])->str:
+    return _language_hint(items)
+
+async def generate_contextual_piece(context_items:list[dict[str,Any]], seed:str|None=None, strategy:str="curiosity")->CreativePiece:
+    """Generate a fresh room-relevant piece while honoring the Presence strategy."""
     clean=[str(x.get("text",""))[:300] for x in context_items[-8:] if str(x.get("text","" )).strip()]
     hint=_language_hint(context_items)
-    fallback=generate_story(seed) if random.SystemRandom().random()<0.55 else generate_gossip(seed)
+    strategy=(strategy or "curiosity").strip().lower()
+    fallback = generate_story(seed) if strategy == "story" else generate_gossip(seed) if strategy == "gossip" else generate_story(seed) if random.SystemRandom().random()<0.5 else generate_gossip(seed)
     if not clean:return fallback
+    if strategy == "story": format_rule="Make it a tiny original fictional story with a beginning, turn, and memorable closing."
+    elif strategy == "gossip": format_rule="Make it playful fictional world-gossip, never about a real group member and never presented as factual news."
+    elif strategy == "playful_observation": format_rule="Make one playful, harmless observation about the room's public conversational atmosphere without naming or profiling members."
+    else: format_rule="Make one curious, conversation-opening idea grounded in the public topic without becoming a generic greeting."
     prompt=("You are Midnight Oracle. Create ONE original, harmless, non-invasive spontaneous idea for a Telegram group. "
             "Use the recent public conversation only as topical atmosphere; never mention, profile, expose, diagnose, or gossip about a member. "
-            f"Language: {hint}. Keep it conversational, premium, concise, and relevant to the room. It can be a tiny fictional story, playful observation, curious question, or harmless world-style gossip. "
-            "Do not claim private knowledge or fabricate real breaking news. Do not use a generic greeting. Return only the message.\nRecent public conversation:\n"+"\n".join(f"- {x}" for x in clean))
+            f"Language: {hint}. Strategy: {strategy}. {format_rule} Keep it conversational, premium, concise, and relevant. "
+            "Do not claim private knowledge or fabricate real breaking news. Return only the message.\nRecent public conversation:\n"+"\n".join(f"- {x}" for x in clean))
     try:
         generated=await service.generate(prompt,timeout=20.0)
         generated=(generated or "").strip()[:2200]
-        if generated:return CreativePiece("contextual",generated,str(seed or time.time_ns()))
-    except (AIUnavailable,TimeoutError,Exception):pass
+        if generated:return CreativePiece(strategy,generated,str(seed or time.time_ns()))
+    except Exception:
+        pass
     return fallback
 
 def extract_safe_memory(text:str)->str|None:
@@ -91,4 +100,4 @@ def local_reply(text:str,history:list[dict[str,Any]]|None=None,memories:list[str
 
 async def generate_or_fallback(prompt:str,fallback_text:str)->str:
     try:return await service.generate(prompt,timeout=20.0)
-    except (AIUnavailable,TimeoutError,Exception):return fallback_text
+    except Exception:return fallback_text
