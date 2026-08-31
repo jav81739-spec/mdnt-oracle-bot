@@ -38,6 +38,9 @@ _PRIVATE_COMMANDS = {
     "groupinfo","setwelcome","setgoodbye","id","info","report",
 }
 
+# Compatibility contract retained for command-surface regression tests and legacy bridges.
+ADMIN_ONLY = frozenset(_PRIVATE_COMMANDS)
+
 def _live(application):
     live={"start","help"}
     for group in getattr(application,"handlers",{}).values():
@@ -90,8 +93,7 @@ def _build_archive(live: set[str]) -> tuple[str, list[MessageEntity]]:
         lines.append(f"┌─ {title} ─────────────────┐");cursor+=len(lines[-1])+1
         for c in alive:
             cmd=f"/{c}";line=f"{cmd}  ·  {HINTS.get(c,'ask the Oracle')}";start=cursor;lines.append(line);spans.append((start,len(cmd)));cursor+=len(line)+1;seen.add(c)
-        lines.append("└──────────────────────────┘");cursor+=len(lines[-1])+1;lines.append("")
-        cursor+=1
+        lines.append("└──────────────────────────┘");cursor+=len(lines[-1])+1;lines.append("");cursor+=1
     extras=sorted(c for c in live-seen if c not in {"start","help"} and c not in _PRIVATE_COMMANDS)
     if extras:
         lines.append("┌─ ✦ MORE MEMBER COMMANDS ─┐");cursor+=len(lines[-1])+1
