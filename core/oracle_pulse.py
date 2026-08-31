@@ -47,6 +47,23 @@ async def pulse_callback(context) -> None:
 
     for group_id in targets:
         try:
+            blocked = await db.cooldown_active("group", str(group_id), "delivery_blocked", now)
+            if blocked:
+                try:
+                    member = await application.bot.get_chat_member(group_id, application.bot.id)
+                    can_send = getattr(member, "can_send_messages", None)
+                    if can_send is False:
+                        _log("ORACLE_PULSE_SKIP | stage=delivery | chat=%s | reason=permission_blocked", group_id)
+                        continue
+                    await db.execute(
+                        "DELETE FROM cooldowns WHERE scope=? AND scope_id=? AND cooldown_type=?",
+                        ("group", str(group_id), "delivery_blocked"),
+                    )
+                    _log("ORACLE_PULSE_RECOVERED | stage=delivery | chat=%s | reason=permission_restored", group_id)
+                except Exception:
+                    _log("ORACLE_PULSE_SKIP | stage=delivery | chat=%s | reason=permission_check_failed", group_id)
+                    continue
+
             active = await db.fetchall(
                 "SELECT user_id FROM members WHERE group_id=? AND last_seen>? LIMIT 12",
                 (group_id, now - ACTIVE_WINDOW),
