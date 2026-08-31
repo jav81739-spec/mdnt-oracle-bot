@@ -6,17 +6,17 @@ import time
 from .oracle_freshness import FreshnessGovernor
 from .oracle_mind import generate_contextual_piece
 from .oracle_presence import decide_presence
+from midnight_oracle.utils.logger import get_logger
 
+log = get_logger("midnight.oracle_pulse")
 CHECK_INTERVAL = 15 * 60
 DELIVERY_COOLDOWN = 3 * 3600
 ACTIVE_WINDOW = 6 * 3600
 
 
-def _log(application, message: str, *args) -> None:
+def _log(message: str, *args) -> None:
     """Emit a compact stage marker without exposing message/member content."""
-    logger = application.bot_data.get("oracle_log")
-    if logger:
-        logger.info(message, *args)
+    log.info(message, *args)
 
 
 async def pulse_callback(context) -> None:
@@ -24,7 +24,7 @@ async def pulse_callback(context) -> None:
     application = context.application
     db = application.bot_data.get("oracle_db")
     if not db:
-        _log(application, "ORACLE_PULSE_STOP | stage=db")
+        _log("ORACLE_PULSE_STOP | stage=db")
         return
 
     freshness = FreshnessGovernor(application)
@@ -37,11 +37,11 @@ async def pulse_callback(context) -> None:
         targets = []
 
     if not targets:
-        _log(application, "ORACLE_PULSE_STOP | stage=registry | targets=0")
+        _log("ORACLE_PULSE_STOP | stage=registry | targets=0")
         return
 
     now = time.time()
-    _log(application, "ORACLE_PULSE_STAGE | stage=registry | targets=%d", len(targets))
+    _log("ORACLE_PULSE_STAGE | stage=registry | targets=%d", len(targets))
 
     for group_id in targets:
         try:
@@ -50,7 +50,7 @@ async def pulse_callback(context) -> None:
                 (group_id, now - ACTIVE_WINDOW),
             )
             items = list(atmosphere.get(str(group_id), []))[-8:]
-            _log(application, "ORACLE_PULSE_STAGE | stage=eligibility | chat=%s | active=%d | context=%d", group_id, len(active), len(items))
+            _log("ORACLE_PULSE_STAGE | stage=eligibility | chat=%s | active=%d | context=%d", group_id, len(active), len(items))
 
             previous = await db.fetchone(
                 "SELECT sent_at FROM scheduled_log WHERE group_id=? AND schedule_type LIKE 'pulse:%' ORDER BY sent_at DESC LIMIT 1",
@@ -65,7 +65,7 @@ async def pulse_callback(context) -> None:
                 last_delivery=last_delivery,
                 cooldown_seconds=DELIVERY_COOLDOWN,
             )
-            _log(application, "ORACLE_PULSE_STAGE | stage=decision | chat=%s | speak=%s | strategy=%s", group_id, decision.speak, decision.strategy)
+            _log("ORACLE_PULSE_STAGE | stage=decision | chat=%s | speak=%s | strategy=%s", group_id, decision.speak, decision.strategy)
             if not decision.speak:
                 continue
 
@@ -87,10 +87,10 @@ async def pulse_callback(context) -> None:
                     accepted = piece
                     break
             if accepted is None:
-                _log(application, "ORACLE_PULSE_STAGE | stage=generation | chat=%s | accepted=false", group_id)
+                _log("ORACLE_PULSE_STAGE | stage=generation | chat=%s | accepted=false", group_id)
                 continue
 
-            _log(application, "ORACLE_PULSE_STAGE | stage=generation | chat=%s | accepted=true | kind=%s", group_id, accepted.kind)
+            _log("ORACLE_PULSE_STAGE | stage=generation | chat=%s | accepted=true | kind=%s", group_id, accepted.kind)
             try:
                 await application.bot.send_message(
                     group_id,
@@ -101,11 +101,11 @@ async def pulse_callback(context) -> None:
                     "INSERT INTO scheduled_log(group_id,schedule_type,sent_at,had_interaction) VALUES(?,?,?,0)",
                     (group_id, f"pulse:{accepted.kind}", now),
                 )
-                _log(application, "ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=true", group_id)
+                _log("ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=true", group_id)
             except Exception:
-                _log(application, "ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=false", group_id)
+                log.exception("ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=false", group_id)
         except Exception:
-            _log(application, "ORACLE_PULSE_STAGE | stage=runtime_error | chat=%s", group_id)
+            log.exception("ORACLE_PULSE_STAGE | stage=runtime_error | chat=%s", group_id)
             continue
 
 
