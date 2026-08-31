@@ -1,7 +1,7 @@
 """Canonical Midnight Oracle entry point: Phase 1–5 runtime + complete V2 ecosystem."""
 from __future__ import annotations
 import asyncio
-from telegram import Update
+from telegram import Update, WebAppInfo, MenuButtonWebApp
 from telegram.ext import Application,CallbackQueryHandler,CommandHandler,MessageHandler,InlineQueryHandler,PollAnswerHandler,PollHandler,ContextTypes,filters
 from .config import BOT_TOKEN,DATABASE_PATH,TIMEZONE
 from .database import Database,now_ts
@@ -10,7 +10,7 @@ from .memory_engine import MemoryEngine
 from .mood_engine import MoodEngine
 from .handlers.message_handler import MessageRouter
 from .handlers.callback_handler import handle_callback
-from .handlers.command_handler import start,oracle,truth,memory,mymemory,forget,quiet,wake,house
+from .handlers.command_handler import start,oracle,truth,memory,mymemory,forget,quiet,wake,house,_house_url
 from .handlers.help_command import help_command,help_callback
 from .handlers.inline_handler import handle_inline
 from .handlers.world_handler import start_game,end_game,game_callback,handle_game_message,handle_poll_answer,handle_poll
@@ -28,6 +28,14 @@ async def _post_init(application:Application)->None:
         from handlers.runtime_registry import _set_commands
         await _set_commands(application);log.info('COMMAND_SURFACE_READY | source=canonical_runtime_registry')
     except Exception:log.exception('COMMAND_SURFACE_PUBLISH_FAILED')
+    try:
+        house_url=_house_url()
+        if house_url:
+            await application.bot.set_chat_menu_button(menu_button=MenuButtonWebApp('☾ Oracle House',web_app=WebAppInfo(url=house_url)))
+            log.info('ORACLE_HOUSE_MENU_READY | webapp=configured')
+        else:
+            log.info('ORACLE_HOUSE_MENU_SKIPPED | webapp_url=not_configured')
+    except Exception:log.exception('ORACLE_HOUSE_MENU_FAILED')
     try:
         from handlers import chat,social_engine
         await chat.load_from_storage()
