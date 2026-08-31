@@ -5,6 +5,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from telegram.ext import Application, CommandHandler
 from . import social_engine
+from core.oracle_instinct import choose_pair
 
 PREFIX="oracle:rel:"; ORACLE_HOUR=0; ORACLE_MINUTE=7
 
@@ -21,8 +22,8 @@ async def _targets(update):
     chat,user=update.effective_chat,update.effective_user
     return (chat,user,await social_engine._members(chat.id)) if chat and user else (None,None,[])
 
-def _resolve(update,context,members):
-    """Resolve explicit targets when supplied; otherwise let Oracle choose two."""
+def _resolve(update,context,members,kind="bond"):
+    """Honor explicit targets; otherwise Oracle Instinct chooses the pair."""
     actor=update.effective_user; msg=update.effective_message
     first=_member_from_token(members,context.args[0]) if context.args else None
     second=_member_from_token(members,context.args[1]) if len(context.args)>1 else None
@@ -34,8 +35,7 @@ def _resolve(update,context,members):
     if not second and len(context.args)==1: second=_member_from_token(members,context.args[0])
     if first and second and first["id"]!=second["id"]: return first,second
     if not context.args and not (msg and msg.reply_to_message) and len(members)>=2:
-        seed=int(hashlib.sha256(f"{datetime.now(timezone.utc).date()}:{getattr(update.effective_chat,'id',0)}:{getattr(update.effective_user,'id',0)}".encode()).hexdigest(),16)
-        return tuple(random.Random(seed).sample(members,2))
+        return choose_pair(context.application,update.effective_chat.id,members,kind) or (None,None)
     return (None,None)
 
 def _ensure(p):
@@ -57,7 +57,7 @@ async def _ritual(kind,update,context):
     if len(members)<2:
         await update.effective_message.reply_text("☾ I need at least two known group members before I can choose the pair.")
         return
-    a,b=_resolve(update,context,members)
+    a,b=_resolve(update,context,members,kind)
     if not a or not b:
         await update.effective_message.reply_text(f"☾ Use /{kind} with no arguments and let the Oracle choose — or reply to a member.")
         return
@@ -69,7 +69,7 @@ async def _ritual(kind,update,context):
 async def watch(update,context): await _watch_change(update,context,True)
 async def unwatch(update,context): await _watch_change(update,context,False)
 async def _watch_change(update,context,enabled):
-    chat,_,members=await _targets(update); a,b=_resolve(update,context,members) if chat else (None,None)
+    chat,_,members=await _targets(update); a,b=_resolve(update,context,members,"bond") if chat else (None,None)
     if not chat:return
     if not a or not b: await update.effective_message.reply_text("☾ Use /gaze with no arguments and let the Oracle choose — or reply to a member.");return
     p=_ensure(_state(context.application).setdefault(_pair_key(chat.id,a["id"],b["id"]),{})); p["watch"]=bool(enabled)
@@ -80,7 +80,7 @@ def _cycle(now):
     local=now.astimezone(social_engine.ORACLE_TZ); boundary=local.replace(hour=ORACLE_HOUR,minute=ORACLE_MINUTE,second=0,microsecond=0); start=boundary-timedelta(days=1) if local<boundary else boundary; return start,start+timedelta(days=1)
 
 async def sealed(update,context):
-    chat,_,members=await _targets(update); a,b=_resolve(update,context,members) if chat else (None,None)
+    chat,_,members=await _targets(update); a,b=_resolve(update,context,members,"bond") if chat else (None,None)
     if not chat:return
     if not a or not b: await update.effective_message.reply_text("☾ Use /veil with no arguments and let the Oracle choose — or reply to a member.");return
     now=datetime.now(timezone.utc); start,end=_cycle(now); key=_pair_key(chat.id,a["id"],b["id"]); lock_key=f"{key}:veil:{start.date().isoformat()}"; stored=await social_engine._get(lock_key)
