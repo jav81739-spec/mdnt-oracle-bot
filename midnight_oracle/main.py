@@ -29,10 +29,11 @@ async def _post_init(application:Application)->None:
         await _set_commands(application);log.info('COMMAND_SURFACE_READY | source=canonical_runtime_registry')
     except Exception:log.exception('COMMAND_SURFACE_PUBLISH_FAILED')
     try:
-        from handlers import social_engine
+        from handlers import chat,social_engine
+        await chat.load_from_storage()
         if not application.bot_data.get('_midnight_social_jobs_registered'):
             social_engine.init_storage(redis_client);social_engine.register_jobs(application);application.bot_data['_midnight_social_jobs_registered']=True
-        log.info('SOCIAL_ENGINE_READY | autonomous_jobs=registered')
+        log.info('SOCIAL_ENGINE_READY | autonomous_jobs=registered | chat_settings=loaded')
     except Exception:log.exception('SOCIAL_ENGINE_START_FAILED')
     scheduler=OracleScheduler(application,db,timezone=TIMEZONE);scheduler.start();application.bot_data['oracle_scheduler']=scheduler
     log.info('AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on')
@@ -55,12 +56,25 @@ async def _track_group_activity(update:Update,context:ContextTypes.DEFAULT_TYPE)
     except Exception:log.exception('GROUP_ACTIVITY_TRACKING_FAILED | chat_id=%s',chat.id)
 
 async def _route_message(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    if update.effective_chat and update.effective_chat.type in {'group','supergroup'}:
+    chat=update.effective_chat
+    if chat and chat.type in {'group','supergroup'}:
         await handle_game_message(update,context)
         db=context.application.bot_data.get('oracle_db')
         if db:
-            row=await db.fetchone("SELECT game_type FROM game_sessions WHERE group_id=? AND is_active=1 LIMIT 1",(update.effective_chat.id,))
+            row=await db.fetchone("SELECT game_type FROM game_sessions WHERE group_id=? AND is_active=1 LIMIT 1",(chat.id,))
             if row and row['game_type']=='word_scramble':return
+        text=(update.effective_message.text or '').strip() if update.effective_message else ''
+        low=text.casefold()
+        username=str(getattr(context.bot,'username','') or '').casefold()
+        replied=getattr(getattr(update.effective_message,'reply_to_message',None),'from_user',None) if update.effective_message else None
+        bot_id=getattr(context.bot,'id',None)
+        direct=bool(replied and bot_id and getattr(replied,'id',None)==bot_id) or bool(username and f'@{username}' in low) or low in {'oracle','midnight'} or any(low==p or low.startswith(p+' ') for p in ('hey oracle','hello oracle','hi oracle','oracle suno','oracle bhai','oracle bro','oracle listen','hey midnight','hello midnight','hi midnight','midnight suno','midnight bhai','midnight bro'))
+        if not direct:
+            try:
+                from handlers.chat import chat_enabled
+                if not chat_enabled.get(str(chat.id),False):return
+            except Exception:
+                return
     router=context.application.bot_data.get('oracle_router')
     if router:await router.handle(update,context)
 
@@ -75,9 +89,10 @@ def build_application()->Application:
         from handlers.legacy_surface import register_legacy_surface
         result=register_legacy_surface(app);log.info('LEGACY_SURFACE_WIRED | added=%d | skipped=%d',len(result.get('added',[])),len(result.get('skipped',[])))
     except Exception:log.exception('LEGACY_SURFACE_WIRING_FAILED')
-    # Add only V2 capabilities without an existing owner.
     from core.v2_unique import register as register_v2_unique
     register_v2_unique(app)
+    from core.v2_autonomous_commands import register as register_v2_autonomous_commands
+    register_v2_autonomous_commands(app)
     from core.error_handling import install_error_handler
     install_error_handler(app)
     from core.sticker_reactions import install as install_sticker_reactions
