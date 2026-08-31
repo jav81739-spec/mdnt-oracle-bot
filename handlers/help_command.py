@@ -13,8 +13,8 @@ SECTIONS = [
     ("🏏 MIDNIGHT CRICKET", ["cricket","call","cpredict","cbet","cwin","ctournament","cpick","cplay","cricketduel"]),
     ("💀 DEATH GAMES", ["deathgame","joingame","startround","survive","revive","deathstatus","roulette","vote","kill","endgame"]),
     ("🪙 ECONOMY", ["daily","balance","gamble","richest","coinboard","cgift","rob","wallet","deposit","withdraw","rank"]),
-    ("🫀 EXPRESSION", ["chat","persona","vent","confess","quote","8ball","vibe","gif"]),
-    ("💍 LIFE & ROOMS", ["marry","accept","divorce","profile","work","chests","shop","buy","inventory","gift","settings","timecapsule","capsules","enter","eventcheck","oraclehour"]),
+    ("🫀 EXPRESSION", ["chat","persona","vent","confess","quote","8ball","vibe","gif","signalcheck"]),
+    ("💍 LIFE & ROOMS", ["marry","accept","divorce","profile","mprofile","achievements","midnightevent","work","chests","shop","buy","inventory","gift","settings","timecapsule","capsules","enter","eventcheck","oraclehour"]),
 ]
 
 HINTS = {
@@ -27,8 +27,8 @@ HINTS = {
     "cricket":"play solo cricket","call":"make a cricket call","cpredict":"predict the ball","cbet":"place a cricket bet","cwin":"claim a cricket win","ctournament":"enter a tournament","cpick":"pick your player","cplay":"play a cricket round","cricketduel":"challenge a batter",
     "deathgame":"open the death game","joingame":"join the lobby","startround":"start the round","survive":"fight to survive","revive":"return to the game","deathstatus":"check a soul","roulette":"take the risk","vote":"cast a vote","kill":"make a kill","endgame":"close the game",
     "daily":"claim your daily","balance":"check your balance","gamble":"risk your coins","richest":"see the richest","coinboard":"see the coin board","cgift":"gift coins","rob":"attempt a heist","wallet":"open your wallet","deposit":"store coins","withdraw":"take coins out","rank":"see your rank",
-    "chat":"talk with Oracle","persona":"choose a tone","vent":"let something out","confess":"make a confession","quote":"receive a quote","8ball":"ask the 8-ball","vibe":"get a vibe","gif":"summon a GIF",
-    "marry":"propose","accept":"accept a proposal","divorce":"end a marriage","profile":"open your life profile","work":"work for coins","chests":"open your chests","shop":"browse the shop","buy":"buy an item","inventory":"see your items","gift":"gift someone","settings":"tune your profile","timecapsule":"seal a memory","capsules":"open your capsules","enter":"enter the room","eventcheck":"check the event","oraclehour":"see Oracle Hour",
+    "chat":"talk with Oracle","persona":"choose a tone","vent":"let something out","confess":"make a confession","quote":"receive a quote","8ball":"ask the 8-ball","vibe":"get a vibe","gif":"summon a GIF","signalcheck":"read a social signal",
+    "marry":"propose","accept":"accept a proposal","divorce":"end a marriage","profile":"open your life profile","mprofile":"your evolving V2 identity","achievements":"see your Midnight marks","midnightevent":"open a rare world event","work":"work for coins","chests":"open your chests","shop":"browse the shop","buy":"buy an item","inventory":"see your items","gift":"gift someone","settings":"tune your profile","timecapsule":"seal a memory","capsules":"open your capsules","enter":"enter the room","eventcheck":"check the event","oraclehour":"see Oracle Hour",
 }
 
 _PRIVATE_COMMANDS = {
