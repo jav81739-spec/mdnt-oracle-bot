@@ -13,7 +13,7 @@ SECTIONS = [
     ("🏏 MIDNIGHT CRICKET", ["cricket","call","cpredict","cbet","cwin","ctournament","cpick","cplay","cricketduel"]),
     ("💀 DEATH GAMES", ["deathgame","joingame","startround","survive","revive","deathstatus","roulette","vote","kill","endgame"]),
     ("🪙 ECONOMY", ["daily","balance","gamble","richest","coinboard","cgift","rob","wallet","deposit","withdraw","rank"]),
-    ("🫀 EXPRESSION", ["chat","persona","vent","confess","quote","8ball","vibe","gif","signalcheck"]),
+    ("🫀 EXPRESSION", ["chat","persona","vent","confess","quote","8ball","vibe","gif","image","signalcheck"]),
     ("💍 LIFE & ROOMS", ["marry","accept","divorce","profile","mprofile","achievements","midnightevent","work","chests","shop","buy","inventory","gift","settings","timecapsule","capsules","enter","eventcheck","oraclehour"]),
 ]
 
@@ -27,7 +27,7 @@ HINTS = {
     "cricket":"play solo cricket","call":"make a cricket call","cpredict":"predict the ball","cbet":"place a cricket bet","cwin":"claim a cricket win","ctournament":"enter a tournament","cpick":"pick your player","cplay":"play a cricket round","cricketduel":"challenge a batter",
     "deathgame":"open the death game","joingame":"join the lobby","startround":"start the round","survive":"fight to survive","revive":"return to the game","deathstatus":"check a soul","roulette":"take the risk","vote":"cast a vote","kill":"make a kill","endgame":"close the game",
     "daily":"claim your daily","balance":"check your balance","gamble":"risk your coins","richest":"see the richest","coinboard":"see the coin board","cgift":"gift coins","rob":"attempt a heist","wallet":"open your wallet","deposit":"store coins","withdraw":"take coins out","rank":"see your rank",
-    "chat":"talk with Oracle","persona":"choose a tone","vent":"let something out","confess":"make a confession","quote":"receive a quote","8ball":"ask the 8-ball","vibe":"get a vibe","gif":"summon a GIF","signalcheck":"read a social signal",
+    "chat":"talk with Oracle","persona":"choose a tone","vent":"let something out","confess":"make a confession","quote":"receive a quote","8ball":"ask the 8-ball","vibe":"get a vibe","gif":"summon a GIF","image":"find a clean image","signalcheck":"read a social signal",
     "marry":"propose","accept":"accept a proposal","divorce":"end a marriage","profile":"open your life profile","mprofile":"your evolving V2 identity","achievements":"see your Midnight marks","midnightevent":"open a rare world event","work":"work for coins","chests":"open your chests","shop":"browse the shop","buy":"buy an item","inventory":"see your items","gift":"gift someone","settings":"tune your profile","timecapsule":"seal a memory","capsules":"open your capsules","enter":"enter the room","eventcheck":"check the event","oraclehour":"see Oracle Hour",
 }
 
@@ -37,8 +37,6 @@ _PRIVATE_COMMANDS = {
     "kick","warn","clearwarns","pin","unpin","purge","setrules","lock","unlock",
     "groupinfo","setwelcome","setgoodbye","id","info","report",
 }
-
-# Member Help contract: private/admin controls are never advertised.
 ADMIN_ONLY = frozenset(_PRIVATE_COMMANDS - {"kick"})
 
 def _live(application):
@@ -47,8 +45,7 @@ def _live(application):
         for h in group:
             for command in getattr(h,"commands",()) or ():
                 name=str(command).lower().lstrip("/")
-                if name and len(name)<=32 and name not in _PRIVATE_COMMANDS:
-                    live.add(name)
+                if name and len(name)<=32 and name not in _PRIVATE_COMMANDS:live.add(name)
     return live
 
 _live_member_commands = _live
@@ -66,28 +63,22 @@ def _keyboard():
     rows.append([InlineKeyboardButton("✦ START",callback_data="help:start"),InlineKeyboardButton("↻ HALL",callback_data="help:home")])
     return InlineKeyboardMarkup(rows)
 
-def _utf16_len(value: str) -> int:
-    return len(value.encode("utf-16-le")) // 2
+def _utf16_len(value: str) -> int:return len(value.encode("utf-16-le")) // 2
 
 def _section(index,live):
-    title,commands=SECTIONS[index]
-    alive=[c for c in commands if c in live]
-    lines=[f"╭─ {title} ─────────────────╮","│  _commands & their little omens_ │","╰────────────────────────────╯",""]
-    spans=[];cursor=sum(len(x)+1 for x in lines)
+    title,commands=SECTIONS[index];alive=[c for c in commands if c in live]
+    lines=[f"╭─ {title} ─────────────────╮","│  _commands & their little omens_ │","╰────────────────────────────╯",""];spans=[];cursor=sum(len(x)+1 for x in lines)
     for c in alive:
-        cmd=f"/{c}";hint=HINTS.get(c,"ask the Oracle");line=f"{cmd}  ·  {hint}"
-        spans.append((cursor,len(cmd)));lines.append(line);cursor+=len(line)+1
-    lines += ["","☾ Tap a blue command to summon it."]
-    text="\n".join(lines)
+        cmd=f"/{c}";hint=HINTS.get(c,"ask the Oracle");line=f"{cmd}  ·  {hint}";spans.append((cursor,len(cmd)));lines.append(line);cursor+=len(line)+1
+    lines += ["","☾ Tap a blue command to summon it."];text="\n".join(lines)
     entities=[MessageEntity(type=MessageEntity.BOT_COMMAND,offset=_utf16_len(text[:s]),length=_utf16_len(text[s:s+l])) for s,l in spans]
     return text,entities
 
-def _build_archive(live: set[str]) -> tuple[str, list[MessageEntity]]:
-    lines=["╭────────────────────────╮","│      ☾ MIDNIGHT ORACLE │","│    the member command hall│","╰────────────────────────╯","","_Every door below carries a small omen, so you know what it does before you summon it._",""]
-    spans=[];cursor=sum(len(x)+1 for x in lines);seen=set()
+def _build_archive(live: set[str]) -> tuple[str,list[MessageEntity]]:
+    lines=["╭────────────────────────╮","│      ☾ MIDNIGHT ORACLE │","│    the member command hall│","╰────────────────────────╯","","_Every door below carries a small omen, so you know what it does before you summon it._",""];spans=[];cursor=sum(len(x)+1 for x in lines);seen=set()
     for title,commands in SECTIONS:
         alive=[c for c in commands if c in live and c not in _PRIVATE_COMMANDS]
-        if not alive: continue
+        if not alive:continue
         lines.append(f"┌─ {title} ─────────────────┐");cursor+=len(lines[-1])+1
         for c in alive:
             cmd=f"/{c}";line=f"{cmd}  ·  {HINTS.get(c,'ask the Oracle')}";start=cursor;lines.append(line);spans.append((start,len(cmd)));cursor+=len(line)+1;seen.add(c)
@@ -99,11 +90,10 @@ def _build_archive(live: set[str]) -> tuple[str, list[MessageEntity]]:
             cmd=f"/{c}";line=f"{cmd}  ·  {HINTS.get(c,'ask the Oracle')}";start=cursor;lines.append(line);spans.append((start,len(cmd)));cursor+=len(line)+1
         lines.append("└──────────────────────────┘");cursor+=len(lines[-1])+1;lines.append("");cursor+=1
     lines += ["✦ /help  —  reopen this hall","✦ /start —  meet Midnight Oracle","","_Admin controls remain private. The Oracle keeps a few things better discovered than announced._","","☾ Choose a blue command and tap it — Telegram will send it for you."]
-    text="\n".join(lines)
-    entities=[MessageEntity(type=MessageEntity.BOT_COMMAND,offset=_utf16_len(text[:s]),length=_utf16_len(text[s:s+l])) for s,l in spans]
+    text="\n".join(lines);entities=[MessageEntity(type=MessageEntity.BOT_COMMAND,offset=_utf16_len(text[:s]),length=_utf16_len(text[s:s+l])) for s,l in spans]
     for command in ("/help","/start"):
         start=text.rfind(command)
-        if start>=0: entities.append(MessageEntity(type=MessageEntity.BOT_COMMAND,offset=_utf16_len(text[:start]),length=_utf16_len(command)))
+        if start>=0:entities.append(MessageEntity(type=MessageEntity.BOT_COMMAND,offset=_utf16_len(text[:start]),length=_utf16_len(command)))
     return text,entities
 
 async def help_command(update:Update,context:ContextTypes.DEFAULT_TYPE):
@@ -111,15 +101,13 @@ async def help_command(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
 async def help_callback(update:Update,context:ContextTypes.DEFAULT_TYPE):
     q=update.callback_query;await q.answer()
-    if q.data=="help:home":
-        await q.edit_message_text(_home(),reply_markup=_keyboard(),disable_web_page_preview=True);return
+    if q.data=="help:home":await q.edit_message_text(_home(),reply_markup=_keyboard(),disable_web_page_preview=True);return
     if q.data=="help:start":
         await q.edit_message_text("╭────────────────────────╮\n│      ☾ MIDNIGHT ORACLE │\n╰────────────────────────╯\n\n_The Oracle is awake._\n\nType /help to return to the command hall.",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("☾ COMMAND HALL",callback_data="help:home")]]));return
     try:index=int(q.data.rsplit(":",1)[1])
     except (ValueError,IndexError):return
     if not 0<=index<len(SECTIONS):return
-    text,entities=_section(index,_live(context.application))
-    await q.edit_message_text(text,entities=entities,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← COMMAND HALL",callback_data="help:home")]]),disable_web_page_preview=True)
+    text,entities=_section(index,_live(context.application));await q.edit_message_text(text,entities=entities,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← COMMAND HALL",callback_data="help:home")]]),disable_web_page_preview=True)
 
 async def start_command(update:Update,context:ContextTypes.DEFAULT_TYPE):
     text=("╭────────────────────────╮\n│  🌙 MIDNIGHT ORACLE    │\n╰────────────────────────╯\n\n"
