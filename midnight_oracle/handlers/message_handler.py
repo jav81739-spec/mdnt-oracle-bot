@@ -31,11 +31,13 @@ class MessageRouter:
         except Exception as exc: await soft_alert(None,'achievement_announce',exc)
 
     async def _hidden_surprise(self,message,chat_id,user_id,text):
-        try:
-            if abs(hash(f'{chat_id}:{user_id}:{text[:96]}'))%37!=11:return
-            choices=('🌙 _tiny midnight signal: Oracle noticed that one._','✦ _filed quietly in the midnight archives._','🖤 _some moments deserve a little extra notice._')
-            await message.reply_text(choices[abs(hash(text))%len(choices)])
-        except Exception as exc: await soft_alert(None,'hidden_surprise',exc)
+        """Disabled as an inline second reply; surprises belong to the autonomous scheduler.
+
+        Sending a surprise immediately after a normal chat response made one user
+        message produce two Oracle bubbles, which broke the reply UX and made the
+        bot look like two independent assistants were responding.
+        """
+        return
 
     async def _stream_private_reply(self, context, chat_id, draft_id, group_name, ctx, text, signal, recent_context):
         stream = TelegramDraftStream(context.bot, chat_id, draft_id)
@@ -73,27 +75,27 @@ class MessageRouter:
                     reply=await self._stream_private_reply(context,group_id,draft_id,group_name,ctx,text,signal,recent_context)
                 except Exception:
                     reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet,recent_context)
-                await message.reply_text(reply); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(f'{ctx.sender_name}: {text}'); recent.append(f'Oracle: {reply}'); await save_recent(storage_client,str(group_id),recent); await self._hidden_surprise(message,group_id,user.id,text); return
+                await message.reply_text(reply); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(f'{ctx.sender_name}: {text}'); recent.append(f'Oracle: {reply}'); await save_recent(storage_client,str(group_id),recent); return
             if self.jokes:
                 await self.jokes.observe(text,user.id,group_id); callback=await self.jokes.detect_callback_opportunity(text,group_id)
                 if callback and not direct and not await db.cooldown_active('group',str(group_id),'ambient'):
-                    await message.reply_text(callback); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(f'{ctx.sender_name}: {text}'); recent.append(f'Oracle: {callback}'); await save_recent(storage_client,str(group_id),recent); await self._hidden_surprise(message,group_id,user.id,text); return
+                    await message.reply_text(callback); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(f'{ctx.sender_name}: {text}'); recent.append(f'Oracle: {callback}'); await save_recent(storage_client,str(group_id),recent); return
             if self.identity: await self.identity.update(group_id,text,signal)
             if direct:
                 try: await context.bot.send_chat_action(chat_id=group_id,action='typing')
                 except Exception: pass
-                reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet,recent_context); await message.reply_text(reply); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(f'{ctx.sender_name}: {text}'); recent.append(f'Oracle: {reply}'); await save_recent(storage_client,str(group_id),recent); await self._announce_achievements(message,user,group_id,'oracle_reply'); await self._hidden_surprise(message,group_id,user.id,text); return
+                reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet,recent_context); await message.reply_text(reply); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(f'{ctx.sender_name}: {text}'); recent.append(f'Oracle: {reply}'); await save_recent(storage_client,str(group_id),recent); await self._announce_achievements(message,user,group_id,'oracle_reply'); return
             if self.stickers:
                 media=await self.stickers.evaluate(message,signal,ctx)
                 if media.should_send:
                     if media.sticker_id: await message.reply_sticker(media.sticker_id)
                     elif media.reaction_emoji: await context.bot.set_message_reaction(group_id,message.message_id,reaction=[ReactionTypeEmoji(media.reaction_emoji)])
-                    await self.stickers.record(group_id,'contextual',media.sticker_id); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(f'{ctx.sender_name}: {text}'); await save_recent(storage_client,str(group_id),recent); await self._hidden_surprise(message,group_id,user.id,text); return
+                    await self.stickers.record(group_id,'contextual',media.sticker_id); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(f'{ctx.sender_name}: {text}'); await save_recent(storage_client,str(group_id),recent); return
             decision=await self.engine.process_message(message,ctx); await self.memory.observe(user.id,group_id,ctx.sender_name,text,decision.should_reply or signal.social>=0.5); recent.append(f'{ctx.sender_name}: {text}')
             if decision.should_reply:
                 try: await context.bot.send_chat_action(chat_id=group_id,action='typing')
                 except Exception: pass
-                reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet,recent_context); await message.reply_text(reply); recent.append(f'Oracle: {reply}'); await self._announce_achievements(message,user,group_id,'oracle_reply'); await self._hidden_surprise(message,group_id,user.id,text)
+                reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet,recent_context); await message.reply_text(reply); recent.append(f'Oracle: {reply}'); await self._announce_achievements(message,user,group_id,'oracle_reply')
             await save_recent(storage_client,str(group_id),recent)
         except Exception as exc:
             application=getattr(context,'application',None); storage_client=getattr(application,'bot_data',{}).get('storage_client') if application else None; await soft_alert(storage_client,'message_router',exc)
