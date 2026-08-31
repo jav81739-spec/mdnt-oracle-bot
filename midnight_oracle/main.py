@@ -68,7 +68,10 @@ def build_application()->Application:
     if not BOT_TOKEN:raise RuntimeError('BOT_TOKEN is required')
     app=Application.builder().token(BOT_TOKEN).post_init(_post_init).post_shutdown(_post_shutdown).build()
     commands={'start':start,'help':help_command,'oracle':oracle,'truth':truth,'memory':memory,'mymemory':mymemory,'forget':forget,'quiet':quiet,'wake':wake,'house':house,'tod':start_game,'wyr':start_game,'nhie':start_game,'scramble':start_game,'predict':predict,'predictions':predictions,'endgame':end_game,'mysterybox':mysterybox,'nightgift':nightgift,'muse':muse,'glitch':glitch}
-    for name,cb in commands.items():app.add_handler(CommandHandler(name,cb))
+    for name,cb in commands.items():
+        # Keep the member command surface ahead of auxiliary handlers.
+        group=-1 if name in {'help','start'} else 0
+        app.add_handler(CommandHandler(name,cb),group=group)
     try:
         from handlers.legacy_surface import register_legacy_surface
         result=register_legacy_surface(app);log.info('LEGACY_SURFACE_WIRED | added=%d | skipped=%d',len(result.get('added',[])),len(result.get('skipped',[])))
