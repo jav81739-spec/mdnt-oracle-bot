@@ -34,6 +34,16 @@ _GOSSIP_BITS=(
     ("Scientists can measure astonishing things and still lose their keys.","Balance, apparently, is important."),
 )
 
+_GOSSIP_FORMS=(
+    "rumour",
+    "oddity",
+    "midnight_thought",
+    "found_thread",
+    "tiny_confession",
+    "curious_turn",
+    "unfinished_clue",
+)
+
 _STORY_OPENERS=(
     "At 02:17, a city discovered that one of its clocks was always four minutes ahead.",
     "The letter arrived without a stamp, a sender, or any explanation.",
@@ -65,16 +75,48 @@ def _seed(*parts:Any)->int:return int(hashlib.sha256("|".join(str(p) for p in pa
 def _footer()->str:return "🌙 *— Midnight Oracle*"
 
 def generate_gossip(seed:str|None=None)->CreativePiece:
-    """Create playful world-gossip, never gossip about a real person."""
-    actual_seed=str(seed or time.time_ns());rng=random.Random(_seed(actual_seed,"gossip-v2"))
-    lead,tail=rng.choice(_GOSSIP_BITS);theme=rng.choice(_WORLD_THEMES)
-    bridges=(
-        f"Tonight's rabbit hole: *{theme}*. {tail}",
-        f"Somewhere in the *{theme}* rabbit hole, this starts making suspicious sense. {tail}",
-        f"It somehow connects to *{theme}*. Don't ask for the paperwork. There isn't any. 🌙",
-        f"And yes, this somehow leads back to *{theme}*. Midnight has questions.",
+    """Create varied, social-feeling world gossip without targeting real people."""
+    actual_seed=str(seed or time.time_ns());rng=random.Random(_seed(actual_seed,"gossip-v3"))
+    form=rng.choice(_GOSSIP_FORMS)
+    theme=rng.choice(_WORLD_THEMES)
+    lead,tail=rng.choice(_GOSSIP_BITS)
+    if form=="rumour":
+        body=f"{lead}\n\n{tail}"
+    elif form=="oddity":
+        body=rng.choice((
+            f"Here's a strange little thing: {tail} It somehow circles back to *{theme}*.",
+            f"The odd part about *{theme}* is that the best stories are usually hiding in the boring details. {tail}",
+        ))
+    elif form=="midnight_thought":
+        body=rng.choice((
+            f"Random midnight thought: *{theme}* has a habit of making ordinary things feel suspiciously interesting.",
+            f"I keep thinking about *{theme}*. Not because it makes sense. Mostly because it doesn't quite stop being interesting.",
+        ))
+    elif form=="found_thread":
+        body=rng.choice((
+            f"I wandered into a strange little corner of *{theme}* and found this: {tail}",
+            f"There is a thread connecting *{theme}* to a surprisingly ordinary question: why do some stories refuse to disappear?",
+        ))
+    elif form=="tiny_confession":
+        body=rng.choice((
+            f"Tiny Oracle confession: I have a weakness for *{theme}* when one small detail refuses to behave normally.",
+            f"Confession: give me one unexplained detail in *{theme}* and I will immediately start inventing three harmless theories.",
+        ))
+    elif form=="curious_turn":
+        body=f"The funny thing about *{theme}* is that it starts ordinary and then takes one very strange turn. {tail}"
+    else:
+        body=rng.choice((
+            f"There is a clue hiding somewhere in the story of *{theme}*. Nobody seems to agree what it means yet.",
+            f"One small detail about *{theme}* keeps getting overlooked. Maybe that's why it is the interesting part.",
+        ))
+    endings=(
+        "Anyway. I thought the room deserved that little mystery. 🌙",
+        "File that under: things worth thinking about after midnight.",
+        "No conclusion yet. Which, honestly, makes it better.",
+        "The Oracle has theories. The Oracle is keeping the best one to itself. 👀",
+        "That is probably enough mystery for one message. Probably.",
     )
-    text=f"☾ *MIDNIGHT GOSSIP*\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n\n{lead}\n\n{rng.choice(bridges)}\n\n_{rng.choice(('Anyway. That is all the Oracle is willing to reveal tonight.','File that under: things that become more interesting after midnight.','The room may now overthink this responsibly.'))}_\n\n{_footer()}"
+    text=f"☾ *MIDNIGHT GOSSIP*\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n\n{body}\n\n_{rng.choice(endings)}_\n\n{_footer()}"
     return CreativePiece("gossip",text,actual_seed)
 
 def generate_story(seed:str|None=None)->CreativePiece:
@@ -100,7 +142,7 @@ async def generate_contextual_piece(context_items:list[dict[str,Any]], seed:str|
     fallback=generate_story(actual_seed) if strategy=="story" else generate_gossip(actual_seed) if strategy=="gossip" else (generate_story(actual_seed) if random.SystemRandom().random()<0.5 else generate_gossip(actual_seed))
     if not clean:return fallback
     if strategy=="story": rule="Create a tiny original fictional story with a strong opening, a turn and a memorable closing."
-    elif strategy=="gossip": rule="Create playful fictional gossip about an idea, mystery, culture, object, place or strange fact. Never about a group member. Never present invented claims as real news. Do not add a safety disclaimer unless needed."
+    elif strategy=="gossip": rule="Create playful fictional gossip about an idea, mystery, culture, object, place or strange fact. Never about a group member. Never present invented claims as real news. Do not add a safety disclaimer unless needed. Avoid topic labels, 'rabbit hole' headings, fixed openings, fixed closings, and repeated meta-gossip phrases. Choose a natural social shape: a rumour, oddity, curious observation, tiny confession, found thread, unfinished clue, or spontaneous thought."
     elif strategy=="playful_observation": rule="Make one playful, harmless observation about the public conversational atmosphere, without naming, profiling or targeting members."
     else: rule="Make one genuinely interesting conversation-opening thought tied to the public topic; avoid generic greetings and avoid pretending to know private facts."
     prompt=("You are Midnight Oracle, a mysterious but warm social presence. Create ONE original message for a Telegram group. "
@@ -108,7 +150,7 @@ async def generate_contextual_piece(context_items:list[dict[str,Any]], seed:str|
             f"Language: {hint}. Strategy: {strategy}. {rule} "
             "The result must feel spontaneous, specific and human, not like a template, topic label, trivia heading, disclaimer, or AI explanation. "
             "For gossip, gossip about the world of ideas rather than people. For storytelling, tell a real-feeling piece of original fiction. "
-            "Do not fabricate breaking news or attribute invented claims to real people. Return only the message.\nRecent public conversation:\n"
+            "Do not fabricate breaking news or attribute invented claims to real people. Do not explain your generation process. Return only the message.\nRecent public conversation:\n"
             +"\n".join(f"- {x}" for x in clean))
     try:
         generated=(await service.generate(prompt,timeout=20.0) or "").strip()[:2200]
