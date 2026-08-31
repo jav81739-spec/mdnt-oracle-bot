@@ -11,25 +11,77 @@ class CreativePiece:
     text: str
     seed: str
 
-_WORLD_THEMES=("lost cities and archaeological puzzles","deep ocean mysteries","strange weather and atmospheric phenomena","old maps and places that changed names","night trains and cities that never quite sleep","folklore that travelled between cultures","odd inventions that arrived before their time","astronomy, eclipses and the scale of the universe","cognitive biases and the tricks attention plays","libraries, forgotten manuscripts and marginalia","unexpected scientific discoveries","music scenes that changed a city's identity","beautifully useless inventions","ancient games and how people entertained themselves","the psychology of rumours and why stories spread")
-_GOSSIP_FRAGMENTS=("Apparently the moon has been keeping receipts.","There is a rumour that Tuesday has been pretending to be Friday.","Someone, somewhere, is absolutely overthinking a three-word message.","The oldest argument in the universe is apparently still unresolved.","A librarian somewhere has definitely judged a book by its cover.","The night shift has its own unofficial mythology.","Scientists can measure astonishing things and still lose their keys.","A perfectly ordinary street probably has a story nobody has written down yet.","Somewhere a cat has become the unofficial manager of a household.","The universe continues to refuse to explain its group chat.")
-_STORY_OPENERS=("At 02:17, a city discovered that one of its clocks was always four minutes ahead.","The letter arrived without a stamp, a sender, or any explanation.","Every night the same train stopped at a platform that did not exist on the map.","A small library kept one locked shelf that nobody remembered installing.","The astronomer noticed one star that seemed to blink in punctuation marks.","On the first morning of winter, every umbrella in town turned inside out at once.")
-_STORY_TURNS=("Nobody agreed on what it meant, so they did what humans usually do: they invented a story.","The obvious explanation was wrong. The second obvious explanation was worse.","By sunrise, the rumour had become three rumours and one very convincing lie.","The clue was tiny enough to miss and strange enough to remember.","Someone finally asked the one question everyone else had been avoiding.","The truth turned out to be less dramatic, but somehow more beautiful.")
-_STORY_ENDINGS=("And that is how a completely ordinary night became a story people kept retelling.","No one solved the mystery. They simply got better at living with it.","The clock was repaired. The story was not.","Years later, nobody remembered the explanation. Everyone remembered the night.","The last person to leave switched off the light and left the mystery where it belonged.")
+_WORLD_THEMES=(
+    "lost cities and archaeological puzzles","deep ocean mysteries","strange weather and atmospheric phenomena",
+    "old maps and places that changed names","night trains and cities that never quite sleep",
+    "folklore that travelled between cultures","odd inventions that arrived before their time",
+    "astronomy, eclipses and the scale of the universe","cognitive biases and the tricks attention plays",
+    "libraries, forgotten manuscripts and marginalia","unexpected scientific discoveries",
+    "music scenes that changed a city's identity","beautifully useless inventions",
+    "ancient games and how people entertained themselves","the psychology of rumours and why stories spread",
+)
+
+_GOSSIP_BITS=(
+    ("Apparently, the moon has been keeping receipts.","Nobody has explained why the oldest maps always seem to leave one interesting corner blank."),
+    ("Tiny piece of midnight gossip: Tuesday has been acting suspiciously like Friday lately.","The calendar refuses to comment."),
+    ("There is a very convincing rumour that some abandoned places become more interesting after everyone stops looking for them.","Honestly, that feels unfair to the abandoned places."),
+    ("Someone once decided that a perfectly ordinary object needed a much stranger purpose.","The original idea failed. The story survived."),
+    ("The night shift has its own unofficial mythology.","Half the stories are probably exaggerated. The other half are better because nobody checked."),
+    ("A forgotten manuscript can spend centuries being ignored and then one sentence changes everything.","That is a dangerous amount of power for a sentence."),
+    ("Somewhere between fact and folklore, a story becomes too good to leave alone.","Midnight has always had a weakness for that border."),
+    ("There are mysteries that survive not because they are impossible, but because the ordinary explanation is disappointingly boring.","Oracle votes for the interesting footnote."),
+    ("A city can change its name, its borders and its skyline and still accidentally keep the same old ghost story.","Cities are terrible at throwing things away."),
+    ("Scientists can measure astonishing things and still lose their keys.","Balance, apparently, is important."),
+)
+
+_STORY_OPENERS=(
+    "At 02:17, a city discovered that one of its clocks was always four minutes ahead.",
+    "The letter arrived without a stamp, a sender, or any explanation.",
+    "Every night the same train stopped at a platform that did not exist on the map.",
+    "A small library kept one locked shelf that nobody remembered installing.",
+    "The astronomer noticed one star that seemed to blink in punctuation marks.",
+    "On the first morning of winter, every umbrella in town turned inside out at once.",
+)
+_STORY_TURNS=(
+    "Nobody agreed on what it meant, so they did what humans usually do: they invented a story.",
+    "The obvious explanation was wrong. The second obvious explanation was worse.",
+    "By sunrise, the rumour had become three rumours and one very convincing lie.",
+    "The clue was tiny enough to miss and strange enough to remember.",
+    "Someone finally asked the one question everyone else had been avoiding.",
+    "The truth turned out to be less dramatic, but somehow more beautiful.",
+)
+_STORY_ENDINGS=(
+    "And that is how a completely ordinary night became a story people kept retelling.",
+    "No one solved the mystery. They simply got better at living with it.",
+    "The clock was repaired. The story was not.",
+    "Years later, nobody remembered the explanation. Everyone remembered the night.",
+    "The last person to leave switched off the light and left the mystery where it belonged.",
+)
 _MEMORY_SAFE_PATTERNS=(re.compile(r"\bmy favorite (?:movie|film|song|book|game|food|color|colour) is\s+(.+)",re.I),re.compile(r"\bi (?:really )?(?:like|love|prefer)\s+(.+)",re.I),re.compile(r"\bi(?:'m| am) a fan of\s+(.+)",re.I),re.compile(r"\bcall me\s+([\w .'-]{1,80})",re.I))
 _SENSITIVE_MARKERS=re.compile(r"\b(password|otp|pin|cvv|bank|account number|card number|medical|diagnos|medicine|political party|religion|sexual|address|passport|aadhaar|ssn)\b",re.I)
 
 def _seed(*parts:Any)->int:return int(hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest(),16)
 
+def _footer()->str:return "🌙 *— Midnight Oracle*"
+
 def generate_gossip(seed:str|None=None)->CreativePiece:
-    rng=random.Random(_seed(seed or time.time_ns(),"gossip"));theme=rng.choice(_WORLD_THEMES);fragment=rng.choice(_GOSSIP_FRAGMENTS)
-    text=f"☾ *MIDNIGHT GOSSIP*\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n\n{fragment}\n\nTonight's suspicious subject: *{theme}*.\n\n_No group member is involved. This is an Oracle-made rumour for the room, not a claim about a real person._\n\n🌙 *— Midnight Oracle*"
-    return CreativePiece("gossip",text,str(seed or time.time_ns()))
+    """Create playful world-gossip, never gossip about a real person."""
+    actual_seed=str(seed or time.time_ns());rng=random.Random(_seed(actual_seed,"gossip-v2"))
+    lead,tail=rng.choice(_GOSSIP_BITS);theme=rng.choice(_WORLD_THEMES)
+    bridges=(
+        f"Tonight's rabbit hole: *{theme}*. {tail}",
+        f"Somewhere in the *{theme}* rabbit hole, this starts making suspicious sense. {tail}",
+        f"It somehow connects to *{theme}*. Don't ask for the paperwork. There isn't any. 🌙",
+        f"And yes, this somehow leads back to *{theme}*. Midnight has questions.",
+    )
+    text=f"☾ *MIDNIGHT GOSSIP*\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n\n{lead}\n\n{rng.choice(bridges)}\n\n_{rng.choice(('Anyway. That is all the Oracle is willing to reveal tonight.','File that under: things that become more interesting after midnight.','The room may now overthink this responsibly.'))}_\n\n{_footer()}"
+    return CreativePiece("gossip",text,actual_seed)
 
 def generate_story(seed:str|None=None)->CreativePiece:
-    rng=random.Random(_seed(seed or time.time_ns(),"story"));opener,turn,ending=rng.choice(_STORY_OPENERS),rng.choice(_STORY_TURNS),rng.choice(_STORY_ENDINGS);theme=rng.choice(_WORLD_THEMES)
-    text=f"☾ *MIDNIGHT STORY*\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n\n_{opener}_\n\nThe night had the texture of *{theme}*.\n\n{turn}\n\n_{ending}_\n\n✦ _Original Oracle fiction — not a report of a real event._\n\n🌙 *— Midnight Oracle*"
-    return CreativePiece("story",text,str(seed or time.time_ns()))
+    actual_seed=str(seed or time.time_ns());rng=random.Random(_seed(actual_seed,"story-v2"))
+    opener,turn,ending=rng.choice(_STORY_OPENERS),rng.choice(_STORY_TURNS),rng.choice(_STORY_ENDINGS);theme=rng.choice(_WORLD_THEMES)
+    text=f"☾ *MIDNIGHT STORY*\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n\n_{opener}_\n\nThe night had the strange atmosphere of *{theme}*.\n\n{turn}\n\n_{ending}_\n\n{_footer()}"
+    return CreativePiece("story",text,actual_seed)
 
 def _language_hint(items:list[dict[str,Any]])->str:
     joined=" ".join(str(x.get("text","")) for x in items[-10:]).lower()
@@ -39,30 +91,29 @@ def _language_hint(items:list[dict[str,Any]])->str:
     if hindi and latin:return "balanced natural Hinglish/English mix"
     return "natural English"
 
-def language_hint(items:list[dict[str,Any]])->str:
-    return _language_hint(items)
+def language_hint(items:list[dict[str,Any]])->str:return _language_hint(items)
 
 async def generate_contextual_piece(context_items:list[dict[str,Any]], seed:str|None=None, strategy:str="curiosity")->CreativePiece:
-    """Generate a fresh room-relevant piece while honoring the Presence strategy."""
-    clean=[str(x.get("text",""))[:300] for x in context_items[-8:] if str(x.get("text","" )).strip()]
-    hint=_language_hint(context_items)
-    strategy=(strategy or "curiosity").strip().lower()
-    fallback = generate_story(seed) if strategy == "story" else generate_gossip(seed) if strategy == "gossip" else generate_story(seed) if random.SystemRandom().random()<0.5 else generate_gossip(seed)
+    """Generate one relevant Oracle presence while keeping member content non-invasive."""
+    clean=[str(x.get("text",""))[:300] for x in context_items[-8:] if str(x.get("text","")).strip()]
+    hint=_language_hint(context_items);strategy=(strategy or "curiosity").strip().lower();actual_seed=str(seed or time.time_ns())
+    fallback=generate_story(actual_seed) if strategy=="story" else generate_gossip(actual_seed) if strategy=="gossip" else (generate_story(actual_seed) if random.SystemRandom().random()<0.5 else generate_gossip(actual_seed))
     if not clean:return fallback
-    if strategy == "story": format_rule="Make it a tiny original fictional story with a beginning, turn, and memorable closing."
-    elif strategy == "gossip": format_rule="Make it playful fictional world-gossip, never about a real group member and never presented as factual news."
-    elif strategy == "playful_observation": format_rule="Make one playful, harmless observation about the room's public conversational atmosphere without naming or profiling members."
-    else: format_rule="Make one curious, conversation-opening idea grounded in the public topic without becoming a generic greeting."
-    prompt=("You are Midnight Oracle. Create ONE original, harmless, non-invasive spontaneous idea for a Telegram group. "
-            "Use the recent public conversation only as topical atmosphere; never mention, profile, expose, diagnose, or gossip about a member. "
-            f"Language: {hint}. Strategy: {strategy}. {format_rule} Keep it conversational, premium, concise, and relevant. "
-            "Do not claim private knowledge or fabricate real breaking news. Return only the message.\nRecent public conversation:\n"+"\n".join(f"- {x}" for x in clean))
+    if strategy=="story": rule="Create a tiny original fictional story with a strong opening, a turn and a memorable closing."
+    elif strategy=="gossip": rule="Create playful fictional gossip about an idea, mystery, culture, object, place or strange fact. Never about a group member. Never present invented claims as real news. Do not add a safety disclaimer unless needed."
+    elif strategy=="playful_observation": rule="Make one playful, harmless observation about the public conversational atmosphere, without naming, profiling or targeting members."
+    else: rule="Make one genuinely interesting conversation-opening thought tied to the public topic; avoid generic greetings and avoid pretending to know private facts."
+    prompt=("You are Midnight Oracle, a mysterious but warm social presence. Create ONE original message for a Telegram group. "
+            "Use recent public conversation only as topical atmosphere. Never expose, profile, diagnose, target, or invent personal facts about members. "
+            f"Language: {hint}. Strategy: {strategy}. {rule} "
+            "The result must feel spontaneous, specific and human, not like a template, topic label, trivia heading, disclaimer, or AI explanation. "
+            "For gossip, gossip about the world of ideas rather than people. For storytelling, tell a real-feeling piece of original fiction. "
+            "Do not fabricate breaking news or attribute invented claims to real people. Return only the message.\nRecent public conversation:\n"
+            +"\n".join(f"- {x}" for x in clean))
     try:
-        generated=await service.generate(prompt,timeout=20.0)
-        generated=(generated or "").strip()[:2200]
-        if generated:return CreativePiece(strategy,generated,str(seed or time.time_ns()))
-    except Exception:
-        pass
+        generated=(await service.generate(prompt,timeout=20.0) or "").strip()[:2200]
+        if generated:return CreativePiece(strategy,generated,actual_seed)
+    except Exception:pass
     return fallback
 
 def extract_safe_memory(text:str)->str|None:
