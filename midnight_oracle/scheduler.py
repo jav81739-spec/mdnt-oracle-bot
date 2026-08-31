@@ -19,10 +19,14 @@ class OracleScheduler:
     """Run scheduled friendship events and recover durable timed workflows."""
     def __init__(self,application:Application,db:Database,timezone:ZoneInfo=TIMEZONE)->None:
         """Create the scheduler.""";self.application=application;self.db=db;self.timezone=timezone;self.scheduler=AsyncIOScheduler(timezone=timezone)
+    async def _pulse(self)->None:
+        """Bridge the Telegram job context expected by Oracle Pulse into APScheduler."""
+        context=type('PulseContext',(),{'application':self.application})()
+        await pulse_callback(context)
     def start(self)->None:
         """Register autonomous jobs exactly once, including recovery and Oracle Presence."""
         if self.scheduler.running:return
-        self.scheduler.add_job(self.morning,'cron',hour=MORNING_HOUR,minute=MORNING_MINUTE,id='oracle_morning',replace_existing=True);self.scheduler.add_job(self.evening,'cron',hour=EVENING_HOUR,minute=EVENING_MINUTE,id='oracle_evening',replace_existing=True);self.scheduler.add_job(self.three_am,'cron',hour=3,minute=0,id='oracle_3am',replace_existing=True);self.scheduler.add_job(self.absence_daily,'cron',hour=14,minute=0,id='oracle_absence',replace_existing=True);self.scheduler.add_job(self.secret_daily,'cron',hour=15,minute=0,id='oracle_secret',replace_existing=True);self.scheduler.add_job(self.recover_timed,'date',run_date=datetime.now(self.timezone)+timedelta(seconds=2),id='oracle_recovery',replace_existing=True);self.scheduler.add_job(pulse_callback,'interval',minutes=15,id='oracle_pulse',replace_existing=True,max_instances=1,coalesce=True);self.scheduler.start()
+        self.scheduler.add_job(self.morning,'cron',hour=MORNING_HOUR,minute=MORNING_MINUTE,id='oracle_morning',replace_existing=True);self.scheduler.add_job(self.evening,'cron',hour=EVENING_HOUR,minute=EVENING_MINUTE,id='oracle_evening',replace_existing=True);self.scheduler.add_job(self.three_am,'cron',hour=3,minute=0,id='oracle_3am',replace_existing=True);self.scheduler.add_job(self.absence_daily,'cron',hour=14,minute=0,id='oracle_absence',replace_existing=True);self.scheduler.add_job(self.secret_daily,'cron',hour=15,minute=0,id='oracle_secret',replace_existing=True);self.scheduler.add_job(self.recover_timed,'date',run_date=datetime.now(self.timezone)+timedelta(seconds=2),id='oracle_recovery',replace_existing=True);self.scheduler.add_job(self._pulse,'interval',minutes=15,id='oracle_pulse',replace_existing=True,max_instances=1,coalesce=True);self.scheduler.start()
     async def recover_timed(self)->None:
         """Recover expired WYR polls, reschedule live WYR polls, reset interrupted scrambles, and reveal overdue secret events."""
         await SecretEventEngine(self.db).recover_unrevealed(self.application.bot)
