@@ -6,29 +6,24 @@ backend implementation.
 """
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 from typing import Any
 
 from core.storage import storage
 
-# Legacy handlers expect a redis-like object named ``redis_client``.  The
-# durable Storage facade intentionally exposes the same async primitives used
-# by those handlers, so this alias preserves the old import without restoring
-# a second persistence backend.
 redis_client = storage
 
 
 def is_configured() -> bool:
-    """Return whether persistent storage is configured."""
     return storage.configured
 
 
 async def save(key: str, value: Any, ttl: int | None = None) -> bool:
-    """Persist a value through the canonical storage facade."""
     return await storage.set(key, value, ttl=ttl)
 
 
 async def load(key: str, default: Any = None) -> Any:
-    """Load a value and decode legacy JSON strings when possible."""
     value = await storage.get(key, default)
     if isinstance(value, str):
         import json
@@ -37,3 +32,27 @@ async def load(key: str, default: Any = None) -> Any:
         except (TypeError, ValueError):
             return value
     return value
+
+
+_locks: dict[str, asyncio.Lock] = {}
+_locks_guard = asyncio.Lock()
+
+
+@asynccontextmanager
+async def lock(key: str):
+    """Process-local compatibility lock used by legacy command handlers.
+
+    Persistent values still use the canonical Storage backend; this only
+    serializes concurrent handlers inside this bot process and never creates
+    another persistence backend.
+    """
+    async with _locks_guard:
+        mutex = _locks.setdefault(str(key), asyncio.Lock())
+    acquired = False
+    try:
+        await mutex.acquire()
+        acquired = True
+        yield acquired
+    finally:
+        if acquired:
+            mutex.release()
