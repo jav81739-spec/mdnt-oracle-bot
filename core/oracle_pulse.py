@@ -12,86 +12,103 @@ DELIVERY_COOLDOWN = 3 * 3600
 ACTIVE_WINDOW = 6 * 3600
 
 
+def _log(application, message: str, *args) -> None:
+    """Emit a compact stage marker without exposing message/member content."""
+    logger = application.bot_data.get("oracle_log")
+    if logger:
+        logger.info(message, *args)
+
+
 async def pulse_callback(context) -> None:
+    """Run the complete Presence pipeline for every registered group."""
     application = context.application
     db = application.bot_data.get("oracle_db")
     if not db:
+        _log(application, "ORACLE_PULSE_STOP | stage=db")
         return
 
     freshness = FreshnessGovernor(application)
     atmosphere = application.bot_data.get("oracle_atmosphere", {})
-    rows = await db.fetchall("SELECT group_id FROM group_profile")
+    try:
+        from startup import get_chat_registry
+        registry = await get_chat_registry()
+        targets = [int(cid) for cid, info in registry.items() if info.get("type") in ("group", "supergroup")]
+    except Exception:
+        targets = []
+
+    if not targets:
+        _log(application, "ORACLE_PULSE_STOP | stage=registry | targets=0")
+        return
+
     now = time.time()
+    _log(application, "ORACLE_PULSE_STAGE | stage=registry | targets=%d", len(targets))
 
-    for row in rows:
-        group_id = int(row[0])
-        active = await db.fetchall(
-            "SELECT user_id FROM members WHERE group_id=? AND last_seen>? LIMIT 12",
-            (group_id, now - ACTIVE_WINDOW),
-        )
-        items = list(atmosphere.get(str(group_id), []))[-8:]
-        previous = await db.fetchone(
-            "SELECT sent_at FROM scheduled_log WHERE group_id=? AND schedule_type LIKE 'pulse:%' ORDER BY sent_at DESC LIMIT 1",
-            (group_id,),
-        )
-        last_delivery = float(previous[0]) if previous else None
-        decision = decide_presence(
-            group_id=group_id,
-            now=now,
-            active_count=len(active),
-            context_items=items,
-            last_delivery=last_delivery,
-            cooldown_seconds=DELIVERY_COOLDOWN,
-        )
-        if not decision.speak:
-            continue
-
-        accepted = None
-        for attempt in range(6):
-            piece = await generate_contextual_piece(
-                items,
-                seed=f"{group_id}:{int(now // CHECK_INTERVAL)}:{decision.strategy}:{attempt}",
-            )
-            if freshness.accept(
-                group_id,
-                piece.kind,
-                piece.text,
-                theme=decision.reason,
-                media="none",
-                pair="none",
-                strategy=decision.strategy,
-            ):
-                accepted = piece
-                break
-        if accepted is None:
-            continue
-
+    for group_id in targets:
         try:
-            # Generated text is untrusted Markdown. Plain text prevents an otherwise
-            # successful Oracle decision from becoming a Telegram parse failure.
-            await application.bot.send_message(
-                group_id,
-                accepted.text,
-                disable_web_page_preview=True,
+            active = await db.fetchall(
+                "SELECT user_id FROM members WHERE group_id=? AND last_seen>? LIMIT 12",
+                (group_id, now - ACTIVE_WINDOW),
             )
-            await db.execute(
-                "INSERT INTO scheduled_log(group_id,schedule_type,sent_at,had_interaction) VALUES(?,?,?,0)",
-                (group_id, f"pulse:{accepted.kind}", now),
+            items = list(atmosphere.get(str(group_id), []))[-8:]
+            _log(application, "ORACLE_PULSE_STAGE | stage=eligibility | chat=%s | active=%d | context=%d", group_id, len(active), len(items))
+
+            previous = await db.fetchone(
+                "SELECT sent_at FROM scheduled_log WHERE group_id=? AND schedule_type LIKE 'pulse:%' ORDER BY sent_at DESC LIMIT 1",
+                (group_id,),
             )
+            last_delivery = float(previous[0]) if previous else None
+            decision = decide_presence(
+                group_id=group_id,
+                now=now,
+                active_count=len(active),
+                context_items=items,
+                last_delivery=last_delivery,
+                cooldown_seconds=DELIVERY_COOLDOWN,
+            )
+            _log(application, "ORACLE_PULSE_STAGE | stage=decision | chat=%s | speak=%s | strategy=%s", group_id, decision.speak, decision.strategy)
+            if not decision.speak:
+                continue
+
+            accepted = None
+            for attempt in range(6):
+                piece = await generate_contextual_piece(
+                    items,
+                    seed=f"{group_id}:{int(now // CHECK_INTERVAL)}:{decision.strategy}:{attempt}",
+                )
+                if freshness.accept(
+                    group_id,
+                    piece.kind,
+                    piece.text,
+                    theme=decision.reason,
+                    media="none",
+                    pair="none",
+                    strategy=decision.strategy,
+                ):
+                    accepted = piece
+                    break
+            if accepted is None:
+                _log(application, "ORACLE_PULSE_STAGE | stage=generation | chat=%s | accepted=false", group_id)
+                continue
+
+            _log(application, "ORACLE_PULSE_STAGE | stage=generation | chat=%s | accepted=true | kind=%s", group_id, accepted.kind)
+            try:
+                await application.bot.send_message(
+                    group_id,
+                    accepted.text,
+                    disable_web_page_preview=True,
+                )
+                await db.execute(
+                    "INSERT INTO scheduled_log(group_id,schedule_type,sent_at,had_interaction) VALUES(?,?,?,0)",
+                    (group_id, f"pulse:{accepted.kind}", now),
+                )
+                _log(application, "ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=true", group_id)
+            except Exception:
+                _log(application, "ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=false", group_id)
         except Exception:
+            _log(application, "ORACLE_PULSE_STAGE | stage=runtime_error | chat=%s", group_id)
             continue
 
 
 def install(application) -> None:
-    """Install one lightweight opportunity checker; Pulse decides delivery itself."""
-    if application.bot_data.get("_oracle_pulse_installed"):
-        return
-    if application.job_queue is None:
-        raise RuntimeError("ORACLE_PULSE_REQUIRES_JOB_QUEUE")
-    application.job_queue.run_repeating(
-        pulse_callback,
-        interval=CHECK_INTERVAL,
-        first=60,
-        name="oracle_pulse",
-    )
+    """Compatibility hook; the canonical scheduler owns Pulse registration."""
     application.bot_data["_oracle_pulse_installed"] = True
