@@ -25,13 +25,13 @@ async def _persist():
 async def toggle_chat(update,context):
     cid=str(update.effective_chat.id)
     async with storage.lock(f"chat-settings:{cid}") as acquired:
-        if not acquired: return await update.message.reply_text("⏳ Just a second — I'm sorting the room out.")
+        if not acquired: return await update.message.reply_text("⏳ Just a second — I'm sorting the room out.",reply_to_message_id=update.message.message_id)
         saved=await storage.load(STORAGE_KEY,{"enabled":{},"persona":{}}); enabled=dict(saved.get("enabled",{})); personas=dict(saved.get("persona",{})); enabled[cid]=not bool(enabled.get(cid)); chat_enabled.update(enabled); chat_persona.update(personas); await storage.save(STORAGE_KEY,{"enabled":enabled,"persona":personas})
-    await update.message.reply_text("Chat mode is now ON ✅" if enabled[cid] else "Chat mode is now OFF ❌")
+    await update.message.reply_text("Chat mode is now ON ✅" if enabled[cid] else "Chat mode is now OFF ❌",reply_to_message_id=update.message.message_id)
 
 async def set_persona(update,context):
     cid=str(update.effective_chat.id); style=(" ".join(context.args).strip() if context.args else DEFAULT_PERSONA)[:300]
-    chat_persona[cid]=style; await _persist(); await update.message.reply_text("Persona updated. 🌙")
+    chat_persona[cid]=style; await _persist(); await update.message.reply_text("Persona updated. 🌙",reply_to_message_id=update.message.message_id)
 
 async def auto_reply(update,context):
     cid=str(update.effective_chat.id)
@@ -44,51 +44,42 @@ async def auto_reply(update,context):
     _last_reply_time[cid]=now
     persona=chat_persona.get(cid,DEFAULT_PERSONA); history=chat_history.setdefault(cid,[]); history.append({"role":"user","text":msg.text[:1000]}); del history[:-MAX_HISTORY]
     try:
-        async with _ai_slots:
-            reply_text=await core_generate_reply(msg.text,persona,history)
+        async with _ai_slots: reply_text=await core_generate_reply(msg.text,persona,history)
     except AIUnavailable:
-        reply_text=_local_chat(msg.text,history)
-        log.info("CHAT_PROVIDER_COOLDOWN | chat=%s | local_engine=true",cid)
+        reply_text=_local_chat(msg.text,history); log.info("CHAT_PROVIDER_COOLDOWN | chat=%s | local_engine=true",cid)
     except Exception:
-        reply_text=_local_chat(msg.text,history)
-        log.exception("CHAT_PROVIDER_INTERNAL_ERROR | chat=%s",cid)
+        reply_text=_local_chat(msg.text,history); log.exception("CHAT_PROVIDER_INTERNAL_ERROR | chat=%s",cid)
     if not reply_text: reply_text=_local_chat(msg.text,history)
     history.append({"role":"assistant","text":reply_text[:2000]}); del history[:-MAX_HISTORY]
     try: await msg.reply_text(reply_text)
     except Exception: log.exception("CHAT_SEND_FAILED | chat=%s",cid)
 
-
 def _local_chat(text,history):
-    t=(text or "").strip()
-    if not t: return "I'm here. 🌙"
-    last=[x.get("text","") for x in history[-4:] if x.get("role")=="user"]
-    if "?" in t: return "Haan, let's unpack that. 🌙"
-    if any(x in t.lower() for x in ("sad","upset","rough","bad day","not okay","😭","🥲")): return "Haan… bol. Main sun raha hoon. 🖤"
-    if any(x in t.lower() for x in ("lol","haha","😂","🤣")): return "😂 Okay, that one actually got me."
-    if last and last[-1] != t: return "I'm with you. Keep going. 🌙"
-    return "Hmm. Tell me more."
+    t=(text or "").strip(); low=t.casefold()
+    if not t:return "I'm here. 🌙"
+    if "?" in t:return "Haan, let's unpack that. 🌙"
+    if any(x in low for x in ("sad","upset","rough","bad day","not okay","😭","🥲")):return "Haan… bol. Main sun raha hoon. 🖤"
+    if any(x in low for x in ("lol","haha","😂","🤣")):return "😂 Okay, that one actually got me."
+    return _random.choice(("Hmm. Tell me more.","I'm here. Bol.","Yeah… I'm listening. 🌙"))
 
-async def generate_reply(user_text,persona,history):
-    return await core_generate_reply(user_text,persona,history)
+async def generate_reply(user_text,persona,history):return await core_generate_reply(user_text,persona,history)
 
 def ai_service_configured():
     from core.ai import service
     return bool(service.api_key)
 
-SAMPLE_STICKERS=[
-    "CAACAgUAAxkBAAEGBzJqdp9ai3sYNonxPitgXwW1HsGYLQACigEAAqMYnj7IByAbmW8_0z0E",
-]
+SAMPLE_STICKERS=["CAACAgUAAxkBAAEGBzJqdp9ai3sYNonxPitgXwW1HsGYLQACigEAAqMYnj7IByAbmW8_0z0E"]
 _recent_stickers={}; GIF_SEARCH_TERMS=["funny reaction","excited","lol","confused","celebration","facepalm"]; REACTION_EMOJIS=["👍","🔥","🎉","👀","😁"]
 
 def _pick_sticker(cid):
     recent=_recent_stickers.get(cid,[]); available=[s for s in SAMPLE_STICKERS if s not in recent] or SAMPLE_STICKERS; choice=_random.choice(available); recent.append(choice); _recent_stickers[cid]=recent[-4:]; return choice
 
 async def get_sticker_id(update,context):
-    if not update.message.reply_to_message or not update.message.reply_to_message.sticker: return await update.message.reply_text("Reply to a sticker with /getstickerid")
-    await update.message.reply_text(f"Sticker file_id:\n`{update.message.reply_to_message.sticker.file_id}`")
+    if not update.message.reply_to_message or not update.message.reply_to_message.sticker:return await update.message.reply_text("Reply to a sticker with /getstickerid",reply_to_message_id=update.message.message_id)
+    await update.message.reply_text(f"Sticker file_id:\n`{update.message.reply_to_message.sticker.file_id}`",reply_to_message_id=update.message.message_id)
 
 async def send_random_sticker(update,context):
-    if SAMPLE_STICKERS: await context.bot.send_sticker(update.effective_chat.id,_pick_sticker(str(update.effective_chat.id)))
+    if SAMPLE_STICKERS: await context.bot.send_sticker(update.effective_chat.id,_pick_sticker(str(update.effective_chat.id)),reply_to_message_id=update.message.message_id if update.message else None)
 
 async def get_gif_url(term):
     key=os.getenv("GIPHY_API_KEY")
@@ -101,35 +92,49 @@ async def get_gif_url(term):
 
 async def send_random_gif(update,context):
     url=await get_gif_url(" ".join(context.args) if context.args else _random.choice(GIF_SEARCH_TERMS))
-    if url: await context.bot.send_animation(update.effective_chat.id,url)
+    if url: await context.bot.send_animation(update.effective_chat.id,url,reply_to_message_id=update.message.message_id if update.message else None)
+
+async def get_image_url(term):
+    """Find a safe, public image through Wikimedia Commons without another API key."""
+    query=(term or "midnight oracle").strip()[:120]
+    try:
+        async with httpx.AsyncClient(timeout=12,headers={"User-Agent":"MidnightOracle/1.0"}) as client:
+            r=await client.get("https://commons.wikimedia.org/w/api.php",params={"action":"query","format":"json","generator":"search","gsrsearch":query,"gsrnamespace":6,"gsrlimit":12,"prop":"imageinfo","iiprop":"url|mime","iiurlwidth":1200})
+            r.raise_for_status(); pages=r.json().get("query",{}).get("pages",{})
+        candidates=[]
+        for page in pages.values():
+            info=(page.get("imageinfo") or [{}])[0]; mime=str(info.get("mime", ""))
+            url=info.get("thumburl") or info.get("url")
+            if url and mime.startswith("image/") and mime not in {"image/svg+xml","image/gif"}:candidates.append(url)
+        return _random.choice(candidates) if candidates else None
+    except Exception:
+        log.exception("IMAGE_LOOKUP_FAILED")
+        return None
+
+async def image_command(update,context):
+    term=" ".join(context.args).strip()
+    if not term:
+        return await update.effective_message.reply_text("🖼️ Usage: /image <what you want to see>",reply_to_message_id=update.effective_message.message_id)
+    url=await get_image_url(term)
+    if not url:
+        return await update.effective_message.reply_text("☾ I couldn't find a clean image for that.",reply_to_message_id=update.effective_message.message_id)
+    try:
+        await context.bot.send_photo(update.effective_chat.id,url,reply_to_message_id=update.effective_message.message_id)
+    except Exception:
+        log.exception("IMAGE_SEND_FAILED")
+        await update.effective_message.reply_text("☾ The image couldn't be delivered this time.",reply_to_message_id=update.effective_message.message_id)
 
 async def maybe_react_to_message(update,context):
     if not update.message or not chat_enabled.get(str(update.effective_chat.id),False) or _random.random()>0.08:return
     try: await context.bot.set_message_reaction(chat_id=update.effective_chat.id,message_id=update.message.message_id,reaction=_random.choice(REACTION_EMOJIS))
     except Exception: pass
 
-
-# Compatibility surface retained for the established legacy runtime.
 async def send_text_with_gif(update, context, text: str, term: str | None = None):
-    """Send text and, when available, a matching GIF without requiring a provider."""
-    if update.message:
-        await update.message.reply_text(text)
+    if update.message: await update.message.reply_text(text,reply_to_message_id=update.message.message_id)
     if term:
-        url = await get_gif_url(term)
-        if url:
-            await context.bot.send_animation(update.effective_chat.id, url)
+        url=await get_gif_url(term)
+        if url: await context.bot.send_animation(update.effective_chat.id,url,reply_to_message_id=update.message.message_id if update.message else None)
 
-
-async def send_mood_gif(update, context):
-    """Compatibility wrapper for the existing random-GIF command surface."""
-    return await send_random_gif(update, context)
-
-
-async def gif_reply(update, context):
-    """Compatibility wrapper for legacy GIF replies."""
-    return await send_random_gif(update, context)
-
-
-async def sticker_reply(update, context):
-    """Compatibility wrapper for legacy sticker replies."""
-    return await send_random_sticker(update, context)
+async def send_mood_gif(update,context): return await send_random_gif(update,context)
+async def gif_reply(update,context): return await send_random_gif(update,context)
+async def sticker_reply(update,context): return await send_random_sticker(update,context)
