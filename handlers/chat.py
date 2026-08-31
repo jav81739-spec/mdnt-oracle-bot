@@ -44,7 +44,11 @@ async def auto_reply(update,context):
     now=time.monotonic()
     if now-_last_reply_time.get(cid,0)<COOLDOWN_SECONDS:return
     _last_reply_time[cid]=now
-    persona=chat_persona.get(cid,DEFAULT_PERSONA); history=chat_history.setdefault(cid,[]); history.append({"role":"user","text":text[:1000]}); del history[:-MAX_HISTORY]
+    persona=chat_persona.get(cid,DEFAULT_PERSONA); history=chat_history.setdefault(cid,[])
+    user=msg.from_user
+    speaker=" ".join(part for part in (getattr(user,"first_name",None),getattr(user,"last_name",None)) if part).strip() if user else "Member"
+    speaker=speaker[:120] or "Member"
+    history.append({"role":"user","speaker":speaker,"text":text[:1000]}); del history[:-MAX_HISTORY]
     try:
         async with _ai_slots: reply_text=await core_generate_reply(text,persona,history)
     except AIUnavailable:
@@ -52,7 +56,7 @@ async def auto_reply(update,context):
     except Exception:
         reply_text=_local_chat(text,history); log.exception("CHAT_PROVIDER_INTERNAL_ERROR | chat=%s",cid)
     if not reply_text: reply_text=_local_chat(text,history)
-    history.append({"role":"assistant","text":reply_text[:2000]}); del history[:-MAX_HISTORY]
+    history.append({"role":"assistant","speaker":"Midnight Oracle","text":reply_text[:2000]}); del history[:-MAX_HISTORY]
     try: await msg.reply_text(reply_text,reply_to_message_id=msg.message_id)
     except Exception: log.exception("CHAT_SEND_FAILED | chat=%s",cid)
 
