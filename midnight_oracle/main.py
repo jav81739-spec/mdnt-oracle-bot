@@ -75,6 +75,11 @@ def build_application()->Application:
         from handlers.legacy_surface import register_legacy_surface
         result=register_legacy_surface(app);log.info('LEGACY_SURFACE_WIRED | added=%d | skipped=%d',len(result.get('added',[])),len(result.get('skipped',[])))
     except Exception:log.exception('LEGACY_SURFACE_WIRING_FAILED')
+    # Add only the V2 capabilities that have no owner in final-integration.
+    # The module performs its own command-owner check, so existing commands
+    # remain authoritative and cannot be registered a second time.
+    from core.v2_extras import register as register_v2_extras
+    register_v2_extras(app)
     app.add_handler(MessageHandler(filters.ALL,_track_group_activity),group=-1000)
     app.add_handler(PollAnswerHandler(handle_poll_answer));app.add_handler(PollHandler(handle_poll));app.add_handler(CallbackQueryHandler(game_callback,pattern=r'^game:'));app.add_handler(CallbackQueryHandler(help_callback,pattern=r'^help:'));app.add_handler(CallbackQueryHandler(handle_callback));app.add_handler(InlineQueryHandler(handle_inline));app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA,handle_webapp_data));app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_route_message));return app
 
