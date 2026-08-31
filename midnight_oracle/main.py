@@ -29,10 +29,11 @@ async def _post_init(application:Application)->None:
         await _set_commands(application);log.info('COMMAND_SURFACE_READY | source=canonical_runtime_registry')
     except Exception:log.exception('COMMAND_SURFACE_PUBLISH_FAILED')
     try:
-        from handlers import social_engine
+        from handlers import chat,social_engine
+        await chat.load_from_storage()
         if not application.bot_data.get('_midnight_social_jobs_registered'):
             social_engine.init_storage(redis_client);social_engine.register_jobs(application);application.bot_data['_midnight_social_jobs_registered']=True
-        log.info('SOCIAL_ENGINE_READY | autonomous_jobs=registered')
+        log.info('SOCIAL_ENGINE_READY | autonomous_jobs=registered | chat_settings=loaded')
     except Exception:log.exception('SOCIAL_ENGINE_START_FAILED')
     scheduler=OracleScheduler(application,db,timezone=TIMEZONE);scheduler.start();application.bot_data['oracle_scheduler']=scheduler
     log.info('AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on')
@@ -75,7 +76,6 @@ def build_application()->Application:
         from handlers.legacy_surface import register_legacy_surface
         result=register_legacy_surface(app);log.info('LEGACY_SURFACE_WIRED | added=%d | skipped=%d',len(result.get('added',[])),len(result.get('skipped',[])))
     except Exception:log.exception('LEGACY_SURFACE_WIRING_FAILED')
-    # Add only V2 capabilities without an existing owner.
     from core.v2_unique import register as register_v2_unique
     register_v2_unique(app)
     from core.error_handling import install_error_handler
