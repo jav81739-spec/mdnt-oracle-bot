@@ -72,16 +72,13 @@ async def _route_message(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
         try:
             from core.storage import storage
             trigger=await storage.load(f'v2:autonomous:trigger:{chat.id}',None)
-            if isinstance(trigger,str) and trigger and (low==trigger or low.startswith(trigger+' ')):
-                direct=True
-        except Exception:
-            pass
+            if isinstance(trigger,str) and trigger and (low==trigger or low.startswith(trigger+' ')):direct=True
+        except Exception:pass
         if not direct:
             try:
                 from handlers.chat import chat_enabled
                 if not chat_enabled.get(str(chat.id),False):return
-            except Exception:
-                return
+            except Exception:return
     router=context.application.bot_data.get('oracle_router')
     if router:await router.handle(update,context)
 
