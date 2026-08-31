@@ -30,13 +30,20 @@ HINTS = {
     "marry":"propose","accept":"accept a proposal","divorce":"end a marriage","profile":"open your life profile","work":"work for coins","chests":"open your chests","shop":"browse the shop","buy":"buy an item","inventory":"see your items","gift":"gift someone","settings":"tune your profile","timecapsule":"seal a memory","capsules":"open your capsules","enter":"enter the room","eventcheck":"check the event","oraclehour":"see Oracle Hour",
 }
 
+_PRIVATE_COMMANDS = {
+    "broadcast","announce","midnightmap","ownerstatus","ownerstats","setcommands",
+    "reload","shutdown","restart","admin","moderation","mute","unmute","ban",
+    "kick","warn","clearwarns","pin","unpin","purge","setrules","lock","unlock",
+    "groupinfo","setwelcome","setgoodbye","id","info","report",
+}
+
 def _live(application):
     live={"start","help"}
     for group in getattr(application,"handlers",{}).values():
         for h in group:
             for command in getattr(h,"commands",()) or ():
                 name=str(command).lower().lstrip("/")
-                if name and len(name)<=32: live.add(name)
+                if name and len(name)<=32 and name not in _PRIVATE_COMMANDS: live.add(name)
     return live
 
 def _home():
@@ -52,6 +59,9 @@ def _keyboard():
     rows.append([InlineKeyboardButton("✦ START",callback_data="help:start"),InlineKeyboardButton("↻ HALL",callback_data="help:home")])
     return InlineKeyboardMarkup(rows)
 
+def _utf16_len(value: str) -> int:
+    return len(value.encode("utf-16-le")) // 2
+
 def _section(index,live):
     title,commands=SECTIONS[index]
     alive=[c for c in commands if c in live]
@@ -62,7 +72,48 @@ def _section(index,live):
         spans.append((cursor,len(cmd)));lines.append(line);cursor+=len(line)+1
     lines += ["","☾ Tap a blue command to summon it."]
     text="\n".join(lines)
-    entities=[MessageEntity(type=MessageEntity.BOT_COMMAND,offset=len(text[:s].encode("utf-16-le"))//2,length=len(text[s:s+l].encode("utf-16-le"))//2) for s,l in spans]
+    entities=[MessageEntity(type=MessageEntity.BOT_COMMAND,offset=_utf16_len(text[:s]),length=_utf16_len(text[s:s+l])) for s,l in spans]
+    return text,entities
+
+def _build_archive(live: set[str]) -> tuple[str, list[MessageEntity]]:
+    """Backward-compatible archive builder used by older runtime wiring.
+
+    It intentionally returns the same (text, entities) contract as the V2
+    archive.  The interactive Help UI uses section callbacks, but older
+    modules may still import this private helper during startup.
+    """
+    lines=[
+        "╭────────────────────────╮",
+        "│      ☾ MIDNIGHT ORACLE │",
+        "│    the member command hall│",
+        "╰────────────────────────╯",
+        "",
+        "_Every door below carries a small omen, so you know what it does before you summon it._",
+        "",
+    ]
+    spans=[]
+    cursor=sum(len(x)+1 for x in lines)
+    seen=set()
+    for title,commands in SECTIONS:
+        alive=[c for c in commands if c in live and c not in _PRIVATE_COMMANDS]
+        if not alive: continue
+        lines.append(f"┌─ {title} ─────────────────┐");cursor+=len(lines[-1])+1
+        for c in alive:
+            cmd=f"/{c}";line=f"{cmd}  ·  {HINTS.get(c,'ask the Oracle')}"
+            start=cursor;lines.append(line);spans.append((start,len(cmd)));cursor+=len(line)+1;seen.add(c)
+        lines.append("└──────────────────────────┘");cursor+=len(lines[-1])+1;lines.append("");cursor+=1
+    extras=sorted(c for c in live-seen if c not in {"start","help"} and c not in _PRIVATE_COMMANDS)
+    if extras:
+        lines.append("┌─ ✦ MORE MEMBER COMMANDS ─┐");cursor+=len(lines[-1])+1
+        for c in extras:
+            cmd=f"/{c}";line=f"{cmd}  ·  {HINTS.get(c,'ask the Oracle')}";start=cursor;lines.append(line);spans.append((start,len(cmd)));cursor+=len(line)+1
+        lines.append("└──────────────────────────┘");cursor+=len(lines[-1])+1;lines.append("");cursor+=1
+    lines += ["✦ /help  —  reopen this hall","✦ /start —  meet Midnight Oracle","","_Admin controls remain private. The Oracle keeps a few things better discovered than announced._","","☾ Choose a blue command and tap it — Telegram will send it for you."]
+    text="\n".join(lines)
+    entities=[MessageEntity(type=MessageEntity.BOT_COMMAND,offset=_utf16_len(text[s:s] and text[:s]),length=_utf16_len(text[s:s+l])) for s,l in spans]
+    for command in ("/help","/start"):
+        start=text.rfind(command)
+        if start>=0: entities.append(MessageEntity(type=MessageEntity.BOT_COMMAND,offset=_utf16_len(text[:start]),length=_utf16_len(command)))
     return text,entities
 
 async def help_command(update:Update,context:ContextTypes.DEFAULT_TYPE):
