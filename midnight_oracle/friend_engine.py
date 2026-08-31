@@ -23,32 +23,39 @@ class FriendEngine:
     _TIRED=("thak gaya","thak gya","thak gayi","tired","exhausted","neend aa rahi","bahut kaam","bohot kaam","bahut mehnat","burnt out","drained")
     _FRUSTRATED=("kya bakwas","irritating","fed up","nahi ho raha","nhi ho raha","frustrated","annoying","dimag kharab","pak gaya","pak gayi")
     _LONELY=("akela","akeli","bore ho raha","bore ho rahi","lonely","alone","koi nahi","nobody","no one")
+    _LOW_MOOD=("sad","udaas","low feel","feeling low","feel low","down feel","feeling down","empty feel","feel empty","miss kar raha","miss kar rahi","miss someone")
     _VICTORY=("ho gaya","finally","khatam","cleared","got it","done","finished","we did it","yess","yes")
     _VULNERABLE=("nervous","scared","darr","pata nahi","worried","tension","anxious","hurt")
     _HUMOUR=("haha","hahaha","lol","lmao","😂","🤣","💀","chai","coffee")
     def __init__(self,db:Database,mood_engine:MoodEngine|None=None,reply_generator:ReplyGenerator|None=None,seed:int|None=None)->None:
-        """Initialize the decision engine with persistent cooldowns and generators.""";self.db=db;self.cooldowns=CooldownManager(db);self.mood=mood_engine or MoodEngine();self.replies=reply_generator or ReplyGenerator();self.rng=random.Random(seed);self._last_sender={};self._hourly={}
+        self.db=db;self.cooldowns=CooldownManager(db);self.mood=mood_engine or MoodEngine();self.replies=reply_generator or ReplyGenerator();self.rng=random.Random(seed);self._last_sender={};self._hourly={}
     async def process_message(self,message:Message,context:GroupContext)->EngineDecision:
-        """Evaluate one non-command group message and never propagate an internal failure."""
         try:
             text=(message.text or message.caption or '').strip()
             if not text:return EngineDecision(False,None,'no_text')
             if context.group_id=='0':return EngineDecision(False,None,'not_a_group')
-            uid=message.from_user.id if message.from_user else 0;signal=self.mood.observe(uid,int(context.group_id),text);score,reasons=self._score(text,context,signal)
-            # Check deterministic blockers before score so their reasons remain observable and tests/ops are stable.
+            uid=message.from_user.id if message.from_user else 0
+            low=text.casefold();late_care=context.is_late_night and self._contains(low,self._TIRED+self._FRUSTRATED+self._VULNERABLE+self._LONELY+self._LOW_MOOD)
+            signal=self.mood.observe(uid,int(context.group_id),text);score,reasons=self._score(text,context,signal)
             allowed,reason=await self.cooldowns.can_ambient_reply(int(context.group_id),uid)
             if not allowed:return EngineDecision(False,None,reason)
             if self._last_sender.get(context.group_id)==context.sender:return EngineDecision(False,None,'same_sender_twice')
             now=context.now or time.time();bucket=self._hourly.setdefault(context.group_id,[]);bucket[:]=[x for x in bucket if now-x<3600]
             if len(bucket)>=MAX_AMBIENT_REPLIES_PER_HOUR:return EngineDecision(False,None,'hourly_cap')
-            if score<ENGAGEMENT_THRESHOLD:return EngineDecision(False,None,'score_below_threshold')
-            if self.rng.random()>AMBIENT_ENGAGEMENT_RATE:return EngineDecision(False,None,'probabilistic_silence')
-            reply=await self.replies.generate(context.group_name or 'Midnight Oracle',context.sender_name,context.relationship_tier,text,signal.summary(),str(context.hour),context.is_late_night,context.memory_snippet);bucket.append(now);self._last_sender[context.group_id]=context.sender;await self.cooldowns.set('group',context.group_id,'ambient',PER_GROUP_COOLDOWN_SECONDS);await self.cooldowns.set('member',f'{context.group_id}:{context.sender}','ambient',PER_MEMBER_COOLDOWN_SECONDS);return EngineDecision(True,reply,'engaged:'+','.join(reasons))
+            if score<ENGAGEMENT_THRESHOLD and not late_care:return EngineDecision(False,None,'score_below_threshold')
+            if not late_care and self.rng.random()>AMBIENT_ENGAGEMENT_RATE:return EngineDecision(False,None,'probabilistic_silence')
+            reply=await self.replies.generate(context.group_name or 'Midnight Oracle',context.sender_name,context.relationship_tier,text,signal.summary(),str(context.hour),context.is_late_night,context.memory_snippet)
+            bucket.append(now);self._last_sender[context.group_id]=context.sender
+            try:
+                await self.cooldowns.set('group',context.group_id,'ambient',PER_GROUP_COOLDOWN_SECONDS);await self.cooldowns.set('member',f'{context.group_id}:{context.sender}','ambient',PER_MEMBER_COOLDOWN_SECONDS)
+            except Exception:pass
+            return EngineDecision(True,reply,'engaged:'+','.join(reasons))
         except Exception:return EngineDecision(False,None,'engine_error')
     def _score(self,text:str,context:GroupContext,signal)->tuple[int,list[str]]:
-        """Calculate the configured 0–10 social-fit score.""";low=text.casefold();score,reasons=0,[];emotion=self._contains(low,self._TIRED+self._FRUSTRATED+self._VULNERABLE+self._LONELY)
+        low=text.casefold();score,reasons=0,[];emotion=self._contains(low,self._TIRED+self._FRUSTRATED+self._VULNERABLE+self._LONELY+self._LOW_MOOD)
         if self._contains(low,self._TIRED+self._FRUSTRATED):score+=3;reasons.append('emotion')
         if self._contains(low,self._LONELY):score+=3;reasons.append('connection')
+        if self._contains(low,self._LOW_MOOD):score+=3;reasons.append('low_mood')
         if self._contains(low,self._VICTORY):score+=3;reasons.append('celebration')
         if self._contains(low,self._HUMOUR) or '?' in text:score+=2;reasons.append('humour')
         if context.relationship_tier in {'known','close'}:score+=1;reasons.append('known')
@@ -60,8 +67,6 @@ class FriendEngine:
         if context.recent_messages and any(x in recent for x in ('what do you think','what should i do','help me','can someone')):score-=4;reasons.append('directed_question')
         return max(0,min(10,score)),reasons
     @staticmethod
-    def _contains(text:str,phrases:tuple[str,...])->bool:
-        """Return whether any configured signal phrase occurs in normalized text.""";return any(p in text for p in phrases)
+    def _contains(text:str,phrases:tuple[str,...])->bool:return any(p in text for p in phrases)
     @staticmethod
-    def _serious(recent:str,current:str)->bool:
-        """Detect conservative markers of a serious conversation.""";return any(x in recent or x in current for x in ('serious',"can't handle",'cannot handle','please help','hospital','family problem','passed away'))
+    def _serious(recent:str,current:str)->bool:return any(x in recent or x in current for x in ('serious',"can't handle",'cannot handle','please help','hospital','family problem','passed away'))

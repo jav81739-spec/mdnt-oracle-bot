@@ -6,9 +6,13 @@ backend implementation.
 """
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 from typing import Any
 
 from core.storage import storage
+
+redis_client = storage
 
 
 def is_configured() -> bool:
@@ -22,11 +26,33 @@ async def save(key: str, value: Any, ttl: int | None = None) -> bool:
 async def load(key: str, default: Any = None) -> Any:
     value = await storage.get(key, default)
     if isinstance(value, str):
-        # The core storage returns strings for legacy scalar values. JSON values
-        # are decoded here for old handlers that previously called json.loads().
         import json
         try:
             return json.loads(value)
         except (TypeError, ValueError):
             return value
     return value
+
+
+_locks: dict[str, asyncio.Lock] = {}
+_locks_guard = asyncio.Lock()
+
+
+@asynccontextmanager
+async def lock(key: str):
+    """Process-local compatibility lock used by legacy command handlers.
+
+    Persistent values still use the canonical Storage backend; this only
+    serializes concurrent handlers inside this bot process and never creates
+    another persistence backend.
+    """
+    async with _locks_guard:
+        mutex = _locks.setdefault(str(key), asyncio.Lock())
+    acquired = False
+    try:
+        await mutex.acquire()
+        acquired = True
+        yield acquired
+    finally:
+        if acquired:
+            mutex.release()

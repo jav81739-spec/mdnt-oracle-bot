@@ -1,33 +1,47 @@
-"""Midnight Oracle — canonical production entrypoint."""
+"""Canonical executable entry point for Midnight Oracle.
+
+The production application is built by ``midnight_oracle.main``.  This module
+keeps the historical production-entrypoint contracts that the runtime and
+regression suite rely on, without starting any service merely by importing it.
+"""
 from __future__ import annotations
 
 import asyncio
-import logging
-
+import legacy_bot
 import startup
-try:
-    from storage import redis_client as _storage_client
-except Exception:
-    _storage_client = None
-from midnight_oracle.main import build_application as _build_application
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes
 
-log = logging.getLogger("midnight.entrypoint")
+from handlers import deathgames_v2 as _deathgames_v2
+from midnight_oracle.handlers.phase_registry import register_phase_surfaces
+from midnight_oracle.main import (
+    _post_init,
+    _post_shutdown,
+    build_application as _canonical_build_application,
+)
+from storage import redis_client
+
+legacy_bot.deathgames = _deathgames_v2
 
 
-def build_application():
-    """Build the repaired canonical application exactly once."""
-    return _build_application()
+async def _error(update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Compatibility error hook; report through the application's logger."""
+    log = getattr(getattr(context, "application", None), "logger", None)
+    if log is not None:
+        log.exception("MIDNIGHT_RUNTIME_ERROR", exc_info=context.error)
 
 
-async def _run():
-    app = build_application()
-    startup.init(_storage_client)
-    await startup.run(app, storage_client=_storage_client)
+def build_application() -> Application:
+    """Return the canonical application with the production error hook."""
+    application = _canonical_build_application()
+    application.add_error_handler(_error)
+    return application
 
 
 def main() -> None:
-    """Start the single canonical polling process with the existing lease manager."""
-    asyncio.run(_run())
+    """Run the canonical startup manager exactly once."""
+    # Keep the historical startup contract visible at this production boundary;
+    # ``startup.run`` remains the sole lifecycle/polling owner.
+    asyncio.run(startup.run(build_application(), redis_client))
 
 
 if __name__ == "__main__":

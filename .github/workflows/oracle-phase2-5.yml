@@ -2,34 +2,31 @@ name: Midnight Oracle Phase 2-5
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'rebuild/**'
   pull_request:
-    branches: [main]
-  workflow_dispatch:
-    inputs:
-      target_ref:
-        description: Branch or commit SHA to verify
-        required: false
-        default: main
-        type: string
+    branches:
+      - main
+      - 'rebuild/**'
 
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ inputs.target_ref || github.ref }}
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Dependency check
+        run: python -m pip check
       - name: Compile package
-        run: python -m compileall -q midnight_oracle
+        run: python -m compileall -q .
       - name: Import smoke test
-        run: python -c "import midnight_oracle.main, midnight_oracle.engines.joke_engine, midnight_oracle.engines.absence_engine, midnight_oracle.engines.achievement_engine, midnight_oracle.games.game_engine, midnight_oracle.games.truth_dare, midnight_oracle.games.would_you_rather, midnight_oracle.games.never_have_i_ever, midnight_oracle.games.word_scramble, midnight_oracle.games.prediction, midnight_oracle.handlers.inline_handler, midnight_oracle.handlers.webapp_handler"
+        run: python -c "import midnight_oracle.main, midnight_oracle.engines.joke_engine, midnight_oracle.engines.absence_engine, midnight_oracle.engines.achievement_engine, midnight_oracle.games.game_engine, midnight_oracle.games.truth_dare, midnight_oracle.games.would_you_rather, midnight_oracle.games.never_have_i_ever, midnight_oracle.games.word_scramble, midnight_oracle.games.prediction, midnight_oracle.handlers.inline_handler, midnight_oracle.handlers.webapp_handler, handlers.live_chat_bridge"
+      - name: Regression tests
+        run: python -m unittest discover -s tests -p 'test_*.py'
       - name: Phase 1 tests
         run: python -m unittest midnight_oracle.friend_engine_test
-      - name: Runtime surface regression tests
-        run: python -m unittest tests.test_production_entrypoint_contract tests.test_production_import tests.test_runtime_manifest tests.test_runtime_regressions tests.test_runtime_smoke -v

@@ -1,9 +1,8 @@
 """Midnight Oracle runtime compatibility bootstrap.
 
-Keeps the existing Social Engine intact while making its autonomous jobs fan
-out to every known group instead of only the single legacy GROUP_CHAT_ID.
-This module is imported automatically by Python's site machinery when present.
-It does not register Telegram commands or alter /help.
+The canonical startup path owns lifecycle, polling, command registration and
+chat bridges. This module only preserves the existing Social Engine's fan-out
+behaviour so autonomous features reach every discovered group.
 """
 from __future__ import annotations
 
@@ -14,8 +13,6 @@ log = logging.getLogger("midnight.autonomous")
 
 try:
     from handlers import social_engine as _se
-
-    _original_w = _se._w
 
     async def _known_targets() -> list[int]:
         targets: set[int] = set()
@@ -47,5 +44,4 @@ try:
     _se._w = _fanout
     log.info("Autonomous scheduler bootstrap installed: registry fan-out enabled")
 except Exception:
-    # Never prevent the bot from starting if the optional bootstrap cannot load.
     log.exception("Autonomous scheduler bootstrap could not be installed")

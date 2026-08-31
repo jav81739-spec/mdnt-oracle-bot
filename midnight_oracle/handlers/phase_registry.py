@@ -1,0 +1,85 @@
+"""Additive Phase 2-4 Telegram registrations for Midnight Oracle."""
+from __future__ import annotations
+
+import logging
+import os
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram.ext import CallbackQueryHandler, CommandHandler, InlineQueryHandler, PollAnswerHandler, PollHandler
+
+log = logging.getLogger("midnight.phase_registry")
+
+
+def register_phase_surfaces(app) -> None:
+    """Register canonical core commands first, then legacy and durable surfaces."""
+    # These commands belong to the Phase-1/Oracle runtime, not legacy_bot.
+    # Register them before legacy_surface so its reserved-command filter cannot
+    # accidentally leave the public core surface without handlers.
+    try:
+        from .command_handler import start, oracle, truth, memory, mymemory, forget, quiet, wake, house
+        existing = {
+            str(command).lower().lstrip("/")
+            for handlers in getattr(app, "handlers", {}).values()
+            for handler in handlers
+            for command in (getattr(handler, "commands", None) or ())
+        }
+        core = {
+            "oracle": oracle,
+            "truth": truth,
+            "memory": memory,
+            "mymemory": mymemory,
+            "forget": forget,
+            "quiet": quiet,
+            "wake": wake,
+            "house": house,
+        }
+        for name, callback in core.items():
+            if name not in existing:
+                app.add_handler(CommandHandler(name, callback), group=-35)
+                existing.add(name)
+        log.info("CORE_COMMANDS_WIRED | count=%d", len(core))
+    except Exception:
+        log.exception("CORE_COMMAND_WIRING_FAILED")
+
+    try:
+        from handlers.legacy_surface import register_legacy_surface
+        result = register_legacy_surface(app)
+        log_added = len(result.get("added", [])) if isinstance(result, dict) else -1
+        log_skipped = len(result.get("skipped", [])) if isinstance(result, dict) else -1
+        log.info("LEGACY_SURFACE_WIRED | added=%s | skipped=%s", log_added, log_skipped)
+    except Exception:
+        # Legacy registration is additive. A broken optional legacy callback
+        # must never prevent the canonical Phase-1 core commands from working.
+        log.exception("LEGACY_SURFACE_WIRING_FAILED")
+
+    try:
+        existing = {str(command).lower().lstrip("/") for handlers in getattr(app, "handlers", {}).values() for handler in handlers for command in (getattr(handler, "commands", None) or ())}
+        if "ship" not in existing:
+            from handlers.friendship import ship
+            app.add_handler(CommandHandler("ship", ship), group=-25)
+    except Exception:
+        log.exception("SHIP_REGISTRATION_FAILED")
+
+    from .world_handler import start_game, game_callback, handle_poll_answer, handle_poll
+    from .callback_handler import handle_callback
+    from .inline_handler import handle_inline
+    from .prediction_handler import predict, predictions
+
+    for command in ("tod", "wyr", "nhie", "scramble"):
+        app.add_handler(CommandHandler(command, start_game), group=-30)
+    app.add_handler(CommandHandler("predict", predict), group=-30)
+    app.add_handler(CommandHandler("predictions", predictions), group=-30)
+    app.add_handler(PollAnswerHandler(handle_poll_answer), group=-30)
+    app.add_handler(PollHandler(handle_poll), group=-30)
+    app.add_handler(CallbackQueryHandler(game_callback, pattern=r"^game:"), group=-30)
+    app.add_handler(CallbackQueryHandler(handle_callback, pattern=r"^(?:reveal_|secret:).+"), group=-29)
+    app.add_handler(InlineQueryHandler(handle_inline), group=-30)
+    app.add_handler(CommandHandler("house", house), group=-30)
+
+
+async def house(update, context) -> None:
+    """Open Oracle House through Telegram's Mini App WebApp button when configured."""
+    url = (os.getenv("ORACLE_MINI_APP_URL") or os.getenv("MINI_APP_URL") or "").strip()
+    if not url:
+        await update.effective_message.reply_text("☾ Oracle House is quiet for a moment. The room will open when its window is ready.")
+        return
+    await update.effective_message.reply_text("☾ Oracle House\n\nA quieter place for your memories, badges, group pulse and games.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Enter the House 🌙", web_app=WebAppInfo(url=url))]]))

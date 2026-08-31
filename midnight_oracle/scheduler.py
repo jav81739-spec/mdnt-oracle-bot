@@ -23,9 +23,21 @@ class OracleScheduler:
         if self.scheduler.running:return
         self.scheduler.add_job(self.morning,'cron',hour=MORNING_HOUR,minute=MORNING_MINUTE,id='oracle_morning',replace_existing=True);self.scheduler.add_job(self.evening,'cron',hour=EVENING_HOUR,minute=EVENING_MINUTE,id='oracle_evening',replace_existing=True);self.scheduler.add_job(self.three_am,'cron',hour=3,minute=0,id='oracle_3am',replace_existing=True);self.scheduler.add_job(self.absence_daily,'cron',hour=14,minute=0,id='oracle_absence',replace_existing=True);self.scheduler.add_job(self.secret_daily,'cron',hour=15,minute=0,id='oracle_secret',replace_existing=True);self.scheduler.add_job(self.recover_timed,'date',run_date=datetime.now(self.timezone)+timedelta(seconds=2),id='oracle_recovery',replace_existing=True);self.scheduler.start()
     async def recover_timed(self)->None:
-        """Recover expired WYR polls, reset interrupted scramble sessions, and reveal overdue secret events."""
+        """Recover expired WYR polls, reschedule live WYR polls, reset interrupted scrambles, and reveal overdue secret events."""
         await SecretEventEngine(self.db).recover_unrevealed(self.application.bot)
-        await WouldYouRatherGame(self.db).recover_expired(self.application.bot)
+        wyr=WouldYouRatherGame(self.db)
+        rows=await self.db.fetchall("SELECT state FROM game_sessions WHERE game_type='would_you_rather' AND is_active=1")
+        for r in rows:
+            try:
+                state=json.loads(r['state']);started=float(state.get('started_at',0));poll_id=str(state.get('poll_id'));gid=int(state.get('group_id'))
+                if not started or not poll_id or not gid:continue
+                due=started+60
+                if now_ts()>=due:
+                    await wyr.close_poll(poll_id,self.application.bot,gid)
+                else:
+                    self.scheduler.add_job(wyr.close_poll,'date',run_date=datetime.fromtimestamp(due,tz=self.timezone),args=[poll_id,self.application.bot,gid],id=f'wyr_close_{poll_id}',replace_existing=True)
+            except Exception:
+                continue
         rows=await self.db.fetchall("SELECT group_id FROM game_sessions WHERE game_type='word_scramble' AND is_active=1")
         for r in rows:
             gid=int(r['group_id'])
