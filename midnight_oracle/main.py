@@ -78,6 +78,8 @@ def build_application()->Application:
     except Exception:log.exception('LEGACY_SURFACE_WIRING_FAILED')
     from core.v2_unique import register as register_v2_unique
     register_v2_unique(app)
+    from core.v2_autonomous_commands import register as register_v2_autonomous_commands
+    register_v2_autonomous_commands(app)
     from core.error_handling import install_error_handler
     install_error_handler(app)
     from core.sticker_reactions import install as install_sticker_reactions
