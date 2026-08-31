@@ -16,6 +16,10 @@ class RedisCompat:
     async def setex(self, key, ttl, value):
         return await storage.set(key, value, ttl=ttl)
 
+    async def setnx(self, key, value, ttl=15):
+        """Expose the atomic SET NX primitive required by the polling lease."""
+        return await storage.setnx(key, value, ttl=ttl)
+
     async def exists(self, key):
         return int(await storage.exists(key))
 

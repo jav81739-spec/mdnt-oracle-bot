@@ -1,4 +1,4 @@
-"""Human-style Telegram chat with a provider-independent conversation path."""
+"""Human-style Telegram chat with durable memory and a provider-independent Oracle Mind."""
 from __future__ import annotations
 import logging, os, time, random as _random, asyncio
 import httpx
@@ -6,15 +6,16 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from core.ai import AIUnavailable
 from core.chat import generate_reply as core_generate_reply
+from core.oracle_mind import local_reply, recall_memories, save_explicit_memory
 from handlers import storage
 
 log=logging.getLogger("midnight.chat")
 chat_enabled:dict[str,bool]={}; chat_persona:dict[str,str]={}; chat_history:dict[str,list[dict[str,str]]]={}; _last_reply_time:dict[str,float]={}
 DEFAULT_PERSONA="friendly, casual, playful, naturally Hinglish when appropriate"
-MAX_HISTORY=10; COOLDOWN_SECONDS=8; _AI_CONCURRENCY=2; _ai_slots=asyncio.Semaphore(_AI_CONCURRENCY); STORAGE_KEY="chat_settings"
+MAX_HISTORY=12; COOLDOWN_SECONDS=8; _AI_CONCURRENCY=2; _ai_slots=asyncio.Semaphore(_AI_CONCURRENCY); STORAGE_KEY="chat_settings"
 
 async def load_from_storage():
-    global chat_enabled,chat_persona
+    global chat_enabled, chat_persona
     saved=await storage.load(STORAGE_KEY,{"enabled":{},"persona":{}})
     if not isinstance(saved,dict): saved={}
     chat_enabled=dict(saved.get("enabled",{})); chat_persona=dict(saved.get("persona",{}))
@@ -49,24 +50,25 @@ async def auto_reply(update,context):
     speaker=" ".join(part for part in (getattr(user,"first_name",None),getattr(user,"last_name",None)) if part).strip() if user else "Member"
     speaker=speaker[:120] or "Member"
     history.append({"role":"user","speaker":speaker,"text":text[:1000]}); del history[:-MAX_HISTORY]
+    db=context.application.bot_data.get("oracle_db")
+    memories=[]
+    if db and user:
+        try:
+            await save_explicit_memory(db,user.id,update.effective_chat.id,text)
+            memories=await recall_memories(db,user.id,update.effective_chat.id,limit=6)
+        except Exception: log.exception("ORACLE_MEMORY_UPDATE_FAILED | chat=%s",cid)
     try:
-        async with _ai_slots: reply_text=await core_generate_reply(text,persona,history)
+        async with _ai_slots: reply_text=await core_generate_reply(text,persona,history + ([{"role":"memory","speaker":"Oracle Memory","text":m} for m in memories] if memories else []))
     except AIUnavailable:
-        reply_text=_local_chat(text,history); log.info("CHAT_PROVIDER_COOLDOWN | chat=%s | local_engine=true",cid)
+        reply_text=local_reply(text,history,memories); log.info("CHAT_PROVIDER_COOLDOWN | chat=%s | local_mind=true",cid)
     except Exception:
-        reply_text=_local_chat(text,history); log.exception("CHAT_PROVIDER_INTERNAL_ERROR | chat=%s",cid)
-    if not reply_text: reply_text=_local_chat(text,history)
+        reply_text=local_reply(text,history,memories); log.exception("CHAT_PROVIDER_INTERNAL_ERROR | chat=%s",cid)
+    if not reply_text: reply_text=local_reply(text,history,memories)
     history.append({"role":"assistant","speaker":"Midnight Oracle","text":reply_text[:2000]}); del history[:-MAX_HISTORY]
     try: await msg.reply_text(reply_text,reply_to_message_id=msg.message_id)
     except Exception: log.exception("CHAT_SEND_FAILED | chat=%s",cid)
 
-def _local_chat(text,history):
-    t=(text or "").strip(); low=t.casefold()
-    if not t:return "I'm here. 🌙"
-    if "?" in t:return "Haan, let's unpack that. 🌙"
-    if any(x in low for x in ("sad","upset","rough","bad day","not okay","😭","🥲")):return "Haan… bol. Main sun raha hoon. 🖤"
-    if any(x in low for x in ("lol","haha","😂","🤣")):return "😂 Okay, that one actually got me."
-    return _random.choice(("Hmm. Tell me more.","I'm here. Bol.","Yeah… I'm listening. 🌙"))
+def _local_chat(text,history): return local_reply(text,history,None)
 
 async def generate_reply(user_text,persona,history):return await core_generate_reply(user_text,persona,history)
 
@@ -106,10 +108,10 @@ async def get_image_url(term):
     try:
         async with httpx.AsyncClient(timeout=12,headers={"User-Agent":"MidnightOracle/1.0"}) as client:
             r=await client.get("https://commons.wikimedia.org/w/api.php",params={"action":"query","format":"json","generator":"search","gsrsearch":query,"gsrnamespace":6,"gsrlimit":12,"prop":"imageinfo","iiprop":"url|mime","iiurlwidth":1200})
-            r.raise_for_status(); pages=r.json().get("query",{}).get("pages",{})
+            r.raise_for_status();pages=r.json().get("query",{}).get("pages",{})
         candidates=[]
         for page in pages.values():
-            info=(page.get("imageinfo") or [{}])[0]; mime=str(info.get("mime", "")); url=info.get("thumburl") or info.get("url")
+            info=(page.get("imageinfo") or [{}])[0];mime=str(info.get("mime", ""));url=info.get("thumburl") or info.get("url")
             if url and mime.startswith("image/") and mime not in {"image/svg+xml","image/gif"}:candidates.append(url)
         return _random.choice(candidates) if candidates else None
     except Exception:log.exception("IMAGE_LOOKUP_FAILED");return None
