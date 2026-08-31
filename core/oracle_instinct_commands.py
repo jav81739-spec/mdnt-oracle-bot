@@ -4,7 +4,9 @@ import html
 from telegram.ext import CommandHandler
 from .storage import storage
 
-KEY_PREFIX = "v2:oracle:trigger:"
+# Keep the existing storage namespace so current configured group triggers survive
+# the terminology change from "autonomous" to Oracle Instinct.
+KEY_PREFIX = "v2:autonomous:trigger:"
 
 
 def _reply(message, text):
