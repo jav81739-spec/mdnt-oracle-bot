@@ -63,39 +63,14 @@ async def _track_group_activity(update:Update,context:ContextTypes.DEFAULT_TYPE)
     if not db:return
     try:
         await db.execute("INSERT INTO group_profile(group_id,group_name,timezone,created_at) VALUES(?,?,?,?) ON CONFLICT(group_id) DO UPDATE SET group_name=excluded.group_name",(chat.id,chat.title or '',str(TIMEZONE),now_ts()))
+        await db.upsert_member(user.id,chat.id,user.username or '',user.first_name or 'Unknown')
+        await db.increment_interaction(user.id,chat.id)
         from handlers.social_engine import register_member,bump_msg_count
         await register_member(chat.id,user.id,user.first_name or 'Unknown',user.username or '');await bump_msg_count(chat.id,user.id)
         text=(update.effective_message.text or '').strip() if update.effective_message else ''
         if text and not text.startswith('/'):
             atmosphere=context.application.bot_data.setdefault('oracle_atmosphere',{});items=atmosphere.setdefault(str(chat.id),[]);items.append({'text':text[:500],'ts':now_ts()});del items[:-16]
     except Exception:log.exception('GROUP_ACTIVITY_TRACKING_FAILED | chat_id=%s',chat.id)
-
-async def _route_message(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    chat=update.effective_chat
-    if chat and chat.type in {'group','supergroup'}:
-        await handle_game_message(update,context)
-        db=context.application.bot_data.get('oracle_db')
-        if db:
-            row=await db.fetchone("SELECT game_type FROM game_sessions WHERE group_id=? AND is_active=1 LIMIT 1",(chat.id,))
-            if row and row['game_type']=='word_scramble':return
-        text=(update.effective_message.text or '').strip() if update.effective_message else ''
-        low=text.casefold()
-        username=str(getattr(context.bot,'username','') or '').casefold()
-        replied=getattr(getattr(update.effective_message,'reply_to_message',None),'from_user',None) if update.effective_message else None
-        bot_id=getattr(context.bot,'id',None)
-        direct=bool(replied and bot_id and getattr(replied,'id',None)==bot_id) or bool(username and f'@{username}' in low) or low in {'oracle','midnight'} or any(low==p or low.startswith(p+' ') for p in ('hey oracle','hello oracle','hi oracle','oracle suno','oracle bhai','oracle bro','oracle listen','hey midnight','hello midnight','hi midnight','midnight suno','midnight bhai','midnight bro'))
-        try:
-            from core.storage import storage
-            trigger=await storage.load(f'v2:autonomous:trigger:{chat.id}',None)
-            if isinstance(trigger,str) and trigger and (low==trigger or low.startswith(trigger+' ')):direct=True
-        except Exception:pass
-        if not direct:
-            try:
-                from handlers.chat import chat_enabled
-                if not chat_enabled.get(str(chat.id),False):return
-            except Exception:return
-    router=context.application.bot_data.get('oracle_router')
-    if router:await router.handle(update,context)
 
 def build_application()->Application:
     if not BOT_TOKEN:raise RuntimeError('BOT_TOKEN is required')
@@ -125,10 +100,34 @@ def build_application()->Application:
     app.add_handler(MessageHandler(filters.ALL,_track_group_activity),group=-1000)
     app.add_handler(PollAnswerHandler(handle_poll_answer));app.add_handler(PollHandler(handle_poll));app.add_handler(CallbackQueryHandler(game_callback,pattern=r'^game:'));app.add_handler(CallbackQueryHandler(help_callback,pattern=r'^help:'));app.add_handler(CallbackQueryHandler(handle_callback));app.add_handler(InlineQueryHandler(handle_inline));app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA,handle_webapp_data));app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_route_message));return app
 
-def main()->None:
-    """Run through the canonical startup manager so only one polling owner exists."""
+async def _route_message(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
+    chat=update.effective_chat
+    if chat and chat.type in {'group','supergroup'}:
+        await handle_game_message(update,context)
+        db=context.application.bot_data.get('oracle_db')
+        if db:
+            row=await db.fetchone("SELECT game_type FROM game_sessions WHERE group_id=? AND is_active=1 LIMIT 1",(chat.id,))
+            if row and row['game_type']=='word_scramble':return
+        text=(update.effective_message.text or '').strip() if update.effective_message else ''
+        low=text.casefold()
+        username=str(getattr(context.bot,'username','') or '').casefold()
+        replied=getattr(getattr(update.effective_message,'reply_to_message',None),'from_user',None) if update.effective_message else None
+        bot_id=getattr(context.bot,'id',None)
+        direct=bool(replied and bot_id and getattr(replied,'id',None)==bot_id) or bool(username and f'@{username}' in low) or low in {'oracle','midnight'} or any(low==p or low.startswith(p+' ') for p in ('hey oracle','hello oracle','hi oracle','oracle suno','oracle bhai','oracle bro','oracle listen','hey midnight','hello midnight','hi midnight','midnight suno','midnight bhai','midnight bro'))
+        try:
+            from core.storage import storage
+            trigger=await storage.load(f'v2:autonomous:trigger:{chat.id}',None)
+            if isinstance(trigger,str) and trigger and (low==trigger or low.startswith(trigger+' ')):direct=True
+        except Exception:pass
+        if not direct:
+            try:
+                from handlers.chat import chat_enabled
+                if not chat_enabled.get(str(chat.id),False):return
+            except Exception:return
+    router=context.application.bot_data.get('oracle_router')
+    if router:await router.handle(update,context)
+
+if __name__=='__main__':
     configure_logging()
     from startup import run as run_startup
     asyncio.run(run_startup(build_application(),redis_client))
-
-if __name__=='__main__':main()
