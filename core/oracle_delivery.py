@@ -16,6 +16,17 @@ async def deliver(application: Any, chat_id: int, text: str) -> bool:
 
     db = application.bot_data.get("oracle_db")
     try:
+        member = await application.bot.get_chat_member(chat_id, application.bot.id)
+        can_send = getattr(member, "can_send_messages", None)
+        if can_send is False:
+            if db:
+                await db.set_cooldown("group", str(chat_id), "delivery_blocked", BLOCK_EXPIRES_AT)
+            log.error(
+                "ORACLE_DELIVERY_BLOCKED | chat=%s | reason=insufficient_send_rights",
+                chat_id,
+            )
+            return False
+
         await _post(application.bot, chat_id, text)
         if db:
             await db.execute(
