@@ -34,6 +34,33 @@ class VoiceEngineTests(unittest.IsolatedAsyncioTestCase):
             instructions=VOICE_PROFILE["style"] + ". natural delivery",
         )
 
+    def test_explicit_request_is_deterministic(self):
+        engine = VoiceEngine(api_key="test-key")
+        decision = engine.decide(
+            chat_id=1,
+            user_id=2,
+            text="send me a voice",
+            direct=True,
+            private=False,
+            explicit=True,
+        )
+        self.assertTrue(decision.should_send)
+        self.assertEqual(decision.reason, "explicit_voice")
+
+    def test_explicit_request_has_short_cooldown_after_recording(self):
+        engine = VoiceEngine(api_key="test-key")
+        engine.record(1, 2, "first voice")
+        decision = engine.decide(
+            chat_id=1,
+            user_id=2,
+            text="send me another voice",
+            direct=True,
+            private=False,
+            explicit=True,
+        )
+        self.assertFalse(decision.should_send)
+        self.assertEqual(decision.reason, "explicit_cooldown")
+
     def test_duplicate_is_rejected_after_recording(self):
         engine = VoiceEngine(api_key="test-key")
         with patch("midnight_oracle.voice_engine.random.random", return_value=0.0):
