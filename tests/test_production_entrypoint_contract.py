@@ -4,7 +4,7 @@ import unittest
 
 
 class ProductionEntrypointContractTests(unittest.TestCase):
-    def test_entrypoint_owns_single_runtime_wiring(self):
+    def test_entrypoint_delegates_to_single_canonical_runtime(self):
         tree = ast.parse(pathlib.Path('bot.py').read_text(encoding='utf-8'))
         imports_legacy = any(
             isinstance(node, ast.Import)
@@ -12,13 +12,6 @@ class ProductionEntrypointContractTests(unittest.TestCase):
             for node in tree.body
         )
         self.assertTrue(imports_legacy)
-
-        imported_names = {
-            alias.name.split('.')[0]
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Import)
-            for alias in node.names
-        }
         imported_from_telegram = {
             alias.name
             for node in ast.walk(tree)
@@ -26,8 +19,10 @@ class ProductionEntrypointContractTests(unittest.TestCase):
             and node.module == 'telegram.ext'
             for alias in node.names
         }
-        self.assertTrue({'Application', 'CommandHandler', 'MessageHandler'}.issubset(imported_from_telegram))
-
+        self.assertIn('Application', imported_from_telegram)
+        source = pathlib.Path('bot.py').read_text(encoding='utf-8')
+        self.assertIn('build_application as _canonical_build_application', source)
+        self.assertIn('asyncio.run(startup.run(build_application(), redis_client))', source)
         names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
         self.assertNotIn('ChatMemberHandler', names)
 
