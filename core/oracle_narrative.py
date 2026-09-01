@@ -29,6 +29,7 @@ CREATE INDEX IF NOT EXISTS idx_oracle_narratives_group ON oracle_narratives(grou
 
 MIN_GAP = 3 * 3600
 MAX_PARTS = 7
+MIN_PARTS = 3
 
 
 def _fallback(kind: str, title: str, part: int, max_parts: int, canon: str) -> str:
@@ -92,7 +93,7 @@ Create a NEW {kind} series. It must be original and unlike these recently used t
 The series must feel written by a clever, emotionally perceptive human: specific, warm, occasionally funny, never robotic.
 Language: {language}.
 For story: original fiction only. For gossip: playful world/culture/idea gossip only; never invent allegations about real people or group members and never present fiction as real news.
-Make 3-7 parts. Plan a real arc: setup, escalation, turn, consequence, ending. Do not cram the whole arc into Part 1.
+Make {MIN_PARTS}-{MAX_PARTS} parts. Plan a real arc: setup, escalation, turn, consequence, ending. Do not cram the whole arc into Part 1.
 Return JSON only with: title, premise, canon, max_parts. Canon is a concise internal continuity bible, not text to send to users.
 Recent public room atmosphere:
 {public or '- no usable context'}"""
@@ -110,7 +111,7 @@ Recent public room atmosphere:
         premise = str(obj.get("premise") or "A small mystery grows.")[:700]
         canon = str(obj.get("canon") or premise)[:1800]
         try:
-            max_parts = max(3, min(MAX_PARTS, int(obj.get("max_parts", 4))))
+            max_parts = max(MIN_PARTS, min(MAX_PARTS, int(obj.get("max_parts", 4))))
         except Exception:
             max_parts = 4
     if title.casefold() in {x.casefold() for x in old}:
@@ -123,7 +124,8 @@ Recent public room atmosphere:
 
 
 async def _render_part(db, row, context: list[dict[str, Any]], language: str, now: float) -> tuple[str, bool, str, int]:
-    part = int(row[6]) + 1
+    previous_part = int(row[6])
+    part = previous_part + 1
     max_parts = int(row[7])
     title = str(row[3]); premise = str(row[4]); canon = str(row[5]); kind = str(row[2])
     prompt = f"""You are Midnight Oracle. Write Part {part} of a serialized {kind} called {title!r} for a Telegram group.
@@ -132,8 +134,9 @@ Voice: emotionally intelligent, conversational, vivid, restrained, occasionally 
 Language: {language}.
 Premise: {premise}
 Continuity bible: {canon}
-Parts already delivered: {int(row[6])}.
-The final part must resolve the thread. Earlier parts must leave a reason to return.
+Parts already delivered: {previous_part}.
+If this is before Part {MIN_PARTS}, it MUST NOT conclude the series. It must leave a natural unresolved thread.
+The final part must resolve the thread cleanly without a rushed summary.
 Return JSON only: {{"text":"...", "finished": true|false}}.
 Text should include a subtle title/part marker, but no meta explanation, fake factual claims, or member-targeted gossip.
 Recent public atmosphere (use only if naturally relevant):
@@ -144,7 +147,8 @@ Recent public atmosphere (use only if naturally relevant):
         obj = None
     if obj and str(obj.get("text", "")).strip():
         text = str(obj["text"]).strip()[:3200]
-        finished = bool(obj.get("finished", part >= max_parts)) or part >= max_parts
+        requested_finished = bool(obj.get("finished", False))
+        finished = part >= MIN_PARTS and (requested_finished or part >= max_parts)
     else:
         text = _fallback(kind, title, part, max_parts, canon)
         finished = part >= max_parts
@@ -153,7 +157,7 @@ Recent public atmosphere (use only if naturally relevant):
         "UPDATE oracle_narratives SET part_no=?,updated_at=?,next_at=?,status=?,completed_at=? WHERE id=? AND status='active'",
         (part, now, next_at, "completed" if finished else "active", now if finished else None, int(row[0])),
     )
-    return text, finished, kind, int(row[6])
+    return text, finished, kind, previous_part
 
 
 async def rollback(db, narrative_id: int, previous_part: int, now: float) -> None:
