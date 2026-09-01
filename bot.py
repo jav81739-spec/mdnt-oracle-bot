@@ -22,6 +22,11 @@ from midnight_oracle.main import (
 )
 from storage import redis_client
 
+# Telegram and Gemini clients can place credentials in request URLs. Never
+# emit httpx/httpcore request URLs at INFO in production logs.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 log = logging.getLogger("midnight.entrypoint")
 legacy_bot.deathgames = _deathgames_v2
 
