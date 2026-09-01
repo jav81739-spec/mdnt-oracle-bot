@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import legacy_bot
+import logging
+import os
 import startup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes
 
@@ -20,14 +22,15 @@ from midnight_oracle.main import (
 )
 from storage import redis_client
 
+log = logging.getLogger("midnight.entrypoint")
 legacy_bot.deathgames = _deathgames_v2
 
 
 async def _error(update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Compatibility error hook; report through the application's logger."""
-    log = getattr(getattr(context, "application", None), "logger", None)
-    if log is not None:
-        log.exception("MIDNIGHT_RUNTIME_ERROR", exc_info=context.error)
+    log_obj = getattr(getattr(context, "application", None), "logger", None)
+    if log_obj is not None:
+        log_obj.exception("MIDNIGHT_RUNTIME_ERROR", exc_info=context.error)
 
 
 def build_application() -> Application:
@@ -39,8 +42,11 @@ def build_application() -> Application:
 
 def main() -> None:
     """Run the canonical startup manager exactly once."""
-    # Keep the historical startup contract visible at this production boundary;
-    # ``startup.run`` remains the sole lifecycle/polling owner.
+    log.info(
+        "RUNTIME_IDENTITY | branch=main | commit=%s | pid=%s | entrypoint=canonical | source=midnight_oracle.main",
+        os.getenv("RENDER_GIT_COMMIT", "unknown"),
+        os.getpid(),
+    )
     asyncio.run(startup.run(build_application(), redis_client))
 
 
