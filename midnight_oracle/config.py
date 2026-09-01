@@ -1,20 +1,18 @@
 """Validated runtime configuration for Midnight Oracle.
 
 All secrets are read from the environment (with .env support). No secret is
-stored in source control. The module exposes immutable-style module constants
-so the rest of the application has one configuration surface.
+stored in source control. The module exposes one canonical configuration
+surface plus backwards-compatible aliases used by the runtime modules.
 """
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-# Load a local .env when present. Existing process environment values win.
 load_dotenv(override=False)
 
 
@@ -47,7 +45,6 @@ def _int_env(name: str, default: int | None = None) -> int:
 
 
 def _database_url(raw: str) -> str:
-    """Normalize a SQLite path or SQLAlchemy SQLite URL."""
     value = raw.strip()
     if value.startswith("sqlite:///"):
         return value
@@ -92,9 +89,7 @@ class Settings:
         return ZoneInfo(self.timezone_name)
 
 
-
 def load_settings() -> Settings:
-    """Read and validate all application settings once at startup."""
     telegram_token = _required("TELEGRAM_BOT_TOKEN")
     openai_key = _required("OPENAI_API_KEY")
     giphy_key = _required("GIPHY_API_KEY")
@@ -132,7 +127,6 @@ def load_settings() -> Settings:
 
 settings = load_settings()
 
-# Backwards-compatible module-level names used by handlers and integrations.
 TELEGRAM_BOT_TOKEN = settings.telegram_bot_token
 OPENAI_API_KEY = settings.openai_api_key
 GIPHY_API_KEY = settings.giphy_api_key
@@ -151,7 +145,12 @@ GROUP_HOURLY_LIMIT = settings.group_hourly_limit
 GIF_MESSAGE_INTERVAL = settings.gif_message_interval
 RANDOM_STICKER_PROBABILITY = settings.random_sticker_probability
 
-# Oracle behaviour constants.
+# Compatibility names retained for the canonical runtime.  These aliases do
+# not create a second configuration source; they point at the validated values
+# above and prevent legacy imports from breaking the application.
+BOT_TOKEN = TELEGRAM_BOT_TOKEN
+DATABASE_PATH = DATABASE_URL
+
 MOOD_STATES = (
     "MYSTICAL",
     "PROPHETIC",
@@ -171,8 +170,6 @@ PROPHECY_MAX_PER_HOUR = 3
 GROUP_AMBIENT_PROBABILITY = 0.03
 GROUP_VIBE_KEYWORD_THRESHOLD = 5
 WEEKLY_ACTIVE_DAYS = 7
-
-# Time windows use the application timezone.
 MIDNIGHT_START_HOUR = 23
 MIDNIGHT_END_HOUR = 2
 DAWN_START_HOUR = 5
