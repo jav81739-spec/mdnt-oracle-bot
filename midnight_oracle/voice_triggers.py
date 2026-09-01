@@ -1,25 +1,17 @@
-"""Human-facing voice trigger detection for Midnight Oracle.
-
-Only explicit requests for a voice note activate voice mode. Ordinary
-sentences containing words such as ``voice`` or ``audio`` stay in normal
-conversation so Midnight does not misfire.
-"""
+"""Intent-safe voice trigger detection for Midnight Oracle."""
 from __future__ import annotations
 
 import re
 
-# Deliberately phrase-based. Single words like ``voice``, ``audio``, ``bolo``
-# and ``suno`` are too common in ordinary conversation to be safe triggers.
+# Deliberately phrase-based. Generic words such as "voice", "audio", "bolo",
+# "suno", or "speak" are never sufficient on their own.
 VOICE_TRIGGERS = (
-    "voice note",
-    "send me a voice",
+    "send a voice note",
+    "send me a voice note",
     "send a voice",
-    "send voice",
-    "voice bhejo",
-    "voice bhej",
-    "voice do",
-    "voice please",
-    "voice pls",
+    "send me a voice",
+    "voice note bhejo",
+    "voice note bhej",
     "voice mein bolo",
     "voice me bolo",
     "voice mein bol",
@@ -28,34 +20,30 @@ VOICE_TRIGGERS = (
     "voice me batao",
     "voice mein bata",
     "voice me bata",
-    "say it",
-    "say that",
-    "say something",
-    "say it in voice",
-    "speak it",
-    "speak in voice",
-    "send audio",
-    "send me audio",
-    "audio bhejo",
-    "audio bhej",
     "awaaz mein bolo",
     "awaaz me bolo",
     "awaaz mein bol",
     "awaaz me bol",
-    "awaaz mein batao",
-    "awaaz me batao",
+    "bol ke batao",
     "bol ke bata",
+    "bolkar batao",
     "bolkar bata",
     "bol ke sunao",
     "bolkar sunao",
     "suna do",
+    "say it in voice",
+    "say that in voice",
+    "say this in voice",
+    "say it as a voice note",
+    "send an audio note",
+    "audio note bhejo",
 )
 
 _SORTED_TRIGGERS = tuple(sorted(VOICE_TRIGGERS, key=len, reverse=True))
 
 
 def wants_voice(text: str) -> bool:
-    """Return true only for an explicit voice-note request."""
+    """Return true only for a deliberate request to receive a voice note."""
     low = " ".join((text or "").casefold().split())
     if not low:
         return False

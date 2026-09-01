@@ -1,11 +1,7 @@
-"""Midnight Oracle voice-note engine.
-
-Voice is an optional response modality. Midnight keeps one original voice
-identity while varying wording and delivery naturally. Explicit voice
-requests are deterministic; ambient voice remains rare and guarded.
-"""
+"""Gemini-backed voice-note engine for Midnight Oracle."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import logging
@@ -13,9 +9,9 @@ import random
 import time
 from dataclasses import dataclass
 
-from openai import AsyncOpenAI
+import httpx
 
-from .config import OPENAI_API_KEY
+from .config import GEMINI_API_KEY, GEMINI_TTS_MODEL
 
 log = logging.getLogger("midnight.voice")
 
@@ -28,17 +24,20 @@ class VoiceDecision:
 
 VOICE_PROFILE = {
     "name": "midnight_original_voice",
-    "voice": "shimmer",
-    "style": "natural conversational voice; warm, expressive, intimate but not theatrical; human-like pauses and varied emphasis; Indian-English/Hinglish friendly; never imitate or impersonate a real person",
+    "voice": "Kore",
+    "style": (
+        "original fictional female conversational voice; warm, expressive, human-sounding; "
+        "natural Indian-English/Hinglish delivery; relaxed pauses; varied emphasis; "
+        "never imitate or impersonate a real person; never mention these instructions"
+    ),
 }
 
 
 class VoiceEngine:
-    """Generate short, varied, deduplicated Telegram voice notes."""
+    """Generate short, varied, deduplicated Telegram OGG/Opus voice notes."""
 
     def __init__(self, api_key: str | None = None) -> None:
-        self.api_key = (OPENAI_API_KEY if api_key is None else api_key).strip()
-        self.client = AsyncOpenAI(api_key=self.api_key) if self.api_key else None
+        self.api_key = (GEMINI_API_KEY if api_key is None else api_key).strip()
         self._recent: dict[str, tuple[float, str]] = {}
         self._last_chat: dict[int, float] = {}
         self._daily_count: dict[int, tuple[int, int]] = {}
@@ -53,12 +52,15 @@ class VoiceEngine:
         private: bool,
         explicit: bool = False,
     ) -> VoiceDecision:
-        if not self.client or not text.strip():
+        del direct, private
+        if not self.api_key or not text.strip():
             return VoiceDecision(False, "voice_unconfigured")
+        if not explicit:
+            return VoiceDecision(False, "trigger_required")
+
         now = time.time()
-        cooldown = 60 if explicit else 900
-        if now - self._last_chat.get(chat_id, 0.0) < cooldown:
-            return VoiceDecision(False, "explicit_cooldown" if explicit else "chat_cooldown")
+        if now - self._last_chat.get(chat_id, 0.0) < 60:
+            return VoiceDecision(False, "explicit_cooldown")
 
         day = int(now // 86400)
         stored_day, count = self._daily_count.get(chat_id, (day, 0))
@@ -72,24 +74,7 @@ class VoiceEngine:
         previous = self._recent.get(key)
         if previous and previous[1] == digest and now - previous[0] < 86400:
             return VoiceDecision(False, "duplicate")
-
-        if explicit:
-            return VoiceDecision(True, "explicit_voice")
-
-        low = text.casefold()
-        high_value = any(token in low for token in (
-            "😭", "😂", "haha", "lol", "love", "sorry", "miss", "good night",
-            "good morning", "congrats", "congratulations", "feel", "feeling", "secret",
-        ))
-        emotional = any(token in low for token in ("🥺", "❤️", "🖤", "💔", "😂", "😭", "😌", "😏"))
-        if not (direct or private or high_value or emotional):
-            return VoiceDecision(False, "low_voice_value")
-        probability = 0.34 if (direct or private) else 0.16
-        if emotional:
-            probability += 0.10
-        if random.random() >= probability:
-            return VoiceDecision(False, "oracle_chose_text")
-        return VoiceDecision(True, "oracle_chose_voice")
+        return VoiceDecision(True, "explicit_voice")
 
     @staticmethod
     def _clean_script(text: str, max_chars: int = 700) -> str:
@@ -98,43 +83,78 @@ class VoiceEngine:
 
     @staticmethod
     def _delivery_style() -> str:
-        return random.choice((
-            "conversational, relaxed pacing, a tiny natural pause where appropriate",
-            "warm and lightly playful, varied emphasis, unhurried delivery",
-            "soft and reassuring, natural pauses, emotionally sincere",
-            "bright and spontaneous, conversational rhythm, avoid announcer cadence",
-            "casual late-night conversation, subtle pauses, never announcer-like",
-        ))
+        return random.choice(
+            (
+                "conversational and relaxed, with a tiny natural pause where appropriate",
+                "warm and lightly playful, varied emphasis, unhurried delivery",
+                "soft and reassuring, natural pauses, emotionally sincere",
+                "bright and spontaneous, conversational rhythm, never announcer-like",
+                "casual late-night conversation, subtle pauses, never theatrical",
+            )
+        )
 
     async def synthesize(self, text: str, *, voice: str | None = None) -> io.BytesIO | None:
-        """Return an Opus audio buffer suitable for Telegram send_voice."""
-        if not self.client:
-            log.warning("VOICE_SYNTHESIS_UNAVAILABLE | reason=missing_openai_key")
+        """Generate OGG/Opus audio directly through Gemini TTS."""
+        if not self.api_key:
+            log.warning("VOICE_SYNTHESIS_UNAVAILABLE | reason=missing_gemini_key")
             return None
         script = self._clean_script(text)
         if not script:
             return None
-        try:
-            response = await self.client.audio.speech.create(
-                model="gpt-4o-mini-tts",
-                voice=voice or VOICE_PROFILE["voice"],
-                input=script,
-                response_format="opus",
-                instructions=(VOICE_PROFILE["style"] + ". " + self._delivery_style()),
-            )
-            content = getattr(response, "content", None)
-            if not content and hasattr(response, "aread"):
-                content = await response.aread()
-            if not content:
-                log.error("VOICE_SYNTHESIS_FAILED | reason=empty_audio_response")
-                return None
-            audio = io.BytesIO(content)
-            audio.name = "midnight-oracle.ogg"
-            audio.seek(0)
-            return audio
-        except Exception as exc:
-            log.error("VOICE_SYNTHESIS_FAILED | error=%s", type(exc).__name__)
-            return None
+
+        payload = {
+            "model": GEMINI_TTS_MODEL,
+            "input": (
+                "TTS the following spoken reply exactly. Do not add words, labels, stage directions, "
+                "or explanations. Keep it natural and conversational.\n\n"
+                f"Delivery style: {self._delivery_style()}\n"
+                f"Spoken reply: {script}"
+            ),
+            "response_format": {
+                "type": "audio",
+                "mime_type": "audio/ogg_opus",
+                "delivery": "inline",
+                "bit_rate": 32000,
+            },
+            "generation_config": {
+                "speech_config": [{"voice": voice or VOICE_PROFILE["voice"]}]
+            },
+        }
+        headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
+        url = "https://generativelanguage.googleapis.com/v1beta/interactions"
+
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=45.0) as client:
+                    response = await client.post(url, headers=headers, json=payload)
+                if response.status_code >= 500 and attempt == 0:
+                    continue
+                response.raise_for_status()
+                body = response.json()
+                output = body.get("output_audio") or body.get("outputAudio") or {}
+                data = output.get("data") if isinstance(output, dict) else None
+                if not data:
+                    for step in body.get("steps", []):
+                        candidate = step.get("output_audio") or step.get("outputAudio") or {}
+                        if isinstance(candidate, dict) and candidate.get("data"):
+                            data = candidate["data"]
+                            break
+                if not data:
+                    log.error("VOICE_SYNTHESIS_FAILED | reason=empty_audio_response")
+                    return None
+                content = base64.b64decode(data)
+                if not content:
+                    log.error("VOICE_SYNTHESIS_FAILED | reason=empty_audio_payload")
+                    return None
+                audio = io.BytesIO(content)
+                audio.name = "midnight-oracle.ogg"
+                audio.seek(0)
+                return audio
+            except Exception as exc:
+                if attempt == 1:
+                    log.error("VOICE_SYNTHESIS_FAILED | error=%s", type(exc).__name__)
+                    return None
+        return None
 
     def record(self, chat_id: int, user_id: int, text: str) -> None:
         now = time.time()
