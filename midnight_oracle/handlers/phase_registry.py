@@ -7,21 +7,16 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, InlineQueryHandle
 
 
 def register_phase_surfaces(app) -> None:
-    """Register live legacy commands first, then durable world and Mini App surfaces."""
-    # Relationship commands are installed first so the compatibility registry
-    # sees them as already-owned and cannot attach its older canned callbacks.
+    """Register live surfaces while keeping presentation natural and non-revealing."""
+    # High-priority relationship commands deliberately sit before legacy handlers.
+    # The underlying selection remains private; only the natural result is public.
     try:
-        from handlers.organic_relationships import bond, randomship, matchmaker
-        existing = {
-            str(command).lower().lstrip("/")
-            for handlers in getattr(app, "handlers", {}).values()
-            for handler in handlers
-            for command in (getattr(handler, "commands", None) or ())
-        }
-        for command, callback in (("bond", bond), ("randomship", randomship), ("matchmaker", matchmaker)):
-            if command not in existing:
-                app.add_handler(CommandHandler(command, callback), group=-26)
-                existing.add(command)
+        from handlers.organic_relationships import bond, randomship, matchmaker, ship, friendship, loyalty
+        for command, callback in (
+            ("bond", bond), ("randomship", randomship), ("matchmaker", matchmaker),
+            ("ship", ship), ("friendship", friendship), ("loyalty", loyalty),
+        ):
+            app.add_handler(CommandHandler(command, callback), group=-40)
     except Exception:
         import logging
         logging.getLogger("midnight.relationship").exception("ORGANIC_RELATIONSHIP_SURFACE_FAILED")
@@ -37,27 +32,11 @@ def register_phase_surfaces(app) -> None:
     try:
         from handlers.legacy_surface import register_legacy_surface
         result = register_legacy_surface(app)
-        log_added = len(result.get("added", [])) if isinstance(result, dict) else -1
-        log_skipped = len(result.get("skipped", [])) if isinstance(result, dict) else -1
         import logging
-        logging.getLogger("midnight.phase_registry").info("LEGACY_SURFACE_WIRED | added=%s | skipped=%s", log_added, log_skipped)
+        logging.getLogger("midnight.phase_registry").info("LEGACY_SURFACE_WIRED | added=%s | skipped=%s", len(result.get("added", [])) if isinstance(result, dict) else -1, len(result.get("skipped", [])) if isinstance(result, dict) else -1)
     except Exception:
         import logging
         logging.getLogger("midnight.phase_registry").exception("LEGACY_SURFACE_WIRING_FAILED")
-
-    try:
-        existing = {
-            str(command).lower().lstrip("/")
-            for handlers in getattr(app, "handlers", {}).values()
-            for handler in handlers
-            for command in (getattr(handler, "commands", None) or ())
-        }
-        if "ship" not in existing:
-            from handlers.friendship import ship
-            app.add_handler(CommandHandler("ship", ship), group=-25)
-    except Exception:
-        import logging
-        logging.getLogger("midnight.phase_registry").exception("SHIP_REGISTRATION_FAILED")
 
     from .world_handler import start_game, game_callback, handle_game_message, handle_poll_answer, handle_poll
     from .callback_handler import handle_callback
@@ -84,6 +63,6 @@ async def house(update, context) -> None:
         await update.effective_message.reply_text("☾ Oracle House is quiet for a moment. The room will open when its window is ready.")
         return
     await update.effective_message.reply_text(
-        "☾ Oracle House\n\nA quieter place for your memories, badges, group pulse and games.",
+        "☾ Oracle House\n\nA quieter room for your memories, achievements, group pulse and games.",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Enter the House 🌙", web_app=WebAppInfo(url=url))]]),
     )
