@@ -9,13 +9,33 @@ on:
     branches:
       - main
       - 'rebuild/**'
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Branch or commit SHA to verify
+        required: false
+        default: main
+        type: string
+
+env:
+  TELEGRAM_BOT_TOKEN: ci-telegram-token-1234567890
+  OPENAI_API_KEY: ci-openai-key-1234567890
+  GIPHY_API_KEY: ci-giphy-key-1234567890
+  STICKER_PACK_NAME: ci-stickers
+  ORACLE_MASTER_ID: '1'
+  DATABASE_URL: sqlite:///ci.sqlite3
+  GROUP_CHAT_ID: '0'
+  OWNER_ID: '0'
 
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target_ref || github.ref }}
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Install dependencies

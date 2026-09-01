@@ -1,1 +1,2 @@
 CI verification marker — runtime fixes only; no production behavior encoded here.
+Final verification trigger: 2026-08-30.
