@@ -5,6 +5,7 @@ per-group cooldown supplied by the caller. Text remains the primary experience.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import random
 import re
@@ -22,27 +23,51 @@ MEDIA_COOLDOWN = 12 * 3600
 def _term(text: str, kind: str) -> str:
     value = re.sub(r"[^\w\s'-]", " ", text or "", flags=re.UNICODE)
     words = [w for w in value.split() if len(w) > 2]
-    base = " ".join(words[:12])
+    # Prefer scene-bearing words over Telegram formatting/meta words.
+    stop = {"part", "the", "and", "with", "that", "this", "from", "then", "when", "there", "someone", "nobody", "oracle"}
+    meaningful = [w for w in words if w.casefold() not in stop]
+    base = " ".join(meaningful[:10] or words[:10])
     if kind == "story":
         return f"cinematic {base} night"[:120]
     return f"curious {base}"[:120]
 
 
+def _stable_rng(*values: str | int | None) -> random.Random:
+    seed = "|".join(str(v or "") for v in values).encode("utf-8")
+    digest = hashlib.sha256(seed).digest()
+    return random.Random(int.from_bytes(digest[:8], "big"))
+
+
 def _media_kind(text: str, narrative_kind: str, part_index: int | None) -> str | None:
     """Choose a restrained medium; never force media into every narrative."""
     low = (text or "").casefold()
-    rng = random.Random(hash((narrative_kind, part_index or 0, low[:80])) & 0xFFFFFFFF)
-    # Text-first policy: most narrative beats remain text-only.
+    rng = _stable_rng(narrative_kind, part_index or 0, low[:160])
     roll = rng.random()
     if narrative_kind == "story":
-        if roll < 0.18 and part_index in (1, None):
+        if roll < 0.18 and part_index == 1:
             return "image"
-        if roll < 0.28 and any(x in low for x in ("train", "city", "library", "star", "ocean", "map")):
+        if roll < 0.30 and any(x in low for x in ("train", "city", "library", "star", "ocean", "map", "street", "rain", "moon")):
             return "image"
     elif narrative_kind == "gossip":
-        if roll < 0.12 and any(x in low for x in ("funny", "ridiculous", "rumour", "rumor", "weird")):
+        if roll < 0.12 and any(x in low for x in ("funny", "ridiculous", "rumour", "rumor", "weird", "wild", "absurd")):
             return "gif"
     return None
+
+
+def sticker_ids() -> list[str]:
+    raw = os.getenv("ORACLE_STICKER_IDS", "").strip()
+    return [x.strip() for x in re.split(r"[,\n]", raw) if x.strip()]
+
+
+def choose_sticker(text: str, narrative_kind: str, part_index: int | None = None) -> str | None:
+    """Use an explicitly configured sticker pack only when a reaction beat fits."""
+    ids = sticker_ids()
+    if not ids:
+        return None
+    low = (text or "").casefold()
+    if not any(x in low for x in ("😂", "🤣", "funny", "ridiculous", "absurd", "wild", "oh", "wait")):
+        return None
+    return _stable_rng("sticker", narrative_kind, part_index or 0, low[:120]).choice(ids)
 
 
 async def _giphy(term: str) -> str | None:
@@ -62,7 +87,7 @@ async def _giphy(term: str) -> str | None:
             for item in data
             if item.get("images", {}).get("original", {}).get("url")
         ]
-        return random.choice(urls) if urls else None
+        return _stable_rng("giphy", term).choice(urls) if urls else None
     except Exception:
         log.exception("ORACLE_MEDIA_GIF_LOOKUP_FAILED")
         return None
@@ -97,7 +122,7 @@ async def _wikimedia(term: str) -> str | None:
             url = info.get("thumburl") or info.get("url")
             if url and mime.startswith("image/") and mime not in {"image/svg+xml", "image/gif"}:
                 urls.append(url)
-        return random.choice(urls) if urls else None
+        return _stable_rng("image", term).choice(urls) if urls else None
     except Exception:
         log.exception("ORACLE_MEDIA_IMAGE_LOOKUP_FAILED")
         return None
