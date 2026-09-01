@@ -53,6 +53,40 @@ def reference_hints(history: list) -> list[str]:
     return hints[-8:]
 
 
+_GENERIC_REPLY_PATTERNS = (
+    r"\b(i['’]?m|i am)\s+listening\b",
+    r"\bno rush\b",
+    r"\bi['’]?m here\b",
+    r"\bhow can i help\b",
+    r"\bhow may i help\b",
+    r"\blet['’]?s unpack\b",
+    r"\bwhat['’]?s on your mind\b",
+    r"\bfeel free to\b",
+    r"\bi understand\b",
+)
+
+
+def _looks_canned(reply: str | None) -> bool:
+    """Reject assistant-like filler that makes the Oracle sound like support software."""
+    value = (reply or "").strip()
+    if not value:
+        return True
+    return any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in _GENERIC_REPLY_PATTERNS)
+
+
+def _casual_fallback(user_text: str) -> str | None:
+    """Small deterministic fallbacks for obvious low-information chat bids."""
+    value = (user_text or "").strip()
+    if not value:
+        return None
+    compact = re.sub(r"[^a-zA-Z0-9\u0900-\u097F]+", " ", value.casefold()).strip()
+    if re.fullmatch(r"(?:chl|chal|chalo)(?:\s+chl|\s+chal|\s+chalo)*", compact):
+        return "Haan haan 😂 bol, kya hua?"
+    if re.fullmatch(r"(?:lol|lmao|haha|hehe)(?:\s+\w+)*", compact):
+        return "😂 Bas, ab tum hi batao kis baat pe itni hansi aa rahi hai."
+    return None
+
+
 async def generate_reply(user_text: str, persona: str, history: list) -> str | None:
     """Generate a compact, context-aware reply through the central AI service."""
     if not ai_service.api_key:
@@ -74,6 +108,8 @@ async def generate_reply(user_text: str, persona: str, history: list) -> str | N
         "- Reply to what the person actually said; use recent context only when it helps.\n"
         "- Sound spontaneous, specific and human. Match the emotional temperature instead of applying a fixed mood.\n"
         "- For ordinary low-stakes messages, talk like a friend in the room: answer directly, joke back, react, tease lightly, or continue the thought. Do not turn a casual message into emotional support.\n"
+        "- Never answer a casual message with generic support language. In particular, avoid 'I'm listening', 'No rush', 'I'm here', 'How can I help?', 'What's on your mind?', or similar filler unless the user's message explicitly asks for emotional support.\n"
+        "- Prefer concrete reactions to generic validation. If the message is playful or silly, play along. If it is a simple question, answer it. If it is teasing, tease back lightly.\n"
         "- Do not use canned assistant openings such as 'Noted', 'Certainly', 'Absolutely', 'I understand', 'Let's unpack that', 'I'm listening', 'No rush', 'I'm here', or 'How can I help?' unless the newest message genuinely calls for that exact response.\n"
         "- Do not restate the user's message or explain your role.\n"
         f"- Language signal: {language_hint}. If the newest message is Romanized Bangla, understand it as Bangla and reply naturally in Romanized Bangla unless the conversation clearly switches language. Do not translate it unless asked.\n"
@@ -89,4 +125,18 @@ async def generate_reply(user_text: str, persona: str, history: list) -> str | N
         f"Newest message:\n{user_text}\n\n"
         "Reply naturally to the newest message. Output only the reply text."
     )
-    return await ai_service.generate(prompt, timeout=20.0)
+    reply = await ai_service.generate(prompt, timeout=20.0)
+    if not _looks_canned(reply):
+        return reply
+
+    retry_prompt = (
+        prompt
+        + "\n\nQUALITY CONTROL: Your previous draft sounded like a customer-support bot. Discard it. "
+          "Write a fresh, specific reaction to the newest message as a friend in the group. "
+          "Do not use any phrase resembling 'I'm listening', 'No rush', 'I'm here', 'How can I help?', "
+          "or 'What's on your mind'. If the message is playful, be playful. Output only the new reply."
+    )
+    retry = await ai_service.generate(retry_prompt, timeout=20.0)
+    if not _looks_canned(retry):
+        return retry
+    return _casual_fallback(user_text) or retry
