@@ -1,7 +1,7 @@
 """Midnight Oracle voice-note engine.
 
-Voice is an optional response modality, chosen by context rather than forced on
-all replies. It uses the existing OpenAI dependency and fails closed to text.
+Voice is an optional response modality. Midnight keeps one original female voice
+identity while varying the spoken wording and delivery instructions naturally.
 """
 from __future__ import annotations
 
@@ -22,8 +22,15 @@ class VoiceDecision:
     reason: str
 
 
+VOICE_PROFILE = {
+    "name": "midnight_original_female",
+    "voice": "alloy",
+    "style": "natural conversational female voice; warm, expressive, intimate but not theatrical; human-like pauses and varied emphasis; Indian-English/Hinglish friendly; never imitate or impersonate a real person",
+}
+
+
 class VoiceEngine:
-    """Generate short, deduplicated Telegram voice notes without breaking chat."""
+    """Generate short, varied, deduplicated Telegram voice notes."""
 
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = (api_key or OPENAI_API_KEY or "").strip()
@@ -33,7 +40,6 @@ class VoiceEngine:
         self._daily_count: dict[int, tuple[int, int]] = {}
 
     def decide(self, *, chat_id: int, user_id: int, text: str, direct: bool, private: bool) -> VoiceDecision:
-        """Choose voice only when it adds something and cooldowns permit it."""
         if not self.client or not text.strip():
             return VoiceDecision(False, "voice_unconfigured")
         now = time.time()
@@ -71,7 +77,16 @@ class VoiceEngine:
         text = " ".join(text.split()).strip()
         return text[:max_chars].rstrip() if len(text) > max_chars else text
 
-    async def synthesize(self, text: str, *, voice: str = "alloy") -> io.BytesIO | None:
+    @staticmethod
+    def _delivery_style() -> str:
+        return random.choice((
+            "conversational, relaxed pacing, a tiny natural pause where appropriate",
+            "warm and lightly playful, varied emphasis, unhurried delivery",
+            "soft and reassuring, natural pauses, emotionally sincere",
+            "bright and spontaneous, conversational rhythm, avoid announcer cadence",
+        ))
+
+    async def synthesize(self, text: str, *, voice: str | None = None) -> io.BytesIO | None:
         """Return an Opus audio buffer suitable for Telegram send_voice."""
         if not self.client:
             return None
@@ -81,9 +96,10 @@ class VoiceEngine:
         try:
             response = await self.client.audio.speech.create(
                 model="gpt-4o-mini-tts",
-                voice=voice,
+                voice=voice or VOICE_PROFILE["voice"],
                 input=script,
                 response_format="opus",
+                instructions=(VOICE_PROFILE["style"] + ". " + self._delivery_style()),
             )
             content = getattr(response, "content", None)
             if not content:
