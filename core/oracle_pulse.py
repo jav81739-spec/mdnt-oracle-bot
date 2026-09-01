@@ -6,7 +6,7 @@ import time
 
 from .oracle_delivery import deliver
 from .oracle_freshness import FreshnessGovernor
-from .oracle_media import MEDIA_COOLDOWN, choose_media
+from .oracle_media import MEDIA_COOLDOWN, choose_media, choose_sticker
 from .oracle_mind import generate_contextual_piece, language_hint
 from .oracle_narrative import maybe_deliver as maybe_deliver_narrative, rollback as rollback_narrative
 from .oracle_presence import decide_presence
@@ -30,17 +30,24 @@ def _part_index(state: str | None) -> int | None:
 
 
 async def _deliver_narrative_with_media(application, db, group_id: int, text: str, kind: str, state: str | None, now: float) -> bool:
-    """Text is primary; one optional contextual media companion is allowed."""
+    """Text is primary; at most one contextual media/sticker companion is allowed."""
     if not await deliver(application, group_id, text):
         return False
     if await db.cooldown_active("group", str(group_id), MEDIA_COOLDOWN_TYPE, now):
         return True
     try:
-        media = await choose_media(text, kind, _part_index(state))
+        part_index = _part_index(state)
+        sticker = choose_sticker(text, kind, part_index)
+        if sticker:
+            await application.bot.send_sticker(group_id, sticker)
+            await db.set_cooldown("group", str(group_id), MEDIA_COOLDOWN_TYPE, now + MEDIA_COOLDOWN)
+            _log("ORACLE_PULSE_STAGE | stage=media | chat=%s | kind=sticker | delivered=true", group_id)
+            return True
+        media = await choose_media(text, kind, part_index)
         if not media:
             return True
         if media["kind"] == "gif":
-            await application.bot.send_animation(group_id, media["url"], caption="Powered By GIPHY")
+            await application.bot.send_animation(group_id, media["url"])
         elif media["kind"] == "image":
             await application.bot.send_photo(group_id, media["url"])
         else:
@@ -101,7 +108,8 @@ async def pulse_callback(context) -> None:
                     if narrative_id is not None and previous_part is not None:
                         await rollback_narrative(db, narrative_id, previous_part, now)
                     continue
-                delivered = await _deliver_narrative_with_media(application, db, group_id, narrative_text, accepted_kind, narrative_state, now)
+                current_part = previous_part + 1 if previous_part is not None else None
+                delivered = await _deliver_narrative_with_media(application, db, group_id, narrative_text, accepted_kind, f"part:{current_part}" if current_part else narrative_state, now)
                 if not delivered:
                     if narrative_id is not None and previous_part is not None:
                         await rollback_narrative(db, narrative_id, previous_part, now)
