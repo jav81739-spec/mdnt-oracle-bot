@@ -33,7 +33,17 @@ def _protected_callback(cb, command):
     if command not in _PROTECTED:return cb
     async def guarded(update, context):
         if not await _authorized(update, context, command):
-            if getattr(update, "effective_message", None):await update.effective_message.reply_text("☾ This command is restricted to the owner or group admins.",reply_to_message_id=update.effective_message.message_id)
+            # Permission failures must never create a second error by attempting
+            # a reply in a chat where the bot cannot write.
+            message = getattr(update, "effective_message", None)
+            if not message:return
+            try:
+                await message.reply_text(
+                    "☾ This command is restricted to the owner or group admins.",
+                    reply_to_message_id=message.message_id,
+                )
+            except TelegramError:
+                log.info("PROTECTED_COMMAND_DENIED_NO_WRITE_ACCESS | command=%s | chat=%s", command, getattr(update.effective_chat, "id", None))
             return
         return await cb(update, context)
     guarded.__name__ = getattr(cb, "__name__", f"guarded_{command}")
