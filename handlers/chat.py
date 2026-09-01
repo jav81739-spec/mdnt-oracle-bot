@@ -17,33 +17,59 @@ MAX_HISTORY=12; COOLDOWN_SECONDS=8; _AI_CONCURRENCY=2; _ai_slots=asyncio.Semapho
 _CANNED_REPLIES={
     "i'm listening. no rush.", "i’m listening. no rush.", "i'm listening.", "i’m listening.",
     "i'm here. no rush.", "i’m here. no rush.", "how can i help you today?",
-    "let's unpack that.", "i understand.", "certainly.", "absolutely.",
+    "let's unpack that.", "i understand.", "certainly.", "absolutely",
 }
 
 
 def _natural_fallback(text:str,history:list[dict[str,str]],memories:list[str]|None=None)->str:
     """Keep provider outages conversational instead of falling into support-agent language."""
     value=(text or "").strip(); low=value.casefold()
-    if not value:return "Hmm. 🌙"
+    if not value:return "Hmm."
     if any(token in low for token in ("sad","upset","rough","bad day","not okay","😭","🥲")):
-        return _random.choice(("Haan… bol. Kya hua?", "Hmm. Bol na, kya scene hai?", "Yeah… tell me. 🖤"))
+        return _random.choice(("Haan… bol.", "Hmm… kya hua?", "Yeah… bol na."))
     if any(token in low for token in ("lol","haha","😂","🤣")):
-        return _random.choice(("😂 Okay, that was good.", "Lmao 😭", "Okay, I actually laughed at that."))
+        return _random.choice(("😂 Fair.", "Lmao 😭", "Okay, that was actually funny."))
     if re.search(r"\b(?:aisa|accha|acha)\s+k(?:aisa|ya)\b|\baisa\s+k(?:aisa|ya)\s+h", low):
-        return _random.choice(("Achha? 😭 Kis part ki baat kar raha hai?", "Haan? 😂 Kya weird laga?", "Wait, explain. 👀"))
+        return _random.choice(("Achha? Kis part ki baat kar raha hai?", "Haan? Kya weird laga?", "Wait, kya hua?"))
     if "gossip" in low:return local_reply(value,history,memories)
     if "story" in low or "kahani" in low:return local_reply(value,history,memories)
     if "?" in value:
-        return _random.choice(("Hmm — interesting. Bata, tumhara take kya hai?", "Haan, good question. 👀", "Wait, isme actually ek angle hai…"))
+        return _random.choice(("Hmm — interesting.", "Haan, good question.", "Wait, isme actually ek angle hai…"))
     if memories:
-        return _random.choice(("Haan, samajh raha hoon.", "Yeah, I'm following.", "Hmm. Continue."))
-    return _random.choice(("Hmm. 👀", "Haan, bol.", "Go on.", "Okay, I'm following.", "Interesting. Tell me more."))
+        return _random.choice(("Haan, samajh gaya.", "Yeah, got you.", "Hmm, I'm with you."))
+    return _random.choice(("Hmm.", "Haan, bol.", "Go on.", "Okay.", "Interesting."))
 
 
-def _usable_reply(reply:str|None,user_text:str)->str|None:
+def _sentence_keys(text:str)->list[str]:
+    chunks=re.split(r"(?<=[.!?।])\s+|\n+",(text or "").strip())
+    keys=[]
+    for chunk in chunks:
+        cleaned=re.sub(r"[^\w\u0980-\u09ff]+"," ",chunk.casefold()).strip()
+        if len(cleaned.split())>=3: keys.append(cleaned)
+    return keys
+
+
+def _has_repetition(reply:str, history:list[dict[str,str]]|None=None)->bool:
+    keys=_sentence_keys(reply)
+    if len(keys)!=len(set(keys)): return True
+    words=re.findall(r"[\w\u0980-\u09ff]+",(reply or "").casefold())
+    if len(words)>=8:
+        for size in (4,5,6):
+            seen=set()
+            for i in range(len(words)-size+1):
+                gram=" ".join(words[i:i+size])
+                if gram in seen:return True
+                seen.add(gram)
+    previous=[_sentence_keys(str(t.get("text",""))) for t in (history or [])[-4:] if t.get("role")=="assistant"]
+    current=set(keys)
+    return bool(current and any(current.intersection(set(old)) for old in previous))
+
+
+def _usable_reply(reply:str|None,user_text:str,history:list[dict[str,str]]|None=None)->str|None:
     value=(reply or "").strip()
     if not value:return None
     if value.casefold() in _CANNED_REPLIES:return None
+    if _has_repetition(value,history):return None
     return value
 
 async def load_from_storage():
@@ -90,7 +116,14 @@ async def auto_reply(update,context):
             memories=await recall_memories(db,user.id,update.effective_chat.id,limit=6)
         except Exception: log.exception("ORACLE_MEMORY_UPDATE_FAILED | chat=%s",cid)
     try:
-        async with _ai_slots: reply_text=_usable_reply(await core_generate_reply(text,persona,history + ([{"role":"memory","speaker":"Oracle Memory","text":m} for m in memories] if memories else [])),text)
+        context_history=history + ([{"role":"memory","speaker":"Oracle Memory","text":m} for m in memories] if memories else [])
+        async with _ai_slots:
+            draft=await core_generate_reply(text,persona,context_history)
+            reply_text=_usable_reply(draft,text,history)
+            if reply_text is None and draft:
+                retry_text=text+"\n[Reply quality: write one fresh, non-repetitive, specific conversational response. Do not repeat any sentence or phrase from the draft. Do not use canned assistant language.]"
+                retry=await core_generate_reply(retry_text,persona,context_history)
+                reply_text=_usable_reply(retry,text,history)
     except AIUnavailable:
         reply_text=None; log.info("CHAT_PROVIDER_COOLDOWN | chat=%s | local_mind=true",cid)
     except Exception:
