@@ -1,10 +1,8 @@
 """Durable, one-at-a-time serialized storytelling and world-gossip for Oracle Pulse."""
 from __future__ import annotations
 
-import hashlib
 import json
 import re
-import time
 from typing import Any
 
 from .ai import service
@@ -62,10 +60,7 @@ async def active(db, group_id: int):
 
 
 async def recent_titles(db, group_id: int, limit: int = 24) -> list[str]:
-    rows = await db.fetchall(
-        "SELECT title FROM oracle_narratives WHERE group_id=? ORDER BY id DESC LIMIT ?",
-        (group_id, limit),
-    )
+    rows = await db.fetchall("SELECT title FROM oracle_narratives WHERE group_id=? ORDER BY id DESC LIMIT ?", (group_id, limit))
     return [str(r[0]) for r in rows]
 
 
@@ -127,7 +122,7 @@ Recent public room atmosphere:
     return await active(db, group_id)
 
 
-async def _render_part(db, row, context: list[dict[str, Any]], language: str, now: float) -> tuple[str, bool, str]:
+async def _render_part(db, row, context: list[dict[str, Any]], language: str, now: float) -> tuple[str, bool, str, int]:
     part = int(row[6]) + 1
     max_parts = int(row[7])
     title = str(row[3]); premise = str(row[4]); canon = str(row[5]); kind = str(row[2])
@@ -158,20 +153,28 @@ Recent public atmosphere (use only if naturally relevant):
         "UPDATE oracle_narratives SET part_no=?,updated_at=?,next_at=?,status=?,completed_at=? WHERE id=? AND status='active'",
         (part, now, next_at, "completed" if finished else "active", now if finished else None, int(row[0])),
     )
-    return text, finished, kind
+    return text, finished, kind, int(row[6])
 
 
-async def maybe_deliver(db, application, group_id: int, kind: str, context: list[dict[str, Any]], now: float) -> tuple[str | None, str, str | None]:
-    """Return one due narrative part, or None; a group has only one active narrative at once."""
+async def rollback(db, narrative_id: int, previous_part: int, now: float) -> None:
+    """Undo an un-delivered/rejected part so a transient failure never loses canon."""
+    await db.execute(
+        "UPDATE oracle_narratives SET part_no=?,updated_at=?,next_at=?,status='active',completed_at=NULL WHERE id=?",
+        (previous_part, now, now, int(narrative_id)),
+    )
+
+
+async def maybe_deliver(db, application, group_id: int, kind: str, context: list[dict[str, Any]], now: float) -> tuple[str | None, str, str | None, int | None, int | None]:
+    """Return one due narrative part; a group has only one active narrative at once."""
     await ensure(db)
     row = await active(db, group_id)
     if row:
         if float(row[11]) > now:
-            return None, "active_wait", str(row[2])
-        text, finished, row_kind = await _render_part(db, row, context, _language_hint(context), now)
-        return text, "finished" if finished else "continued", row_kind
+            return None, "active_wait", str(row[2]), None, None
+        text, finished, row_kind, previous_part = await _render_part(db, row, context, _language_hint(context), now)
+        return text, "finished" if finished else "continued", row_kind, int(row[0]), previous_part
     if kind not in {"story", "gossip"}:
-        return None, "no_narrative", None
+        return None, "no_narrative", None, None, None
     row = await _new_series(db, group_id, kind, context, _language_hint(context), now)
-    text, finished, row_kind = await _render_part(db, row, context, _language_hint(context), now)
-    return text, "finished" if finished else "started", row_kind
+    text, finished, row_kind, previous_part = await _render_part(db, row, context, _language_hint(context), now)
+    return text, "finished" if finished else "started", row_kind, int(row[0]), previous_part
