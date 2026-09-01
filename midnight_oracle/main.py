@@ -17,6 +17,8 @@ from .handlers.world_handler import start_game,end_game,game_callback,handle_gam
 from .handlers.prediction_handler import predict,predictions
 from .handlers.webapp_handler import handle_webapp_data
 from .handlers.surprise_handler import mysterybox,nightgift,muse,glitch
+from .handlers.voice_handler import voice
+from .voice_triggers import wants_voice
 from .scheduler import OracleScheduler
 from .utils.logger import configure_logging,get_logger
 from storage import redis_client
@@ -56,26 +58,10 @@ async def _post_shutdown(application:Application)->None:
     db=application.bot_data.get('oracle_db')
     if db:await db.close()
 
-async def _track_group_activity(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    chat=update.effective_chat;user=update.effective_user
-    if not chat or chat.type not in {'group','supergroup'} or not user or user.is_bot:return
-    db=context.application.bot_data.get('oracle_db')
-    if not db:return
-    try:
-        await db.execute("INSERT INTO group_profile(group_id,group_name,timezone,created_at) VALUES(?,?,?,?) ON CONFLICT(group_id) DO UPDATE SET group_name=excluded.group_name",(chat.id,chat.title or '',str(TIMEZONE),now_ts()))
-        await db.upsert_member(user.id,chat.id,user.username or '',user.first_name or 'Unknown')
-        await db.increment_interaction(user.id,chat.id)
-        from handlers.social_engine import register_member,bump_msg_count
-        await register_member(chat.id,user.id,user.first_name or 'Unknown',user.username or '');await bump_msg_count(chat.id,user.id)
-        text=(update.effective_message.text or '').strip() if update.effective_message else ''
-        if text and not text.startswith('/'):
-            atmosphere=context.application.bot_data.setdefault('oracle_atmosphere',{});items=atmosphere.setdefault(str(chat.id),[]);items.append({'text':text[:500],'ts':now_ts()});del items[:-16]
-    except Exception:log.exception('GROUP_ACTIVITY_TRACKING_FAILED | chat_id=%s',chat.id)
-
 def build_application()->Application:
     if not BOT_TOKEN:raise RuntimeError('BOT_TOKEN is required')
     app=Application.builder().token(BOT_TOKEN).post_init(_post_init).post_shutdown(_post_shutdown).build()
-    commands={'start':start,'help':help_command,'oracle':oracle,'truth':truth,'memory':memory,'mymemory':mymemory,'forget':forget,'quiet':quiet,'wake':wake,'house':house,'tod':start_game,'wyr':start_game,'nhie':start_game,'scramble':start_game,'unscramble':None,'predict':predict,'predictions':predictions,'endgame':end_game,'mysterybox':mysterybox,'nightgift':nightgift,'muse':muse,'glitch':glitch}
+    commands={'start':start,'help':help_command,'oracle':oracle,'truth':truth,'memory':memory,'mymemory':mymemory,'forget':forget,'quiet':quiet,'wake':wake,'house':house,'voice':voice,'tod':start_game,'wyr':start_game,'nhie':start_game,'scramble':start_game,'unscramble':None,'predict':predict,'predictions':predictions,'endgame':end_game,'mysterybox':mysterybox,'nightgift':nightgift,'muse':muse,'glitch':glitch}
     for name,cb in commands.items():
         if name=='unscramble':
             from handlers.games import unscramble as cb
@@ -113,7 +99,7 @@ async def _route_message(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
         username=str(getattr(context.bot,'username','') or '').casefold()
         replied=getattr(getattr(update.effective_message,'reply_to_message',None),'from_user',None) if update.effective_message else None
         bot_id=getattr(context.bot,'id',None)
-        direct=bool(replied and bot_id and getattr(replied,'id',None)==bot_id) or bool(username and f'@{username}' in low) or low in {'oracle','midnight'} or any(low==p or low.startswith(p+' ') for p in ('hey oracle','hello oracle','hi oracle','oracle suno','oracle bhai','oracle bro','oracle listen','hey midnight','hello midnight','hi midnight','midnight suno','midnight bhai','midnight bro'))
+        direct=wants_voice(text) or bool(replied and bot_id and getattr(replied,'id',None)==bot_id) or bool(username and f'@{username}' in low) or low in {'oracle','midnight'} or any(low==p or low.startswith(p+' ') for p in ('hey oracle','hello oracle','hi oracle','oracle suno','oracle bhai','oracle bro','oracle listen','hey midnight','hello midnight','hi midnight','midnight suno','midnight bhai','midnight bro'))
         try:
             from core.storage import storage
             trigger=await storage.load(f'v2:autonomous:trigger:{chat.id}',None)
