@@ -1,8 +1,7 @@
 """Validated runtime configuration for Midnight Oracle.
 
-All secrets are read from the environment (with .env support). No secret is
-stored in source control. The module exposes one canonical configuration
-surface plus backwards-compatible aliases used by the runtime modules.
+Configuration is import-safe: importing modules for tests does not require
+production secrets. Runtime startup remains strict through ``load_settings``.
 """
 from __future__ import annotations
 
@@ -88,12 +87,17 @@ class Settings:
 
 
 def load_settings() -> Settings:
-    telegram_token = _required("TELEGRAM_BOT_TOKEN")
+    telegram_token = _optional("TELEGRAM_BOT_TOKEN") or _optional("BOT_TOKEN")
+    if not telegram_token:
+        raise ConfigurationError("Missing required environment variable: TELEGRAM_BOT_TOKEN")
     openai_key = _required("OPENAI_API_KEY")
     giphy_key = _required("GIPHY_API_KEY")
     sticker_pack = _required("STICKER_PACK_NAME")
     master_id = _int_env("ORACLE_MASTER_ID")
-    database = _database_url(_required("DATABASE_URL"))
+    database_raw = _optional("DATABASE_URL") or _optional("DATABASE_PATH")
+    if not database_raw:
+        raise ConfigurationError("Missing required environment variable: DATABASE_URL")
+    database = _database_url(database_raw)
     log_level = (_optional("LOG_LEVEL", "INFO") or "INFO").upper()
     if log_level not in {"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"}:
         raise ConfigurationError("LOG_LEVEL must be a valid Loguru level")
@@ -120,27 +124,27 @@ def load_settings() -> Settings:
     )
 
 
-settings = load_settings()
-TELEGRAM_BOT_TOKEN = settings.telegram_bot_token
-OPENAI_API_KEY = settings.openai_api_key
-GIPHY_API_KEY = settings.giphy_api_key
-STICKER_PACK_NAME = settings.sticker_pack_name
-ORACLE_MASTER_ID = settings.oracle_master_id
-DATABASE_URL = settings.database_url
-LOG_LEVEL = settings.log_level
-OPENAI_MODEL = settings.openai_model
-TIMEZONE_NAME = settings.timezone_name
-TIMEZONE = settings.timezone
-OPENAI_TIMEOUT_SECONDS = settings.openai_timeout_seconds
-MAX_OPENAI_RETRIES = settings.max_openai_retries
-DM_HOURLY_LIMIT = settings.dm_hourly_limit
-DM_SOFT_LIMIT = settings.dm_soft_limit
-GROUP_HOURLY_LIMIT = settings.group_hourly_limit
-GIF_MESSAGE_INTERVAL = settings.gif_message_interval
-RANDOM_STICKER_PROBABILITY = settings.random_sticker_probability
+# Import-safe compatibility surface. Required production validation happens
+# when ``load_settings`` is called by the runtime entrypoint.
+TELEGRAM_BOT_TOKEN = _optional("TELEGRAM_BOT_TOKEN") or _optional("BOT_TOKEN")
+OPENAI_API_KEY = _optional("OPENAI_API_KEY")
+GIPHY_API_KEY = _optional("GIPHY_API_KEY")
+STICKER_PACK_NAME = _optional("STICKER_PACK_NAME")
+ORACLE_MASTER_ID = _int_env("ORACLE_MASTER_ID", 0)
+_DATABASE_RAW = _optional("DATABASE_URL") or _optional("DATABASE_PATH", "midnight_oracle.sqlite3")
+DATABASE_URL = _database_url(_DATABASE_RAW)
+LOG_LEVEL = (_optional("LOG_LEVEL", "INFO") or "INFO").upper()
+OPENAI_MODEL = _optional("OPENAI_MODEL", "gpt-4o") or "gpt-4o"
+TIMEZONE_NAME = _optional("ORACLE_TIMEZONE", "Asia/Kolkata") or "Asia/Kolkata"
+TIMEZONE = ZoneInfo(TIMEZONE_NAME)
+OPENAI_TIMEOUT_SECONDS = 30.0
+MAX_OPENAI_RETRIES = 3
+DM_HOURLY_LIMIT = 20
+DM_SOFT_LIMIT = 15
+GROUP_HOURLY_LIMIT = 10
+GIF_MESSAGE_INTERVAL = 5
+RANDOM_STICKER_PROBABILITY = 0.08
 
-# Compatibility names retained for the canonical runtime. These aliases point
-# at validated values and do not create a second configuration source.
 BOT_TOKEN = TELEGRAM_BOT_TOKEN
 DATABASE_PATH = DATABASE_URL
 
