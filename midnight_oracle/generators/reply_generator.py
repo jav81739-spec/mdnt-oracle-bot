@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 import random
+from collections import deque
 from collections.abc import AsyncIterator
 from openai import AsyncOpenAI
 from ..config import OPENAI_API_KEY, OPENAI_MODEL, FALLBACK_REPLIES
@@ -50,10 +51,13 @@ OUTPUT
 - Return only the reply text.
 """
 
+
 class ReplyGenerator:
-    """Generate context-aware Oracle replies with a safe local fallback."""
+    """Generate context-aware Oracle replies with a deduplicated safe fallback."""
+
     def __init__(self, client: AsyncOpenAI | None = None) -> None:
         self.client = client or (AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None)
+        self._fallback_recent: deque[str] = deque(maxlen=4)
 
     @staticmethod
     def _dialogue_messages(recent_context: list[str] | None) -> list[dict[str, str]]:
@@ -84,9 +88,11 @@ class ReplyGenerator:
             raise RuntimeError('Oracle model returned an invalid assistant response')
         return text[:900]
 
-    @staticmethod
-    def _fallback() -> str:
-        return _fallback_rng.choice(FALLBACK_REPLIES)
+    def _fallback(self) -> str:
+        available = [reply for reply in FALLBACK_REPLIES if reply not in self._fallback_recent]
+        choice = _fallback_rng.choice(available or list(FALLBACK_REPLIES))
+        self._fallback_recent.append(choice)
+        return choice
 
     async def stream(self, group_name: str, name: str, relationship_tier: str, message: str, mood_summary: str, time_text: str, late: bool, memory: str, recent_context: list[str] | None = None) -> AsyncIterator[str]:
         """Yield real OpenAI output deltas; callers may fall back on provider failure."""
