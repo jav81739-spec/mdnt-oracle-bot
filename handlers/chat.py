@@ -1,6 +1,6 @@
 """Human-style Telegram chat with durable memory and a provider-independent Oracle Mind."""
 from __future__ import annotations
-import logging, os, time, random as _random, asyncio
+import logging, os, time, random as _random, asyncio, re
 import httpx
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -11,8 +11,40 @@ from handlers import storage
 
 log=logging.getLogger("midnight.chat")
 chat_enabled:dict[str,bool]={}; chat_persona:dict[str,str]={}; chat_history:dict[str,list[dict[str,str]]]={}; _last_reply_time:dict[str,float]={}
-DEFAULT_PERSONA="friendly, casual, playful, naturally Hinglish when appropriate"
+DEFAULT_PERSONA="friendly, casual, playful, dryly funny, naturally Hinglish when appropriate"
 MAX_HISTORY=12; COOLDOWN_SECONDS=8; _AI_CONCURRENCY=2; _ai_slots=asyncio.Semaphore(_AI_CONCURRENCY); STORAGE_KEY="chat_settings"
+
+_CANNED_REPLIES={
+    "i'm listening. no rush.", "i’m listening. no rush.", "i'm listening.", "i’m listening.",
+    "i'm here. no rush.", "i’m here. no rush.", "how can i help you today?",
+    "let's unpack that.", "i understand.", "certainly.", "absolutely.",
+}
+
+
+def _natural_fallback(text:str,history:list[dict[str,str]],memories:list[str]|None=None)->str:
+    """Keep provider outages conversational instead of falling into support-agent language."""
+    value=(text or "").strip(); low=value.casefold()
+    if not value:return "Hmm. 🌙"
+    if any(token in low for token in ("sad","upset","rough","bad day","not okay","😭","🥲")):
+        return _random.choice(("Haan… bol. Kya hua?", "Hmm. Bol na, kya scene hai?", "Yeah… tell me. 🖤"))
+    if any(token in low for token in ("lol","haha","😂","🤣")):
+        return _random.choice(("😂 Okay, that was good.", "Lmao 😭", "Okay, I actually laughed at that."))
+    if re.search(r"\b(?:aisa|accha|acha)\s+k(?:aisa|ya)\b|\baisa\s+k(?:aisa|ya)\s+h", low):
+        return _random.choice(("Achha? 😭 Kis part ki baat kar raha hai?", "Haan? 😂 Kya weird laga?", "Wait, explain. 👀"))
+    if "gossip" in low:return local_reply(value,history,memories)
+    if "story" in low or "kahani" in low:return local_reply(value,history,memories)
+    if "?" in value:
+        return _random.choice(("Hmm — interesting. Bata, tumhara take kya hai?", "Haan, good question. 👀", "Wait, isme actually ek angle hai…"))
+    if memories:
+        return _random.choice(("Haan, samajh raha hoon.", "Yeah, I'm following.", "Hmm. Continue."))
+    return _random.choice(("Hmm. 👀", "Haan, bol.", "Go on.", "Okay, I'm following.", "Interesting. Tell me more."))
+
+
+def _usable_reply(reply:str|None,user_text:str)->str|None:
+    value=(reply or "").strip()
+    if not value:return None
+    if value.casefold() in _CANNED_REPLIES:return None
+    return value
 
 async def load_from_storage():
     global chat_enabled, chat_persona
@@ -58,17 +90,17 @@ async def auto_reply(update,context):
             memories=await recall_memories(db,user.id,update.effective_chat.id,limit=6)
         except Exception: log.exception("ORACLE_MEMORY_UPDATE_FAILED | chat=%s",cid)
     try:
-        async with _ai_slots: reply_text=await core_generate_reply(text,persona,history + ([{"role":"memory","speaker":"Oracle Memory","text":m} for m in memories] if memories else []))
+        async with _ai_slots: reply_text=_usable_reply(await core_generate_reply(text,persona,history + ([{"role":"memory","speaker":"Oracle Memory","text":m} for m in memories] if memories else [])),text)
     except AIUnavailable:
-        reply_text=local_reply(text,history,memories); log.info("CHAT_PROVIDER_COOLDOWN | chat=%s | local_mind=true",cid)
+        reply_text=None; log.info("CHAT_PROVIDER_COOLDOWN | chat=%s | local_mind=true",cid)
     except Exception:
-        reply_text=local_reply(text,history,memories); log.exception("CHAT_PROVIDER_INTERNAL_ERROR | chat=%s",cid)
-    if not reply_text: reply_text=local_reply(text,history,memories)
+        reply_text=None; log.exception("CHAT_PROVIDER_INTERNAL_ERROR | chat=%s",cid)
+    if not reply_text: reply_text=_natural_fallback(text,history,memories)
     history.append({"role":"assistant","speaker":"Midnight Oracle","text":reply_text[:2000]}); del history[:-MAX_HISTORY]
     try: await msg.reply_text(reply_text,reply_to_message_id=msg.message_id)
     except Exception: log.exception("CHAT_SEND_FAILED | chat=%s",cid)
 
-def _local_chat(text,history): return local_reply(text,history,None)
+def _local_chat(text,history): return _natural_fallback(text,history,None)
 
 async def generate_reply(user_text,persona,history):return await core_generate_reply(user_text,persona,history)
 
