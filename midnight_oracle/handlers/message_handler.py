@@ -1,131 +1,213 @@
-"""Canonical Midnight Oracle message router — DM + group human chat."""
+"""Canonical Midnight Oracle message router — one decision, one delivery."""
 from __future__ import annotations
+
 from datetime import datetime
-from telegram import Update, ReactionTypeEmoji
+
+from telegram import ReactionTypeEmoji, Update
 from telegram.ext import ContextTypes
+
+from ..database import now_ts
 from ..friend_engine import FriendEngine, GroupContext
+from ..generators.reply_generator import ReplyGenerator
+from ..handlers.sticker_handler import StickerHandler
 from ..memory_engine import MemoryEngine
 from ..mood_engine import MoodEngine
-from ..generators.reply_generator import ReplyGenerator
-from ..database import now_ts
-from ..engines.joke_engine import JokeEngine
-from ..engines.group_identity_engine import GroupIdentityEngine
-from ..engines.achievement_engine import AchievementEngine
-from ..handlers.sticker_handler import StickerHandler
-from ..handlers.streaming_draft import TelegramDraftStream
 from ..voice_engine import VoiceEngine
 from ..voice_triggers import wants_voice
+from ..engines.group_identity_engine import GroupIdentityEngine
+from ..engines.joke_engine import JokeEngine
+from middleware.alert import soft_alert
 from middleware.cooldown import cooldown_seconds, is_cooling
 from middleware.recent_buffer import load_recent, save_recent
-from middleware.alert import soft_alert
+
 
 class MessageRouter:
-    """Coordinate direct summons, DM chat, ambient friendship, memory, media, voice and achievements."""
-    def __init__(self, engine: FriendEngine, memory: MemoryEngine, mood: MoodEngine, replies: ReplyGenerator | None = None) -> None:
-        self.engine=engine; self.memory=memory; self.mood=mood; self.replies=replies or ReplyGenerator(); self.recent={}
-        db=getattr(engine,'db',None); self.jokes=JokeEngine(db) if db else None; self.identity=GroupIdentityEngine(db) if db else None; self.achievements=AchievementEngine(db) if db else None; self.stickers=StickerHandler(db) if db else None; self.voice=VoiceEngine()
+    """Coordinate direct chat, conservative ambient chat, memory, media and voice."""
 
-    async def _reply(self, message, text, **kwargs):
-        """Always make human-chat output a real Telegram reply, including DMs."""
+    def __init__(self, engine: FriendEngine, memory: MemoryEngine, mood: MoodEngine, replies: ReplyGenerator | None = None) -> None:
+        self.engine = engine
+        self.memory = memory
+        self.mood = mood
+        self.replies = replies or ReplyGenerator()
+        self.recent: dict[int, list[str]] = {}
+        db = getattr(engine, "db", None)
+        self.jokes = JokeEngine(db) if db else None
+        self.identity = GroupIdentityEngine(db) if db else None
+        self.stickers = StickerHandler(db) if db else None
+        self.voice = VoiceEngine()
+
+    async def _reply(self, message, text: str, **kwargs):
+        if not str(text or "").strip():
+            return None
         return await message.reply_text(text, reply_to_message_id=message.message_id, **kwargs)
 
-    async def _send_reply(self, message, reply: str, *, chat_id: int, user_id: int, text: str, direct: bool, private: bool) -> None:
-        """Send one guarded voice note for explicit requests, otherwise normal text."""
-        explicit=wants_voice(text)
-        decision=self.voice.decide(chat_id=chat_id,user_id=user_id,text=text,direct=direct,private=private,explicit=explicit)
+    async def _send_reply(self, message, reply: str, *, chat_id: int, user_id: int, text: str, direct: bool, private: bool) -> bool:
+        """Deliver exactly one response. Voice is attempted only for explicit voice requests."""
+        if not str(reply or "").strip():
+            return False
+        explicit = wants_voice(text)
+        decision = self.voice.decide(chat_id=chat_id, user_id=user_id, text=text, direct=direct, private=private, explicit=explicit)
         if decision.should_send:
-            audio=await self.voice.synthesize(reply)
+            audio = await self.voice.synthesize(reply)
             if audio is not None:
                 try:
                     await message.reply_voice(voice=audio, reply_to_message_id=message.message_id)
-                    self.voice.record(chat_id,user_id,reply)
-                    audio.close()
-                    return
+                    self.voice.record(chat_id, user_id, reply)
+                    return True
                 except Exception as exc:
-                    await soft_alert(None,'voice_delivery',exc)
+                    await soft_alert(None, "voice_delivery", exc)
                 finally:
-                    try: audio.close()
-                    except Exception: pass
-        await self._reply(message,reply)
+                    try:
+                        audio.close()
+                    except Exception:
+                        pass
+        await self._reply(message, reply)
+        return True
 
-    async def _announce_achievements(self,message,member,group_id,event):
-        if not self.achievements:return
-        try:
-            user_id=int(getattr(member,'user_id',getattr(member,'id',0)))
-            for key in await self.achievements.evaluate(user_id,group_id,event): await self._reply(message,await self.achievements.announce(key,member,group_id))
-        except Exception as exc: await soft_alert(None,'achievement_announce',exc)
-
-    async def _hidden_surprise(self,message,chat_id,user_id,text):
-        """Disabled as an inline second reply; surprises belong to the autonomous scheduler."""
+    async def _announce_achievements(self, message, member, group_id, event) -> None:
+        """Achievements never create a second unsolicited conversational message."""
+        del message, member, group_id, event
         return
 
-    async def _stream_private_reply(self, context, chat_id, draft_id, group_name, ctx, text, signal, recent_context):
-        stream = TelegramDraftStream(context.bot, chat_id, draft_id)
-        await stream.thinking()
-        parts: list[str] = []
-        async for delta in self.replies.stream(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet,recent_context):
-            parts.append(delta)
-            await stream.push(''.join(parts))
-        reply = self.replies._clean(''.join(parts))
-        await stream.finish()
-        return reply
+    async def _hidden_surprise(self, message, chat_id, user_id, text):
+        """Inline surprise delivery is intentionally disabled; autonomous features own that surface."""
+        del message, chat_id, user_id, text
+        return
 
-    async def handle(self,update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
+    async def handle(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
-            message=update.effective_message; chat=update.effective_chat; user=update.effective_user
-            if not message or not chat or not user or bool(getattr(user,'is_bot',False)):return
-            text=(message.text or message.caption or '').strip()
-            if not text or text.startswith('/'):return
-            private=chat.type=='private'; group=chat.type in {'group','supergroup'}
-            if not private and not group:return
-            explicit_voice=wants_voice(text)
-            direct=private or explicit_voice or self._is_direct_summon(text,context,message)
-            if is_cooling(f'{chat.id}:{user.id}',cooldown_seconds(chat.type,direct)):return
-            application=getattr(context,'application',None); bot_data=getattr(application,'bot_data',{}) if application else {}; storage_client=bot_data.get('storage_client'); db=getattr(self.engine,'db',None)
-            if not db:return
-            group_id=chat.id; group_name=(chat.title or 'Midnight Oracle') if group else 'Midnight Oracle DM'
-            await db.upsert_member(user.id,group_id,user.username or '',user.first_name or 'friend')
-            profile=await self.memory.get(user.id,group_id); recent=await load_recent(storage_client,str(group_id)); self.recent[group_id]=recent
-            recent_context=list(recent)[-8:]
-            now=datetime.now(); signal=self.mood.estimate(text); ctx=GroupContext(str(user.id),str(group_id),list(recent)[-10:],now.hour,now.hour>=23 or now.hour<3,group_name,profile.relationship_tier,profile.preferred_name or user.first_name or 'friend',now_ts(),(' | '.join(list(profile.themes[:2])+list(profile.worries[:1]))) or 'none')
+            message = update.effective_message
+            chat = update.effective_chat
+            user = update.effective_user
+            if not message or not chat or not user or bool(getattr(user, "is_bot", False)):
+                return
+            text = (message.text or message.caption or "").strip()
+            if not text or text.startswith("/"):
+                return
+            private = chat.type == "private"
+            group = chat.type in {"group", "supergroup"}
+            if not private and not group:
+                return
+
+            explicit_voice = wants_voice(text)
+            direct = private or explicit_voice or self._is_direct_summon(text, context, message)
+            if is_cooling(f"{chat.id}:{user.id}", cooldown_seconds(chat.type, direct)):
+                return
+
+            application = getattr(context, "application", None)
+            bot_data = getattr(application, "bot_data", {}) if application else {}
+            storage_client = bot_data.get("storage_client")
+            db = getattr(self.engine, "db", None)
+            if not db:
+                return
+
+            group_id = chat.id
+            group_name = (chat.title or "Midnight Oracle") if group else "Midnight Oracle DM"
+            await db.upsert_member(user.id, group_id, user.username or "", user.first_name or "friend")
+            profile = await self.memory.get(user.id, group_id)
+            recent = await load_recent(storage_client, str(group_id))
+            self.recent[group_id] = recent
+            recent_context = list(recent)[-8:]
+            now = datetime.now()
+            signal = self.mood.estimate(text)
+            ctx = GroupContext(
+                str(user.id), str(group_id), list(recent)[-10:], now.hour,
+                now.hour >= 23 or now.hour < 3, group_name,
+                profile.relationship_tier, profile.preferred_name or user.first_name or "friend",
+                now_ts(), (" | ".join(list(profile.themes[:2]) + list(profile.worries[:1]))) or "none",
+            )
+
             if private:
-                try: await context.bot.send_chat_action(chat_id=group_id,action='typing')
-                except Exception: pass
-                draft_id = int((message.message_id << 1) | 1)
                 try:
-                    reply=await self._stream_private_reply(context,group_id,draft_id,group_name,ctx,text,signal,recent_context)
+                    await context.bot.send_chat_action(chat_id=group_id, action="typing")
                 except Exception:
-                    reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet,recent_context)
-                await self._send_reply(message,reply,chat_id=group_id,user_id=user.id,text=text,direct=True,private=True); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(f'{ctx.sender_name}: {text}'); recent.append(f'Oracle: {reply}'); await save_recent(storage_client,str(group_id),recent); return
+                    pass
+                reply = await self.replies.generate(
+                    group_name, ctx.sender_name, ctx.relationship_tier, text,
+                    signal.summary(), str(ctx.hour), ctx.is_late_night, ctx.memory_snippet, recent_context,
+                )
+                if not reply:
+                    return
+                if await self._send_reply(message, reply, chat_id=group_id, user_id=user.id, text=text, direct=True, private=True):
+                    await self.memory.observe(user.id, group_id, ctx.sender_name, text, True)
+                    recent.append(f"{ctx.sender_name}: {text}")
+                    recent.append(f"Oracle: {reply}")
+                    await save_recent(storage_client, str(group_id), recent)
+                return
+
             if self.jokes:
-                await self.jokes.observe(text,user.id,group_id); callback=await self.jokes.detect_callback_opportunity(text,group_id)
-                if callback and not direct and not await db.cooldown_active('group',str(group_id),'ambient'):
-                    await self._reply(message,callback); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(f'{ctx.sender_name}: {text}'); recent.append(f'Oracle: {callback}'); await save_recent(storage_client,str(group_id),recent); return
-            if self.identity: await self.identity.update(group_id,text,signal)
+                await self.jokes.observe(text, user.id, group_id)
+                callback = await self.jokes.detect_callback_opportunity(text, group_id)
+                if callback and not direct and not await db.cooldown_active("group", str(group_id), "ambient"):
+                    await self._reply(message, callback)
+                    await self.memory.observe(user.id, group_id, ctx.sender_name, text, True)
+                    recent.append(f"{ctx.sender_name}: {text}")
+                    recent.append(f"Oracle: {callback}")
+                    await save_recent(storage_client, str(group_id), recent)
+                    return
+
+            if self.identity:
+                await self.identity.update(group_id, text, signal)
+
             if direct:
-                try: await context.bot.send_chat_action(chat_id=group_id,action='typing')
-                except Exception: pass
-                reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet,recent_context); await self._send_reply(message,reply,chat_id=group_id,user_id=user.id,text=text,direct=True,private=False); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(f'{ctx.sender_name}: {text}'); recent.append(f'Oracle: {reply}'); await save_recent(storage_client,str(group_id),recent); await self._announce_achievements(message,user,group_id,'oracle_reply'); return
+                try:
+                    await context.bot.send_chat_action(chat_id=group_id, action="typing")
+                except Exception:
+                    pass
+                reply = await self.replies.generate(
+                    group_name, ctx.sender_name, ctx.relationship_tier, text,
+                    signal.summary(), str(ctx.hour), ctx.is_late_night, ctx.memory_snippet, recent_context,
+                )
+                if not reply:
+                    return
+                if await self._send_reply(message, reply, chat_id=group_id, user_id=user.id, text=text, direct=True, private=False):
+                    await self.memory.observe(user.id, group_id, ctx.sender_name, text, True)
+                    recent.append(f"{ctx.sender_name}: {text}")
+                    recent.append(f"Oracle: {reply}")
+                    await save_recent(storage_client, str(group_id), recent)
+                return
+
+            # Contextual sticker/reaction output is explicit-only. It can never
+            # pre-empt ordinary conversation anymore.
             if self.stickers:
-                media=await self.stickers.evaluate(message,signal,ctx)
+                media = await self.stickers.evaluate(message, signal, ctx)
                 if media.should_send:
-                    if media.sticker_id: await message.reply_sticker(media.sticker_id, reply_to_message_id=message.message_id)
-                    elif media.reaction_emoji: await context.bot.set_message_reaction(group_id,message.message_id,reaction=[ReactionTypeEmoji(media.reaction_emoji)] )
-                    await self.stickers.record(group_id,'contextual',media.sticker_id); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(f'{ctx.sender_name}: {text}'); await save_recent(storage_client,str(group_id),recent); return
-            decision=await self.engine.process_message(message,ctx); await self.memory.observe(user.id,group_id,ctx.sender_name,text,decision.should_reply or signal.social>=0.5); recent.append(f'{ctx.sender_name}: {text}')
-            if decision.should_reply:
-                try: await context.bot.send_chat_action(chat_id=group_id,action='typing')
-                except Exception: pass
-                reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet,recent_context); await self._send_reply(message,reply,chat_id=group_id,user_id=user.id,text=text,direct=False,private=False); recent.append(f'Oracle: {reply}'); await self._announce_achievements(message,user,group_id,'oracle_reply')
-            await save_recent(storage_client,str(group_id),recent)
+                    if media.sticker_id:
+                        await message.reply_sticker(media.sticker_id, reply_to_message_id=message.message_id)
+                    elif media.reaction_emoji:
+                        await context.bot.set_message_reaction(group_id, message.message_id, reaction=[ReactionTypeEmoji(media.reaction_emoji)])
+                    await self.stickers.record(group_id, "explicit", media.sticker_id)
+                    return
+
+            decision = await self.engine.process_message(message, ctx)
+            await self.memory.observe(user.id, group_id, ctx.sender_name, text, decision.should_reply or signal.social >= 0.5)
+            recent.append(f"{ctx.sender_name}: {text}")
+            if decision.should_reply and decision.reply_text:
+                try:
+                    await context.bot.send_chat_action(chat_id=group_id, action="typing")
+                except Exception:
+                    pass
+                if await self._send_reply(message, decision.reply_text, chat_id=group_id, user_id=user.id, text=text, direct=False, private=False):
+                    recent.append(f"Oracle: {decision.reply_text}")
+            await save_recent(storage_client, str(group_id), recent)
         except Exception as exc:
-            application=getattr(context,'application',None); storage_client=getattr(application,'bot_data',{}).get('storage_client') if application else None; await soft_alert(storage_client,'message_router',exc)
+            application = getattr(context, "application", None)
+            storage_client = getattr(application, "bot_data", {}).get("storage_client") if application else None
+            await soft_alert(storage_client, "message_router", exc)
 
     @staticmethod
-    def _is_direct_summon(text,context,message):
-        low=text.casefold().strip(); username=str(getattr(getattr(context,'bot',None),'username','') or '').casefold()
-        if username and f'@{username}' in low:return True
-        replied=getattr(message,'reply_to_message',None); replied_user=getattr(replied,'from_user',None); bot_id=getattr(getattr(context,'bot',None),'id',None)
-        if replied_user and bot_id and getattr(replied_user,'id',None)==bot_id:return True
-        trigger_phrases=('hey oracle','oracle suno','oracle bhai','oracle bro','oracle listen','midnight suno','midnight bhai','midnight bro','hey midnight')
-        return low in {'oracle','midnight'} or any(low==p or low.startswith(p+' ') for p in trigger_phrases)
+    def _is_direct_summon(text, context, message) -> bool:
+        low = text.casefold().strip()
+        username = str(getattr(getattr(context, "bot", None), "username", "") or "").casefold()
+        if username and f"@{username}" in low:
+            return True
+        replied = getattr(message, "reply_to_message", None)
+        replied_user = getattr(replied, "from_user", None)
+        bot_id = getattr(getattr(context, "bot", None), "id", None)
+        if replied_user and bot_id and getattr(replied_user, "id", None) == bot_id:
+            return True
+        trigger_phrases = (
+            "hey oracle", "oracle suno", "oracle bhai", "oracle bro", "oracle listen",
+            "midnight suno", "midnight bhai", "midnight bro", "hey midnight",
+        )
+        return low in {"oracle", "midnight"} or any(low == phrase or low.startswith(phrase + " ") for phrase in trigger_phrases)
