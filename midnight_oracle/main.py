@@ -40,17 +40,18 @@ async def _post_init(application:Application)->None:
     try:
         from handlers import chat,social_engine
         await chat.load_from_storage()
-        if not application.bot_data.get('_midnight_social_jobs_registered'):
-            social_engine.init_storage(redis_client);social_engine.register_jobs(application);application.bot_data['_midnight_social_jobs_registered']=True
-        log.info('SOCIAL_ENGINE_READY | pulse=registered | chat_settings=loaded')
+        # The old social-engine timer bank contains canned, revealing autonomous
+        # messages. Canonical ambient presence is owned by Oracle Pulse below.
+        social_engine.init_storage(redis_client)
+        log.info('SOCIAL_ENGINE_READY | command_support=on | autonomous_legacy_jobs=off | chat_settings=loaded')
     except Exception:log.exception('SOCIAL_ENGINE_START_FAILED')
     try:
         from core.oracle_pulse import install as install_oracle_pulse
         install_oracle_pulse(application)
-        log.info('ORACLE_PULSE_READY | decision_interval=15m | content=contextual_original_gossip_or_story | member_memory=excluded')
+        log.info('ORACLE_PULSE_READY | decision_interval=15m | delivery_cooldown=6h | contextual_original_presence=on')
     except Exception:log.exception('ORACLE_PULSE_INSTALL_FAILED')
     scheduler=OracleScheduler(application,db,timezone=TIMEZONE);scheduler.start();application.bot_data['oracle_scheduler']=scheduler
-    log.info('ORACLE_INTELLIGENCE_READY | friend_engine=on | memory=short+long | scheduler=on | social=on | pulse=on | world=on')
+    log.info('ORACLE_INTELLIGENCE_READY | friend_engine=on | memory=short+long | scheduler=on | legacy_social_autonomy=off | pulse=on | world=on')
 
 async def _post_shutdown(application:Application)->None:
     scheduler=application.bot_data.get('oracle_scheduler')
