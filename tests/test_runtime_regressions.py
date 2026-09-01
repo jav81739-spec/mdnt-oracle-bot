@@ -11,6 +11,17 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.assertIn("_post_init", source)
         self.assertIn("asyncio.run(startup.run", source)
 
+    def test_runtime_identity_is_not_hardcoded_to_main(self):
+        source = (ROOT / "bot.py").read_text(encoding="utf-8")
+        self.assertIn('os.getenv("RENDER_GIT_BRANCH", os.getenv("GIT_BRANCH", "unknown"))', source)
+        self.assertNotIn('branch=main', source)
+
+    def test_polling_lease_refresh_is_ownership_safe(self):
+        source = (ROOT / "startup.py").read_text(encoding="utf-8")
+        self.assertIn("cjson.instance ~= ARGV[1]", source)
+        self.assertIn("POLLING_LEASE_LOST", source)
+        self.assertIn("stopping to prevent duplicate Telegram polling", source)
+
     def test_current_gemini_model_contract_is_used(self):
         source = (ROOT / "core" / "ai.py").read_text(encoding="utf-8")
         self.assertIn('DEFAULT_MODEL = "gemini-3.7-flash"', source)
