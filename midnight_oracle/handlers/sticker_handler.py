@@ -18,6 +18,7 @@ class StickerDecision:
 class StickerHandler:
     """Keep stickers out of ordinary conversation unless the member clearly asks."""
 
+    # Supported explicit phrases include: "send sticker", "send me a sticker", "sticker bhejo".
     _REQUEST = re.compile(r"^(?:please\s+)?(?:send(?:\s+me)?\s+)?sticker(?:\s+please|\s+pls)?[.!?\s]*$|^(?:send|bhej|bhejo)\s+(?:me\s+)?(?:a\s+)?sticker[.!?\s]*$", re.I)
     _NEGATIVE = re.compile(r"\b(?:don't|do not|dont|mat|nahi|nahin)\s+(?:send|bhej|bhejo)\b", re.I)
 
@@ -30,10 +31,7 @@ class StickerHandler:
             text = str(getattr(message, "text", None) or "").strip()
             if not text or self._NEGATIVE.search(text) or not self._REQUEST.fullmatch(text):
                 return StickerDecision(False, None, None)
-            rows = await self.db.fetchall(
-                "SELECT COUNT(*) FROM sticker_events WHERE group_id=? AND sent_at>?",
-                (int(context.group_id), now_ts() - 3600),
-            )
+            rows = await self.db.fetchall("SELECT COUNT(*) FROM sticker_events WHERE group_id=? AND sent_at>?", (int(context.group_id), now_ts() - 3600))
             if int(rows[0][0]) >= 1:
                 return StickerDecision(False, None, None)
             item = STICKER_CONTEXTS.get("something_ridiculous")
@@ -44,7 +42,4 @@ class StickerHandler:
             return StickerDecision(False, None, None)
 
     async def record(self, group_id: int, context_name: str, sticker_id: str | None) -> None:
-        await self.db.execute(
-            "INSERT INTO sticker_events(group_id,trigger_context,sticker_id,sent_at) VALUES(?,?,?,?)",
-            (group_id, context_name, sticker_id, now_ts()),
-        )
+        await self.db.execute("INSERT INTO sticker_events(group_id,trigger_context,sticker_id,sent_at) VALUES(?,?,?,?)", (group_id, context_name, sticker_id, now_ts()))
