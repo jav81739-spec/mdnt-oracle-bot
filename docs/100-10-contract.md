@@ -12,7 +12,7 @@ This document defines the release-quality target for the bot. It is a contract, 
 - Scheduler jobs are idempotent, observable, and failure-tolerant.
 - AI provider failures are bounded, observable, and cannot expose secrets.
 - External media providers have resilient handling for denial, timeout, and empty results.
-- Telegram message length, edit, reply, permission, and DM constraints are handled gracefully.
+- Telegram message length, edit, reply, and permission constraints are handled gracefully.
 - Commands and callback surfaces have one canonical owner.
 - Member data is isolated; hidden implementation details and private data are not exposed.
 - Rate limits and malformed input cannot crash the runtime.
@@ -37,7 +37,7 @@ This document defines the release-quality target for the bot. It is a contract, 
 3. Render deployment completes successfully.
 4. Startup logs show the intended runtime identity and healthy initialization.
 5. Scheduler and command registration are verified in production.
-6. Real Telegram smoke tests cover ordinary conversation, commands, callbacks, media, permissions, and failure paths.
+6. Direct Telegram verification and real Telegram smoke tests cover ordinary conversation, commands, callbacks, media, permissions, and failure paths.
 7. Experience review confirms the member-facing contract above.
 
 Final release requires both scores to be 100/100.
