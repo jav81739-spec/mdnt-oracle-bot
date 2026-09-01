@@ -14,6 +14,9 @@ class RuntimeRegressionTests(unittest.TestCase):
     def test_current_gemini_model_contract_is_used(self):
         source = (ROOT / "core" / "ai.py").read_text(encoding="utf-8")
         self.assertIn('DEFAULT_MODEL = "gemini-3.7-flash"', source)
+        self.assertIn('"gemini-3.6-flash"', source)
+        self.assertIn('"gemini-3.5-flash"', source)
+        self.assertIn('"gemini-3.1-flash-lite"', source)
         self.assertIn('"gemini-2.0-flash"', source)
         self.assertIn("RETIRED_MODELS", source)
         self.assertNotIn('self.model = self.model or "gemini-2.0-flash"', source)
