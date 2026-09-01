@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import re
 
-# Explicit requests are deterministic; ambient voice remains probabilistic.
 VOICE_TRIGGERS = (
     "voice note", "voice", "voice mein", "voice me", "voice mein bolo",
     "voice me bolo", "voice mein bol", "voice me bol", "say it", "say that",
@@ -16,8 +15,6 @@ VOICE_TRIGGERS = (
     "bolkar bata", "bol ke sunao", "bolkar sunao", "bolo", "sunao", "suno",
 )
 
-# Longest phrases first prevents a shorter phrase from masking a more precise
-# request when callers inspect the matched trigger.
 _SORTED_TRIGGERS = tuple(sorted(VOICE_TRIGGERS, key=len, reverse=True))
 
 
@@ -26,4 +23,4 @@ def wants_voice(text: str) -> bool:
     low = " ".join(text.casefold().split())
     if not low:
         return False
-    return any(re.search(rf"(?<!\\w){re.escape(trigger)}(?!\\w)", low) for trigger in _SORTED_TRIGGERS)
+    return any(re.search(rf"(?<!\w){re.escape(trigger)}(?!\w)", low) for trigger in _SORTED_TRIGGERS)
