@@ -11,11 +11,26 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.assertIn("_post_init", source)
         self.assertIn("asyncio.run(startup.run", source)
 
+    def test_runtime_identity_is_not_hardcoded_to_main(self):
+        source = (ROOT / "bot.py").read_text(encoding="utf-8")
+        self.assertIn('os.getenv("RENDER_GIT_BRANCH", os.getenv("GIT_BRANCH", "unknown"))', source)
+        self.assertNotIn('branch=main', source)
+
+    def test_polling_lease_refresh_is_ownership_safe(self):
+        source = (ROOT / "startup.py").read_text(encoding="utf-8")
+        self.assertIn("cjson.instance ~= ARGV[1]", source)
+        self.assertIn("POLLING_LEASE_LOST", source)
+        self.assertIn("stopping to prevent duplicate Telegram polling", source)
+
     def test_current_gemini_model_contract_is_used(self):
         source = (ROOT / "core" / "ai.py").read_text(encoding="utf-8")
-        self.assertIn('"gemini-3.7-flash"', source)
+        self.assertIn('DEFAULT_MODEL = "gemini-3.7-flash"', source)
+        self.assertIn('"gemini-3.6-flash"', source)
+        self.assertIn('"gemini-3.5-flash"', source)
+        self.assertIn('"gemini-3.1-flash-lite"', source)
+        self.assertIn('"gemini-2.0-flash"', source)
+        self.assertIn("RETIRED_MODELS", source)
         self.assertNotIn('self.model = self.model or "gemini-2.0-flash"', source)
-        self.assertNotIn('"gemini-2.0-flash"', source)
 
     def test_legacy_key_compatibility_uses_scan(self):
         source = (ROOT / "storage.py").read_text(encoding="utf-8")

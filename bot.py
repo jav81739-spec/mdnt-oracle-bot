@@ -1,6 +1,6 @@
 """Canonical executable entry point for Midnight Oracle.
 
-The production application is built by ``midnight_oracle.main``.  This module
+The production application is built by ``midnight_oracle.main``. This module
 keeps the historical production-entrypoint contracts that the runtime and
 regression suite rely on, without starting any service merely by importing it.
 """
@@ -11,10 +11,9 @@ import legacy_bot
 import logging
 import os
 import startup
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes
+from telegram.ext import Application, ContextTypes
 
 from handlers import deathgames_v2 as _deathgames_v2
-from midnight_oracle.handlers.phase_registry import register_phase_surfaces
 from midnight_oracle.main import (
     _post_init,
     _post_shutdown,
@@ -22,15 +21,16 @@ from midnight_oracle.main import (
 )
 from storage import redis_client
 
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 log = logging.getLogger("midnight.entrypoint")
 legacy_bot.deathgames = _deathgames_v2
 
 
 async def _error(update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Compatibility error hook; report through the application's logger."""
-    log_obj = getattr(getattr(context, "application", None), "logger", None)
-    if log_obj is not None:
-        log_obj.exception("MIDNIGHT_RUNTIME_ERROR", exc_info=context.error)
+    """Compatibility error hook; report failures without leaking user data."""
+    log.error("MIDNIGHT_RUNTIME_ERROR | error=%r", context.error)
 
 
 def build_application() -> Application:
@@ -43,8 +43,9 @@ def build_application() -> Application:
 def main() -> None:
     """Run the canonical startup manager exactly once."""
     log.info(
-        "RUNTIME_IDENTITY | branch=main | commit=%s | pid=%s | entrypoint=canonical | source=midnight_oracle.main",
-        os.getenv("RENDER_GIT_COMMIT", "unknown"),
+        "RUNTIME_IDENTITY | branch=%s | commit=%s | pid=%s | entrypoint=canonical | source=midnight_oracle.main",
+        os.getenv("RENDER_GIT_BRANCH", os.getenv("GIT_BRANCH", "unknown")),
+        os.getenv("RENDER_GIT_COMMIT", os.getenv("GIT_COMMIT", "unknown")),
         os.getpid(),
     )
     asyncio.run(startup.run(build_application(), redis_client))

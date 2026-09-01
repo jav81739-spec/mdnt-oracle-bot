@@ -98,7 +98,7 @@ def build_application()->Application:
     from core.sticker_reactions import install as install_sticker_reactions
     install_sticker_reactions(app)
     app.add_handler(MessageHandler(filters.ALL,_track_group_activity),group=-1000)
-    app.add_handler(PollAnswerHandler(handle_poll_answer));app.add_handler(PollHandler(handle_poll));app.add_handler(CallbackQueryHandler(game_callback,pattern=r'^game:'));app.add_handler(CallbackQueryHandler(help_callback,pattern=r'^help:'));app.add_handler(CallbackQueryHandler(handle_callback));app.add_handler(InlineQueryHandler(handle_inline));app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA,handle_webapp_data));app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_route_message));return app
+    app.add_handler(PollAnswerHandler(handle_poll_answer));app.add_handler(PollHandler(handle_poll));app.add_handler(CallbackQueryHandler(game_callback,pattern=r'^game:'));app.add_handler(CallbackQueryHandler(help_callback,pattern=r'^help:'));app.add_handler(CallbackQueryHandler(handle_callback,pattern=r'^(?:reveal_|secret:).+'));app.add_handler(InlineQueryHandler(handle_inline));app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA,handle_webapp_data));app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_route_message));return app
 
 async def _route_message(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
     chat=update.effective_chat

@@ -29,13 +29,28 @@ async def _store_delete(key):
         if _storage is None:return False
         result=_storage.delete(key);return bool(await result if asyncio.iscoroutine(result) else result)
     except Exception:return False
-async def _refresh_lease():await _store_set(_LEASE_KEY,json.dumps({"instance":_INSTANCE_ID,"ts":time.time()}),_LEASE_TTL)
+async def _refresh_lease():
+    """Refresh only our lease; persistent Redis refresh is atomic."""
+    owner_json=json.dumps({"instance":_INSTANCE_ID,"ts":time.time()})
+    raw=await _store_get(_LEASE_KEY)
+    try:current=json.loads(raw).get("instance") if raw else None
+    except Exception:current=None
+    if current!=_INSTANCE_ID:return False
+    evaluator=getattr(_storage,"eval",None) if _storage is not None else None
+    if callable(evaluator):
+        script="local v=redis.call('GET',KEYS[1]); if not v then return 0 end; local ok,cjson=pcall(cjson.decode,v); if not ok or cjson.instance ~= ARGV[1] then return 0 end; redis.call('SET',KEYS[1],ARGV[2],'EX',ARGV[3]); return 1"
+        try:
+            result=evaluator(script,[_LEASE_KEY],[_INSTANCE_ID,owner_json,str(_LEASE_TTL)])
+            result=await result if asyncio.iscoroutine(result) else result
+            return int(result)==1
+        except Exception:log.exception("POLLING_LEASE_REFRESH_FAILED");return False
+    return await _store_set(_LEASE_KEY,owner_json,_LEASE_TTL)
 async def _acquire_lease():
     raw=await _store_get(_LEASE_KEY)
     if raw:
         try:
             info=json.loads(raw);owner=info.get("instance");age=time.time()-info.get("ts",0)
-            if owner==_INSTANCE_ID:await _refresh_lease();return True
+            if owner==_INSTANCE_ID:return await _refresh_lease()
             if age<_LEASE_TTL:return False
         except Exception:pass
     return await _store_setnx(_LEASE_KEY,json.dumps({"instance":_INSTANCE_ID,"ts":time.time()}),_LEASE_TTL)
@@ -45,9 +60,13 @@ async def _release_lease():
         if raw and json.loads(raw).get("instance")==_INSTANCE_ID:await _store_delete(_LEASE_KEY)
     except Exception:pass
 async def _lease_heartbeat_loop():
+    global _shutting_down
     while not _shutting_down:
         await asyncio.sleep(_LEASE_REFRESH)
-        if not _shutting_down:await _refresh_lease()
+        if _shutting_down:break
+        if not await _refresh_lease():
+            log.critical("POLLING_LEASE_LOST | instance=%s | stopping to prevent duplicate Telegram polling",_INSTANCE_ID)
+            await _graceful_shutdown();break
 _REGISTRY_KEY="midnight:chat_registry"
 async def register_chat(chat_id,chat_type,title=""):
     if chat_type=="private":return
@@ -92,17 +111,13 @@ async def _verify_command_menu(application):
     except Exception:log.exception("COMMAND_MENU_VERIFY_FAILED")
 def _install_live_runtime_bridges(application):
     """Startup owns lifecycle; activate the autonomous registry dispatcher once."""
-    if application.bot_data.get("_midnight_human_bridge_registered"):
-        log.info("LIVE_CHAT_BRIDGE_ALREADY_REGISTERED | owner=bot")
-    else:
-        log.info("LIVE_CHAT_BRIDGE_DELEGATED | owner=bot_entrypoint")
+    if application.bot_data.get("_midnight_human_bridge_registered"):log.info("LIVE_CHAT_BRIDGE_ALREADY_REGISTERED | owner=bot")
+    else:log.info("LIVE_CHAT_BRIDGE_DELEGATED | owner=bot_entrypoint")
     if not application.bot_data.get("_midnight_autonomous_scheduler_registered"):
         try:
             from handlers.autonomous_scheduler import register as register_autonomous_scheduler
-            if register_autonomous_scheduler(application):
-                log.info("AUTONOMOUS_SCHEDULER_ACTIVE | delivery=chat_registry")
-        except Exception:
-            log.exception("AUTONOMOUS_SCHEDULER_REGISTRATION_FAILED")
+            if register_autonomous_scheduler(application):log.info("AUTONOMOUS_SCHEDULER_ACTIVE | delivery=chat_registry")
+        except Exception:log.exception("AUTONOMOUS_SCHEDULER_REGISTRATION_FAILED")
 async def _stop_oracle_scheduler():
     scheduler=(_app.bot_data.get("oracle_scheduler") if _app else None)
     if scheduler is not None:
