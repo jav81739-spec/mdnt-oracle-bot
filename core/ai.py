@@ -1,4 +1,9 @@
-"""Central Gemini HTTPS gateway for Midnight Oracle."""
+"""Central Gemini gateway for Midnight Oracle.
+
+Interactions API is the primary transport; the supported generateContent
+transport remains a narrow compatibility fallback so provider migrations do
+not take the bot offline.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -24,6 +29,7 @@ class AIService:
         "gemini-3.7-flash",
         "gemini-3.6-flash",
         "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
         "gemini-3.1-flash-lite",
         "gemini-2.5-flash",
         "gemini-2.5-flash-lite",
@@ -37,17 +43,14 @@ class AIService:
         "gemini-3.1-pro-preview",
         "gemini-3-flash-preview",
         "gemini-3-pro-preview",
-        "gemini-3.1-flash-image-preview",
-        "gemini-3-pro-image-preview",
     }
+    INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
+    MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
     def __post_init__(self):
         self.api_key = self.api_key or os.getenv("GEMINI_API_KEY", "")
         configured = os.getenv("GEMINI_MODEL", "").strip()
-        if configured and configured not in self.RETIRED_MODELS:
-            self.model = self.model or configured
-        else:
-            self.model = self.model or self.DEFAULT_MODEL
+        self.model = self.model or (configured if configured and configured not in self.RETIRED_MODELS else self.DEFAULT_MODEL)
         self._client = None
         self._client_lock = asyncio.Lock()
 
@@ -69,13 +72,8 @@ class AIService:
                 await client.aclose()
 
     async def _discover_model(self, client) -> str | None:
-        """Select a currently exposed generateContent model after a 404."""
         try:
-            response = await client.get(
-                "https://generativelanguage.googleapis.com/v1beta/models",
-                params={"pageSize": 100},
-                timeout=min(8.0, self.timeout),
-            )
+            response = await client.get(self.MODELS_URL, params={"pageSize": 100}, timeout=min(8.0, self.timeout))
             response.raise_for_status()
             models = response.json().get("models") or []
             available = {
@@ -91,44 +89,61 @@ class AIService:
         except Exception:
             return None
 
-    async def generate(self, prompt: str, *, timeout: float | None = None) -> str:
-        if not self.api_key:
-            raise AIUnavailable("provider unavailable")
-        if not prompt.strip():
-            raise AIUnavailable("empty prompt")
-        client = await self._get_client()
+    async def _interactions(self, client, prompt: str, timeout: float) -> str:
+        response = await client.post(
+            self.INTERACTIONS_URL,
+            json={"model": self.model, "input": prompt[:12000]},
+            timeout=timeout,
+        )
+        if response.status_code >= 400:
+            response.raise_for_status()
+        text = self._extract_interaction_text(response.json())
+        if not text:
+            raise AIUnavailable("empty provider response")
+        return text.strip()
+
+    async def _legacy_generate_content(self, client, prompt: str, timeout: float) -> str:
         payload = {
             "contents": [{"role": "user", "parts": [{"text": prompt[:12000]}]}],
             "generationConfig": {"maxOutputTokens": 300},
         }
-        last = None
-        for attempt in range(self.retries + 1):
-            response = None
-            try:
+        response = await client.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
+            json=payload,
+            timeout=timeout,
+        )
+        if response.status_code == 404:
+            discovered = await self._discover_model(client)
+            if discovered and discovered != self.model:
+                self.model = discovered
                 response = await client.post(
                     f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
                     json=payload,
-                    timeout=timeout or self.timeout,
+                    timeout=timeout,
                 )
-                if response.status_code == 404:
-                    discovered = await self._discover_model(client)
-                    if discovered and discovered != self.model:
-                        self.model = discovered
-                        response = await client.post(
-                            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
-                            json=payload,
-                            timeout=timeout or self.timeout,
-                        )
-                    if response.status_code == 404:
-                        raise AIUnavailable("provider unavailable")
-                if response.status_code == 429 or response.status_code >= 500:
-                    response.raise_for_status()
-                elif response.status_code >= 400:
-                    raise AIUnavailable("provider unavailable")
-                text = self._extract_text(response.json())
-                if text:
-                    return text.strip()
-                raise AIUnavailable("empty provider response")
+        if response.status_code >= 400:
+            response.raise_for_status()
+        text = self._extract_text(response.json())
+        if not text:
+            raise AIUnavailable("empty provider response")
+        return text.strip()
+
+    async def generate(self, prompt: str, *, timeout: float | None = None) -> str:
+        if not self.api_key or not prompt.strip():
+            raise AIUnavailable("provider unavailable")
+        client = await self._get_client()
+        request_timeout = timeout or self.timeout
+        last = None
+        for attempt in range(self.retries + 1):
+            try:
+                try:
+                    return await self._interactions(client, prompt, request_timeout)
+                except httpx.HTTPStatusError as exc:
+                    # Interactions is the primary path. A 404/405/410 is a
+                    # transport/model compatibility signal, not a user error.
+                    if exc.response.status_code not in {404, 405, 410}:
+                        raise
+                    return await self._legacy_generate_content(client, prompt, request_timeout)
             except AIUnavailable as exc:
                 last = exc
             except (httpx.HTTPError, ValueError) as exc:
@@ -136,6 +151,21 @@ class AIService:
             if attempt < self.retries:
                 await asyncio.sleep(0.25 * (2 ** attempt))
         raise AIUnavailable("provider unavailable") from last
+
+    @staticmethod
+    def _extract_interaction_text(data):
+        output_text = data.get("output_text")
+        if isinstance(output_text, str) and output_text.strip():
+            return output_text
+        parts = []
+        for step in data.get("steps") or []:
+            if not isinstance(step, dict) or step.get("type") not in {"model_output", "output"}:
+                continue
+            content = step.get("content") or []
+            for item in content:
+                if isinstance(item, dict) and isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+        return "".join(parts)
 
     @staticmethod
     def _extract_text(data):
