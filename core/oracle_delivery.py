@@ -17,8 +17,19 @@ async def deliver(application: Any, chat_id: int, text: str) -> bool:
     db = application.bot_data.get("oracle_db")
     try:
         member = await application.bot.get_chat_member(chat_id, application.bot.id)
+        status = str(getattr(member, "status", "")).lower()
         can_send = getattr(member, "can_send_messages", None)
-        if can_send is False:
+
+        permission_blocked = status in {"left", "kicked", "banned"}
+        if status == "restricted" and can_send is False:
+            permission_blocked = True
+        if status in {"member", "restricted"} and can_send is None:
+            chat = await application.bot.get_chat(chat_id)
+            permissions = getattr(chat, "permissions", None)
+            if permissions is not None and getattr(permissions, "can_send_messages", True) is False:
+                permission_blocked = True
+
+        if permission_blocked:
             if db:
                 await db.set_cooldown("group", str(chat_id), "delivery_blocked", BLOCK_EXPIRES_AT)
             log.error(
