@@ -50,8 +50,9 @@ def _home():
             "│       ☾ MIDNIGHT ORACLE    │\n"
             "│         COMMAND HALL       │\n"
             "╰────────────────────────────╯\n\n"
-            "_choose a path. the rest unfolds._\n\n"
-            "Every door carries a small omen. Open one to see what waits inside.")
+            "_choose what you seek. the rest unfolds._\n\n"
+            "Eleven doors. One Oracle.\n"
+            "Open a door and see what waits inside.")
 
 def _keyboard():
     buttons=[InlineKeyboardButton(title,callback_data=f"help:section:{i}") for i,(title,_) in enumerate(SECTIONS)]
@@ -63,10 +64,10 @@ def _utf16_len(value: str) -> int:return len(value.encode("utf-16-le")) // 2
 
 def _section(index,live):
     title,commands=SECTIONS[index];alive=[c for c in commands if c in live]
-    lines=[f"╭─ {title} ─────────────────╮","│ _commands & their omens_ │","╰────────────────────────────╯",""];spans=[];cursor=sum(len(x)+1 for x in lines)
+    lines=[f"╭─ {title} ─────────────────╮","│ _commands · short omens_ │","╰────────────────────────────╯",""];spans=[];cursor=sum(len(x)+1 for x in lines)
     for c in alive:
         cmd=f"/{c}";hint=HINTS.get(c,"ask the Oracle");line=f"{cmd}  ·  {hint}";spans.append((cursor,len(cmd)));lines.append(line);cursor+=len(line)+1
-    lines += ["","☾ Tap a blue command to summon it."];text="\n".join(lines)
+    lines += ["","☾ Choose a command. The Oracle will do the rest."];text="\n".join(lines)
     entities=[MessageEntity(type=MessageEntity.BOT_COMMAND,offset=_utf16_len(text[:s]),length=_utf16_len(text[s:s+l])) for s,l in spans]
     return text,entities
 
