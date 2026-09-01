@@ -58,6 +58,22 @@ async def _post_shutdown(application:Application)->None:
     db=application.bot_data.get('oracle_db')
     if db:await db.close()
 
+async def _track_group_activity(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
+    chat=update.effective_chat;user=update.effective_user
+    if not chat or chat.type not in {'group','supergroup'} or not user or user.is_bot:return
+    db=context.application.bot_data.get('oracle_db')
+    if not db:return
+    try:
+        await db.execute("INSERT INTO group_profile(group_id,group_name,timezone,created_at) VALUES(?,?,?,?) ON CONFLICT(group_id) DO UPDATE SET group_name=excluded.group_name",(chat.id,chat.title or '',str(TIMEZONE),now_ts()))
+        await db.upsert_member(user.id,chat.id,user.username or '',user.first_name or 'Unknown')
+        await db.increment_interaction(user.id,chat.id)
+        from handlers.social_engine import register_member,bump_msg_count
+        await register_member(chat.id,user.id,user.first_name or 'Unknown',user.username or '');await bump_msg_count(chat.id,user.id)
+        text=(update.effective_message.text or '').strip() if update.effective_message else ''
+        if text and not text.startswith('/'):
+            atmosphere=context.application.bot_data.setdefault('oracle_atmosphere',{});items=atmosphere.setdefault(str(chat.id),[]);items.append({'text':text[:500],'ts':now_ts()});del items[:-16]
+    except Exception:log.exception('GROUP_ACTIVITY_TRACKING_FAILED | chat_id=%s',chat.id)
+
 def build_application()->Application:
     if not BOT_TOKEN:raise RuntimeError('BOT_TOKEN is required')
     app=Application.builder().token(BOT_TOKEN).post_init(_post_init).post_shutdown(_post_shutdown).build()
