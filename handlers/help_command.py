@@ -4,17 +4,17 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity, 
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 
 SECTIONS = [
-    ("🔮 READINGS", ["oracle","aura","vibecheck","identity","shadow","element","corecode","universe","ritual","duality","nightreport","sigil","glitch"]),
-    ("🌙 DAILY & MEMORY", ["checkin","streakcheck","memory","mymemory","forget","tod","house","quiet","wake"]),
-    ("🫂 BONDS & SOCIAL", ["hug","kiss","pat","kick","slap","punch","highfive","cuddle","poke","bonk","bite","wave","wink","dance","roast","cheer","comfort","tickle","salute","stare","handshake","fistbump","shoulderpat","cheers","compliment"]),
-    ("💞 RELATIONSHIPS", ["bond","bondstatus","oraclepair","vow","bestie","duo","friendship","ship","tagbestie","squad","loyalty","matchmaker","friendshiptest","randomship","secretadmirer","crush","couples"]),
-    ("☾ AUTONOMOUS RITUALS", ["weave","orbit","echo","anchor","fracture","ember","mirror","crossing","undertow","gaze","release","veil","signal","verdict","muse"]),
-    ("🎮 GAMES", ["quiz","truth","dare","wyr","nhie","rps","riddle","scramble","unscramble","guess","leaderboard","dice","darts","basketball","bowling","football","slot","hangman","tictactoe","wordchain","trivia","wordle","impostor","fastmath","wordbomb","mysterybox","duel","hotseat"]),
-    ("🏏 MIDNIGHT CRICKET", ["cricket","call","cpredict","cbet","cwin","ctournament","cpick","cplay","cricketduel"]),
-    ("💀 DEATH GAMES", ["deathgame","joingame","startround","survive","revive","deathstatus","roulette","vote","kill","endgame"]),
-    ("🪙 ECONOMY", ["daily","balance","gamble","richest","coinboard","cgift","rob","wallet","deposit","withdraw","rank"]),
-    ("🫀 EXPRESSION", ["chat","persona","vent","confess","quote","8ball","vibe","gif","image","signalcheck"]),
-    ("💍 LIFE & ROOMS", ["marry","accept","divorce","profile","mprofile","achievements","midnightevent","work","chests","shop","buy","inventory","gift","settings","timecapsule","capsules","enter","eventcheck","oraclehour"]),
+    ("🔮 THE SIGHT", ["oracle","aura","vibecheck","identity","shadow","element","corecode","universe","ritual","duality","nightreport","sigil","glitch"]),
+    ("🌙 THE MEMORY", ["checkin","streakcheck","memory","mymemory","forget","tod","house","quiet","wake"]),
+    ("🫂 THE BOND", ["hug","kiss","pat","kick","slap","punch","highfive","cuddle","poke","bonk","bite","wave","wink","dance","roast","cheer","comfort","tickle","salute","stare","handshake","fistbump","shoulderpat","cheers","compliment"]),
+    ("💞 THE HEART", ["bond","bondstatus","oraclepair","vow","bestie","duo","friendship","ship","tagbestie","squad","loyalty","matchmaker","friendshiptest","randomship","secretadmirer","crush","couples"]),
+    ("☾ THE RITUALS", ["weave","orbit","echo","anchor","fracture","ember","mirror","crossing","undertow","gaze","release","veil","signal","verdict","muse"]),
+    ("🎮 THE GAMES", ["quiz","truth","dare","wyr","nhie","rps","riddle","scramble","unscramble","guess","leaderboard","dice","darts","basketball","bowling","football","slot","hangman","tictactoe","wordchain","trivia","wordle","impostor","fastmath","wordbomb","mysterybox","duel","hotseat"]),
+    ("🏏 THE ARENA", ["cricket","call","cpredict","cbet","cwin","ctournament","cpick","cplay","cricketduel"]),
+    ("💀 THE UNDERWORLD", ["deathgame","joingame","startround","survive","revive","deathstatus","roulette","vote","kill","endgame"]),
+    ("🪙 THE VAULT", ["daily","balance","gamble","richest","coinboard","cgift","rob","wallet","deposit","withdraw","rank"]),
+    ("🫀 THE VOICE", ["chat","persona","vent","confess","quote","8ball","vibe","gif","image","signalcheck"]),
+    ("💍 THE LIFE", ["marry","accept","divorce","profile","mprofile","achievements","midnightevent","work","chests","shop","buy","inventory","gift","settings","timecapsule","capsules","enter","eventcheck","oraclehour"]),
 ]
 
 HINTS = {
@@ -31,12 +31,7 @@ HINTS = {
     "marry":"propose","accept":"accept a proposal","divorce":"end a marriage","profile":"open your life profile","mprofile":"your evolving V2 identity","achievements":"see your Midnight marks","midnightevent":"open a rare world event","work":"work for coins","chests":"open your chests","shop":"browse the shop","buy":"buy an item","inventory":"see your items","gift":"gift someone","settings":"tune your profile","timecapsule":"seal a memory","capsules":"open your capsules","enter":"enter the room","eventcheck":"check the event","oraclehour":"see Oracle Hour",
 }
 
-_PRIVATE_COMMANDS = {
-    "broadcast","announce","midnightmap","ownerstatus","ownerstats","setcommands",
-    "reload","shutdown","restart","admin","moderation","mute","unmute","ban",
-    "kick","warn","clearwarns","pin","unpin","purge","setrules","lock","unlock",
-    "groupinfo","setwelcome","setgoodbye","id","info","report",
-}
+_PRIVATE_COMMANDS = {"broadcast","announce","midnightmap","ownerstatus","ownerstats","setcommands","reload","shutdown","restart","admin","moderation","mute","unmute","ban","kick","warn","clearwarns","pin","unpin","purge","setrules","lock","unlock","groupinfo","setwelcome","setgoodbye","id","info","report"}
 ADMIN_ONLY = frozenset(_PRIVATE_COMMANDS - {"kick"})
 
 def _live(application):
@@ -52,14 +47,15 @@ _live_member_commands = _live
 
 def _home():
     return ("╭────────────────────────────╮\n"
-            "│      ☾ MIDNIGHT ORACLE     │\n"
-            "│        COMMAND HALL        │\n"
+            "│       ☾ MIDNIGHT ORACLE    │\n"
+            "│         THE HALL            │\n"
             "╰────────────────────────────╯\n\n"
-            "_Choose a door. Tap a section to reveal what lives inside._\n\n"
-            "Every command carries a short omen, so you know what Oracle will do before you summon it.")
+            "_choose what you seek. the rest finds you._\n\n"
+            "Every door carries a small omen. Open one to see what waits inside.")
 
 def _keyboard():
-    rows=[[InlineKeyboardButton(title,callback_data=f"help:section:{i}")] for i,(title,_) in enumerate(SECTIONS)]
+    buttons=[InlineKeyboardButton(title,callback_data=f"help:section:{i}") for i,(title,_) in enumerate(SECTIONS)]
+    rows=[buttons[i:i+2] for i in range(0,len(buttons),2)]
     rows.append([InlineKeyboardButton("✦ START",callback_data="help:start"),InlineKeyboardButton("↻ HALL",callback_data="help:home")])
     return InlineKeyboardMarkup(rows)
 
@@ -67,33 +63,11 @@ def _utf16_len(value: str) -> int:return len(value.encode("utf-16-le")) // 2
 
 def _section(index,live):
     title,commands=SECTIONS[index];alive=[c for c in commands if c in live]
-    lines=[f"╭─ {title} ─────────────────╮","│  _commands & their little omens_ │","╰────────────────────────────╯",""];spans=[];cursor=sum(len(x)+1 for x in lines)
+    lines=[f"╭─ {title} ─────────────────╮","│ _commands & their little omens_ │","╰────────────────────────────╯",""];spans=[];cursor=sum(len(x)+1 for x in lines)
     for c in alive:
         cmd=f"/{c}";hint=HINTS.get(c,"ask the Oracle");line=f"{cmd}  ·  {hint}";spans.append((cursor,len(cmd)));lines.append(line);cursor+=len(line)+1
     lines += ["","☾ Tap a blue command to summon it."];text="\n".join(lines)
     entities=[MessageEntity(type=MessageEntity.BOT_COMMAND,offset=_utf16_len(text[:s]),length=_utf16_len(text[s:s+l])) for s,l in spans]
-    return text,entities
-
-def _build_archive(live: set[str]) -> tuple[str,list[MessageEntity]]:
-    lines=["╭────────────────────────╮","│      ☾ MIDNIGHT ORACLE │","│    the member command hall│","╰────────────────────────╯","","_Every door below carries a small omen, so you know what it does before you summon it._",""];spans=[];cursor=sum(len(x)+1 for x in lines);seen=set()
-    for title,commands in SECTIONS:
-        alive=[c for c in commands if c in live and c not in _PRIVATE_COMMANDS]
-        if not alive:continue
-        lines.append(f"┌─ {title} ─────────────────┐");cursor+=len(lines[-1])+1
-        for c in alive:
-            cmd=f"/{c}";line=f"{cmd}  ·  {HINTS.get(c,'ask the Oracle')}";start=cursor;lines.append(line);spans.append((start,len(cmd)));cursor+=len(line)+1;seen.add(c)
-        lines.append("└──────────────────────────┘");cursor+=len(lines[-1])+1;lines.append("");cursor+=1
-    extras=sorted(c for c in live-seen if c not in {"start","help"} and c not in _PRIVATE_COMMANDS)
-    if extras:
-        lines.append("┌─ ✦ MORE MEMBER COMMANDS ─┐");cursor+=len(lines[-1])+1
-        for c in extras:
-            cmd=f"/{c}";line=f"{cmd}  ·  {HINTS.get(c,'ask the Oracle')}";start=cursor;lines.append(line);spans.append((start,len(cmd)));cursor+=len(line)+1
-        lines.append("└──────────────────────────┘");cursor+=len(lines[-1])+1;lines.append("");cursor+=1
-    lines += ["✦ /help  —  reopen this hall","✦ /start —  meet Midnight Oracle","","_Admin controls remain private. The Oracle keeps a few things better discovered than announced._","","☾ Choose a blue command and tap it — Telegram will send it for you."]
-    text="\n".join(lines);entities=[MessageEntity(type=MessageEntity.BOT_COMMAND,offset=_utf16_len(text[:s]),length=_utf16_len(text[s:s+l])) for s,l in spans]
-    for command in ("/help","/start"):
-        start=text.rfind(command)
-        if start>=0:entities.append(MessageEntity(type=MessageEntity.BOT_COMMAND,offset=_utf16_len(text[:start]),length=_utf16_len(command)))
     return text,entities
 
 async def help_command(update:Update,context:ContextTypes.DEFAULT_TYPE):
