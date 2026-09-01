@@ -2,17 +2,16 @@
 from __future__ import annotations
 import logging
 import os
-import random
 from datetime import time
 from zoneinfo import ZoneInfo
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 from middleware.alert import soft_alert
+from midnight_oracle.generators.social_voice import voice
+
 log=logging.getLogger("midnight.friend")
 TZ=ZoneInfo(os.getenv("ORACLE_TIMEZONE","Asia/Kolkata"));GROUP_CHAT_ID=int(os.getenv("GROUP_CHAT_ID","0") or "0")
-MORNING=["☀️ Good morning, {name}. Honestly — how are you?","☕ Morning, {name}. Actually okay, or just functioning?","🌤 New day, {name}. What's your real status today?"]
-EVENING=["🌆 Day's almost done, {name}. What was the realest part of today?","☾ Evening check, {name}. Did today treat you well?","🕯 Before the day disappears: are you actually okay, {name}?"]
-NIGHT=["☾ 03:00 question, {name}: what's something you'd only admit at this hour?","🌙 Still awake, {name}? No advice tonight. Just talk.","☾ Quiet room, {name}. What's been sitting in your head lately?"]
+
 
 def _keyboard():
     return InlineKeyboardMarkup([[InlineKeyboardButton("🙂 I'm okay",callback_data="oracle:mood:okay"),InlineKeyboardButton("🥲 Not really",callback_data="oracle:mood:rough")],[InlineKeyboardButton("🔥 Great",callback_data="oracle:mood:great"),InlineKeyboardButton("🤐 Later",callback_data="oracle:mood:later")]])
@@ -22,10 +21,10 @@ async def _recent_member()->dict|None:
     try:
         from handlers import social_engine
         members=await social_engine._members(GROUP_CHAT_ID);return max(members,key=lambda m:m.get("last",0)) if members else None
-    except Exception as exc:
+    except Exception:
         log.exception("FRIEND_MEMBER_LOOKUP_FAILED");return None
 
-async def _send(kind:str,templates:list[str],context:ContextTypes.DEFAULT_TYPE):
+async def _send(kind:str,context:ContextTypes.DEFAULT_TYPE):
     log.info("AUTONOMOUS_JOB_ENTERED | feature=friend_%s",kind)
     if not GROUP_CHAT_ID:return
     try:
@@ -34,22 +33,30 @@ async def _send(kind:str,templates:list[str],context:ContextTypes.DEFAULT_TYPE):
         if await social_engine._done(key,18*3600):return
         member=await _recent_member()
         if not member:return
-        name=(member.get("name") or "friend")[:60];text=random.choice(templates).format(name=name)
+        name=(member.get("name") or "friend")[:60]
+        raw=(
+            f"A natural {kind} check-in for {name}. Keep it casual and human; invite a reply without sounding like a scheduled reminder."
+        )
+        text=await voice.render(raw,context=f"Telegram group; {kind} check-in; member name={name}",event_key=key)
+        if not text:return
         await context.bot.send_message(GROUP_CHAT_ID,text,reply_markup=_keyboard())
         log.info("AUTONOMOUS_SENT | feature=friend_%s | member=%s",kind,name)
     except Exception as exc:
         log.exception("AUTONOMOUS_FAILED | feature=friend_%s",kind)
         await soft_alert(context.application.bot_data.get("storage_client") if context.application else None,f"friend_{kind}",exc)
 
-async def morning(context):await _send("morning",MORNING,context)
-async def evening(context):await _send("evening",EVENING,context)
-async def night(context):await _send("3am",NIGHT,context)
+async def morning(context):await _send("morning",context)
+async def evening(context):await _send("evening",context)
+async def night(context):await _send("3am",context)
 
 async def mood_callback(update,context):
     query=update.callback_query
     if not query:return
     await query.answer();replies={"okay":"Good. Keep that okay protected. 🌙","rough":"No pressure to explain. If you want to talk, I'm around.","great":"Then keep that energy. 🔥","later":"Fair. No interrogation. Come back when you feel like talking. 🖤"};mood=(query.data or "").split(":")[-1]
-    try:await query.message.reply_text(replies.get(mood,"I'm listening. 🌙"))
+    try:
+        raw=replies.get(mood,"I'm listening. 🌙")
+        text=await voice.render(raw,context="member mood response",event_key=f"mood:{query.message.chat.id if query.message else 0}:{mood}")
+        await query.message.reply_text(text or raw)
     except Exception as exc:await soft_alert(context.application.bot_data.get("storage_client") if context.application else None,"mood_callback",exc)
 
 async def _ensure_canonical_db(app:Application)->object|None:

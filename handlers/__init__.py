@@ -35,26 +35,34 @@ async def _streakcheck(update, context):
     if not db or not user or not chat:
         await update.effective_message.reply_text("☾ Your streak is quiet for now."); return
     try:
-        rows=await db.fetchall("SELECT DISTINCT date(created_at) FROM mood_log WHERE user_id=? AND group_id=? ORDER BY date(created_at) DESC LIMIT 30",(user.id,chat.id))
-        days={str(r[0]) for r in rows}; from datetime import date,timedelta
+        rows=await db.fetchall("SELECT DISTINCT date(created_at) FROM mood_log WHERE user_id=? AND group_id=? ORDER BY date(created_at) DESC LIMIT 30",(user.id,chat.id)); days={str(r[0]) for r in rows}; from datetime import date,timedelta
         streak=0; day=date.today()
         while day.isoformat() in days: streak+=1; day-=timedelta(days=1)
         await update.effective_message.reply_text(f"☾ Current streak: {streak} day{'s' if streak!=1 else ''}. Keep it natural. 🌙")
-    except Exception:
-        await update.effective_message.reply_text("☾ Your streak is quiet for now.")
+    except Exception: await update.effective_message.reply_text("☾ Your streak is quiet for now.")
 
 
 async def _vent(update, context):
     text=" ".join(getattr(context,"args",[]) or []).strip()
     if not text:
-        await update.effective_message.reply_text("☾ Tell me what's sitting heavy. Use /vent <message>.")
-        return
+        await update.effective_message.reply_text("☾ Tell me what's sitting heavy. Use /vent <message>."); return
     await update.effective_message.reply_text("☾ Heard. No fixing, no judgement. You can leave it here for a while. 🌙")
 
 
 def _register_legacy_surface(app) -> None:
     """Restore recoverable legacy commands without exposing private controls."""
     from . import chat, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule, marriage, deathgames
+    try:
+        from . import social_engine
+        from midnight_oracle.generators.social_voice import voice
+        original_post=social_engine._post
+        async def human_post(bot,chat_id,text):
+            rendered=await voice.render(text,context=f"Telegram group {chat_id}; autonomous Midnight Oracle moment",event_key=f"social:{chat_id}")
+            await original_post(bot,chat_id,rendered or text)
+        social_engine._post=human_post
+    except Exception:
+        import logging
+        logging.getLogger("midnight.social").exception("SOCIAL_VOICE_INSTALL_FAILED")
     modules = {
         "chat": {"chat": ("toggle_chat",), "persona": ("set_persona",)},
         "games": {"quiz": ("quiz",), "dare": ("dare",), "rps": ("rock_paper_scissors",), "riddle": ("riddle",), "riddleanswer": ("riddle_answer",), "guess": ("guess_number",), "leaderboard": ("leaderboard_cmd",), "dice": ("dice_game",), "darts": ("darts_game",), "basketball": ("basketball_game",), "bowling": ("bowling_game",), "football": ("football_game",), "slot": ("slot_game",), "hangman": ("hangman",), "hangmanguess": ("hangman_guess",), "tictactoe": ("tictactoe",), "ttt": ("ttt_move",), "wordchain": ("wordchain_start",), "chainword": ("chain_word",), "trivia": ("trivia",), "wordle": ("wordle",), "wordleguess": ("wordle_guess",)},
@@ -77,10 +85,8 @@ def _register_legacy_surface(app) -> None:
     for module_name, command_map in modules.items():
         for command,candidates in command_map.items():
             if command in existing or command in skip: continue
-            module=module_objs[module_name]
-            callback=next((getattr(module,name,None) for name in candidates if callable(getattr(module,name,None))),None)
-            if callback:
-                app.add_handler(CommandHandler(command,callback),group=0); existing.add(command)
+            module=module_objs[module_name]; callback=next((getattr(module,name,None) for name in candidates if callable(getattr(module,name,None))),None)
+            if callback: app.add_handler(CommandHandler(command,callback),group=0); existing.add(command)
     for command,callback in {"checkin":_checkin,"streakcheck":_streakcheck,"vent":_vent}.items():
         if command not in existing: app.add_handler(CommandHandler(command,callback),group=0); existing.add(command)
 
@@ -113,9 +119,6 @@ def _friend_register_with_legacy(app):
 
 _friend_engine.register=_friend_register_with_legacy
 
-# Production compatibility: the rebuild's death-game engine is the canonical
-# implementation. Keep legacy_bot's public module reference intact while
-# ensuring the V2 command surface is what the entrypoint activates.
 try:
     import legacy_bot as _legacy_bot
     from . import deathgames_v2 as _deathgames_v2
