@@ -4,17 +4,17 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity, 
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 
 SECTIONS = [
-    ("🔮 THE SIGHT", ["oracle","aura","vibecheck","identity","shadow","element","corecode","universe","ritual","duality","nightreport","sigil","glitch"]),
-    ("🌙 THE MEMORY", ["checkin","streakcheck","memory","mymemory","forget","tod","house","quiet","wake"]),
-    ("🫂 THE BOND", ["hug","kiss","pat","kick","slap","punch","highfive","cuddle","poke","bonk","bite","wave","wink","dance","roast","cheer","comfort","tickle","salute","stare","handshake","fistbump","shoulderpat","cheers","compliment"]),
-    ("💞 THE HEART", ["bond","bondstatus","oraclepair","vow","bestie","duo","friendship","ship","tagbestie","squad","loyalty","matchmaker","friendshiptest","randomship","secretadmirer","crush","couples"]),
-    ("☾ THE RITUALS", ["weave","orbit","echo","anchor","fracture","ember","mirror","crossing","undertow","gaze","release","veil","signal","verdict","muse"]),
-    ("🎮 THE GAMES", ["quiz","truth","dare","wyr","nhie","rps","riddle","scramble","unscramble","guess","leaderboard","dice","darts","basketball","bowling","football","slot","hangman","tictactoe","wordchain","trivia","wordle","impostor","fastmath","wordbomb","mysterybox","duel","hotseat"]),
-    ("🏏 THE ARENA", ["cricket","call","cpredict","cbet","cwin","ctournament","cpick","cplay","cricketduel"]),
-    ("💀 THE UNDERWORLD", ["deathgame","joingame","startround","survive","revive","deathstatus","roulette","vote","kill","endgame"]),
-    ("🪙 THE VAULT", ["daily","balance","gamble","richest","coinboard","cgift","rob","wallet","deposit","withdraw","rank"]),
-    ("🫀 THE VOICE", ["chat","persona","vent","confess","quote","8ball","vibe","gif","image","signalcheck"]),
-    ("💍 THE LIFE", ["marry","accept","divorce","profile","mprofile","achievements","midnightevent","work","chests","shop","buy","inventory","gift","settings","timecapsule","capsules","enter","eventcheck","oraclehour"]),
+    ("🔮 SIGHT", ["oracle","aura","vibecheck","identity","shadow","element","corecode","universe","ritual","duality","nightreport","sigil","glitch"]),
+    ("🌙 MEMORY", ["checkin","streakcheck","memory","mymemory","forget","tod","house","quiet","wake"]),
+    ("🫂 BONDS", ["hug","kiss","pat","kick","slap","punch","highfive","cuddle","poke","bonk","bite","wave","wink","dance","roast","cheer","comfort","tickle","salute","stare","handshake","fistbump","shoulderpat","cheers","compliment"]),
+    ("💞 HEART", ["bond","bondstatus","oraclepair","vow","bestie","duo","friendship","ship","tagbestie","squad","loyalty","matchmaker","friendshiptest","randomship","secretadmirer","crush","couples"]),
+    ("☾ RITUALS", ["weave","orbit","echo","anchor","fracture","ember","mirror","crossing","undertow","gaze","release","veil","signal","verdict","muse"]),
+    ("🎮 GAMES", ["quiz","truth","dare","wyr","nhie","rps","riddle","scramble","unscramble","guess","leaderboard","dice","darts","basketball","bowling","football","slot","hangman","tictactoe","wordchain","trivia","wordle","impostor","fastmath","wordbomb","mysterybox","duel","hotseat"]),
+    ("🏏 ARENA", ["cricket","call","cpredict","cbet","cwin","ctournament","cpick","cplay","cricketduel"]),
+    ("💀 UNDERWORLD", ["deathgame","joingame","startround","survive","revive","deathstatus","roulette","vote","kill","endgame"]),
+    ("🪙 VAULT", ["daily","balance","gamble","richest","coinboard","cgift","rob","wallet","deposit","withdraw","rank"]),
+    ("🫀 VOICE", ["chat","persona","vent","confess","quote","8ball","vibe","gif","image","signalcheck"]),
+    ("💍 LIFE", ["marry","accept","divorce","profile","mprofile","achievements","midnightevent","work","chests","shop","buy","inventory","gift","settings","timecapsule","capsules","enter","eventcheck","oraclehour"]),
 ]
 
 HINTS = {
@@ -48,9 +48,9 @@ _live_member_commands = _live
 def _home():
     return ("╭────────────────────────────╮\n"
             "│       ☾ MIDNIGHT ORACLE    │\n"
-            "│         THE HALL            │\n"
+            "│         COMMAND HALL       │\n"
             "╰────────────────────────────╯\n\n"
-            "_choose what you seek. the rest finds you._\n\n"
+            "_choose a path. the rest unfolds._\n\n"
             "Every door carries a small omen. Open one to see what waits inside.")
 
 def _keyboard():
@@ -63,7 +63,7 @@ def _utf16_len(value: str) -> int:return len(value.encode("utf-16-le")) // 2
 
 def _section(index,live):
     title,commands=SECTIONS[index];alive=[c for c in commands if c in live]
-    lines=[f"╭─ {title} ─────────────────╮","│ _commands & their little omens_ │","╰────────────────────────────╯",""];spans=[];cursor=sum(len(x)+1 for x in lines)
+    lines=[f"╭─ {title} ─────────────────╮","│ _commands & their omens_ │","╰────────────────────────────╯",""];spans=[];cursor=sum(len(x)+1 for x in lines)
     for c in alive:
         cmd=f"/{c}";hint=HINTS.get(c,"ask the Oracle");line=f"{cmd}  ·  {hint}";spans.append((cursor,len(cmd)));lines.append(line);cursor+=len(line)+1
     lines += ["","☾ Tap a blue command to summon it."];text="\n".join(lines)
