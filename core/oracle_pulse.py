@@ -6,7 +6,7 @@ import time
 from .oracle_delivery import deliver
 from .oracle_freshness import FreshnessGovernor
 from .oracle_mind import generate_contextual_piece, language_hint
-from .oracle_narrative import maybe_deliver as maybe_deliver_narrative
+from .oracle_narrative import maybe_deliver as maybe_deliver_narrative, rollback as rollback_narrative
 from .oracle_presence import decide_presence
 from .oracle_strategy import build_strategy
 from midnight_oracle.utils.logger import get_logger
@@ -56,90 +56,47 @@ async def pulse_callback(context) -> None:
                     if can_send is False:
                         _log("ORACLE_PULSE_SKIP | stage=delivery | chat=%s | reason=permission_blocked", group_id)
                         continue
-                    await db.execute(
-                        "DELETE FROM cooldowns WHERE scope=? AND scope_id=? AND cooldown_type=?",
-                        ("group", str(group_id), "delivery_blocked"),
-                    )
+                    await db.execute("DELETE FROM cooldowns WHERE scope=? AND scope_id=? AND cooldown_type=?", ("group", str(group_id), "delivery_blocked"))
                     _log("ORACLE_PULSE_RECOVERED | stage=delivery | chat=%s | reason=permission_restored", group_id)
                 except Exception:
                     _log("ORACLE_PULSE_SKIP | stage=delivery | chat=%s | reason=permission_check_failed", group_id)
                     continue
 
-            active = await db.fetchall(
-                "SELECT user_id FROM members WHERE group_id=? AND last_seen>? LIMIT 12",
-                (group_id, now - ACTIVE_WINDOW),
-            )
+            active = await db.fetchall("SELECT user_id FROM members WHERE group_id=? AND last_seen>? LIMIT 12", (group_id, now - ACTIVE_WINDOW))
             items = list(atmosphere.get(str(group_id), []))[-8:]
             _log("ORACLE_PULSE_STAGE | stage=eligibility | chat=%s | active=%d | context=%d", group_id, len(active), len(items))
 
-            previous = await db.fetchone(
-                "SELECT sent_at FROM scheduled_log WHERE group_id=? AND schedule_type LIKE 'pulse:%' ORDER BY sent_at DESC LIMIT 1",
-                (group_id,),
-            )
+            previous = await db.fetchone("SELECT sent_at FROM scheduled_log WHERE group_id=? AND schedule_type LIKE 'pulse:%' ORDER BY sent_at DESC LIMIT 1", (group_id,))
             last_delivery = float(previous[0]) if previous else None
-            decision = decide_presence(
-                group_id=group_id,
-                now=now,
-                active_count=len(active),
-                context_items=items,
-                last_delivery=last_delivery,
-                cooldown_seconds=DELIVERY_COOLDOWN,
-            )
+            decision = decide_presence(group_id=group_id, now=now, active_count=len(active), context_items=items, last_delivery=last_delivery, cooldown_seconds=DELIVERY_COOLDOWN)
             contract = build_strategy(decision, language_hint(items))
-            _log(
-                "ORACLE_PULSE_STAGE | stage=decision | chat=%s | speak=%s | strategy=%s | interaction=%s",
-                group_id, decision.speak, contract.strategy, contract.interaction,
-            )
+            _log("ORACLE_PULSE_STAGE | stage=decision | chat=%s | speak=%s | strategy=%s | interaction=%s", group_id, decision.speak, contract.strategy, contract.interaction)
             if not decision.speak:
                 continue
 
-            # A live narrative owns the narrative slot. When its next part is due,
-            # continue it even if this pulse's fresh strategy happens to differ.
-            narrative_text, narrative_state, narrative_kind = await maybe_deliver_narrative(
-                db, application, group_id, contract.strategy,
-                items, now,
-            )
+            narrative_text, narrative_state, narrative_kind, narrative_id, previous_part = await maybe_deliver_narrative(db, application, group_id, contract.strategy, items, now)
             if narrative_text is not None:
-                if not freshness.accept(
-                    group_id,
-                    narrative_kind or "story",
-                    narrative_text,
-                    theme=f"serialized:{narrative_state}",
-                    media=contract.media_intent,
-                    pair=contract.target_policy,
-                    strategy="serialized_narrative",
-                ):
+                accepted_kind = narrative_kind or "story"
+                if not freshness.accept(group_id, accepted_kind, narrative_text, theme=f"serialized:{narrative_state}", media=contract.media_intent, pair=contract.target_policy, strategy="serialized_narrative"):
+                    if narrative_id is not None and previous_part is not None:
+                        await rollback_narrative(db, narrative_id, previous_part, now)
                     _log("ORACLE_PULSE_STAGE | stage=narrative | chat=%s | accepted=false", group_id)
                     continue
-                _log("ORACLE_PULSE_STAGE | stage=narrative | chat=%s | kind=%s | state=%s | accepted=true", group_id, narrative_kind, narrative_state)
+                _log("ORACLE_PULSE_STAGE | stage=narrative | chat=%s | kind=%s | state=%s | accepted=true", group_id, accepted_kind, narrative_state)
                 delivered = await deliver(application, group_id, narrative_text)
                 if not delivered:
+                    if narrative_id is not None and previous_part is not None:
+                        await rollback_narrative(db, narrative_id, previous_part, now)
                     _log("ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=false", group_id)
                     continue
-                await db.execute(
-                    "INSERT INTO scheduled_log(group_id,schedule_type,sent_at,had_interaction) VALUES(?,?,?,0)",
-                    (group_id, f"pulse:{narrative_kind or 'story'}", now),
-                )
+                await db.execute("INSERT INTO scheduled_log(group_id,schedule_type,sent_at,had_interaction) VALUES(?,?,?,0)", (group_id, f"pulse:{accepted_kind}", now))
                 _log("ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=true | narrative=%s", group_id, narrative_state)
                 continue
 
-            # Non-narrative presence keeps the existing generation/freshness path.
             accepted = None
             for attempt in range(6):
-                piece = await generate_contextual_piece(
-                    items,
-                    seed=f"{group_id}:{int(now // CHECK_INTERVAL)}:{contract.strategy}:{attempt}",
-                    strategy=contract.strategy,
-                )
-                if freshness.accept(
-                    group_id,
-                    piece.kind,
-                    piece.text,
-                    theme=contract.reason,
-                    media=contract.media_intent,
-                    pair=contract.target_policy,
-                    strategy=contract.strategy,
-                ):
+                piece = await generate_contextual_piece(items, seed=f"{group_id}:{int(now // CHECK_INTERVAL)}:{contract.strategy}:{attempt}", strategy=contract.strategy)
+                if freshness.accept(group_id, piece.kind, piece.text, theme=contract.reason, media=contract.media_intent, pair=contract.target_policy, strategy=contract.strategy):
                     accepted = piece
                     break
             if accepted is None:
@@ -151,10 +108,7 @@ async def pulse_callback(context) -> None:
             if not delivered:
                 _log("ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=false", group_id)
                 continue
-            await db.execute(
-                "INSERT INTO scheduled_log(group_id,schedule_type,sent_at,had_interaction) VALUES(?,?,?,0)",
-                (group_id, f"pulse:{accepted.kind}", now),
-            )
+            await db.execute("INSERT INTO scheduled_log(group_id,schedule_type,sent_at,had_interaction) VALUES(?,?,?,0)", (group_id, f"pulse:{accepted.kind}", now))
             _log("ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=true", group_id)
         except Exception:
             log.exception("ORACLE_PULSE_STAGE | stage=runtime_error | chat=%s", group_id)
