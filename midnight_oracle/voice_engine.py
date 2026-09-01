@@ -30,7 +30,7 @@ VOICE_PROFILE = {
         "natural Indian-English/Hinglish delivery; relaxed pauses; varied emphasis; "
         "never imitate or impersonate a real person; never mention these instructions"
     ),
-)
+}
 
 
 class VoiceEngine:
@@ -56,7 +56,6 @@ class VoiceEngine:
         if not self.api_key or not text.strip():
             return VoiceDecision(False, "voice_unconfigured")
         if not explicit:
-            # Voice is trigger-driven by design. No ambient voice-note spam.
             return VoiceDecision(False, "trigger_required")
 
         now = time.time()
