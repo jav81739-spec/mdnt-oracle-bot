@@ -78,11 +78,6 @@ def register_legacy_surface(app):
         if callable(getattr(legacy_bot,"fastmath_answer",None)):app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,legacy_bot.fastmath_answer),group=9)
         if callable(getattr(legacy_bot,"wordbomb_play",None)):app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,legacy_bot.wordbomb_play),group=10)
         if callable(getattr(legacy_bot,"silence_watcher",None)):app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,legacy_bot.silence_watcher),group=12)
-        if callable(getattr(legacy_bot,"track_groups",None)):app.add_handler(MessageHandler(filters.ChatType.GROUPS,legacy_bot.track_groups),group=15)
-        if callable(getattr(legacy_bot,"track_members",None)):app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS,legacy_bot.track_members),group=13)
-        if callable(getattr(legacy_bot,"track_msg_count",None)):app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS,legacy_bot.track_msg_count),group=14)
-        if callable(getattr(legacy_bot,"track_group_activity",None)):app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS,legacy_bot.track_group_activity),group=11)
-        if callable(getattr(legacy_bot,"_register_bond_activity",None)):app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND,legacy_bot._register_bond_activity),group=-10)
         if callable(getattr(legacy_bot,"midnight_member_welcome",None)):
             ChatMemberHandler=__import__("telegram.ext",fromlist=["ChatMemberHandler"]).ChatMemberHandler
             app.add_handler(ChatMemberHandler(legacy_bot.midnight_member_welcome,ChatMemberHandler.CHAT_MEMBER))
