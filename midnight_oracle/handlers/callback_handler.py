@@ -1,19 +1,15 @@
-"""Inline keyboard callbacks including Help navigation and secret events."""
+"""Inline keyboard callbacks for secret events and the word-scramble end action."""
 from __future__ import annotations
 from telegram import Update
 from telegram.ext import ContextTypes
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle Midnight Oracle callbacks without leaking internal state."""
+    """Handle only callbacks owned by this module; unrelated surfaces get their own routes."""
     query = update.callback_query
     if not query:
         return
     data = query.data or ""
     try:
-        if data.startswith("help:"):
-            from .help_command import help_callback
-            await help_callback(update, context)
-            return
         if data.startswith(("reveal_", "secret:")):
             raw = data.split("_", 1)[1] if data.startswith("reveal_") else data.split(":", 1)[1]
             event_id = int(raw)
