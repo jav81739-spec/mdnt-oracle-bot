@@ -6,6 +6,7 @@ import time
 from .oracle_delivery import deliver
 from .oracle_freshness import FreshnessGovernor
 from .oracle_mind import generate_contextual_piece, language_hint
+from .oracle_narrative import maybe_deliver as maybe_deliver_narrative
 from .oracle_presence import decide_presence
 from .oracle_strategy import build_strategy
 from midnight_oracle.utils.logger import get_logger
@@ -92,6 +93,44 @@ async def pulse_callback(context) -> None:
             if not decision.speak:
                 continue
 
+            # A live narrative owns the narrative slot. When its next part is due,
+            # continue it even if this pulse's fresh strategy happens to differ.
+            narrative_text, narrative_state = await maybe_deliver_narrative(
+                db, application, group_id, contract.strategy,
+                items, now,
+            )
+            if narrative_text is not None:
+                accepted = type("NarrativePiece", (), {
+                    "kind": "story" if narrative_state in {"started", "continued", "finished"} and "story" in narrative_text.lower() else contract.strategy,
+                    "text": narrative_text,
+                })()
+                # Narrative state is already persisted before delivery. Freshness
+                # still gets the final veto so a generated continuation cannot
+                # bypass the existing anti-repeat governor.
+                if not freshness.accept(
+                    group_id,
+                    accepted.kind,
+                    accepted.text,
+                    theme=f"serialized:{narrative_state}",
+                    media=contract.media_intent,
+                    pair=contract.target_policy,
+                    strategy="serialized_narrative",
+                ):
+                    _log("ORACLE_PULSE_STAGE | stage=narrative | chat=%s | accepted=false", group_id)
+                    continue
+                _log("ORACLE_PULSE_STAGE | stage=narrative | chat=%s | state=%s | accepted=true", group_id, narrative_state)
+                delivered = await deliver(application, group_id, accepted.text)
+                if not delivered:
+                    _log("ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=false", group_id)
+                    continue
+                await db.execute(
+                    "INSERT INTO scheduled_log(group_id,schedule_type,sent_at,had_interaction) VALUES(?,?,?,0)",
+                    (group_id, f"pulse:{accepted.kind}", now),
+                )
+                _log("ORACLE_PULSE_STAGE | stage=delivery | chat=%s | delivered=true | narrative=%s", group_id, narrative_state)
+                continue
+
+            # Non-narrative presence keeps the existing generation/freshness path.
             accepted = None
             for attempt in range(6):
                 piece = await generate_contextual_piece(
