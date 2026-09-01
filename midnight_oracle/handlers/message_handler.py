@@ -30,21 +30,22 @@ class MessageRouter:
         return await message.reply_text(text, reply_to_message_id=message.message_id, **kwargs)
 
     async def _send_reply(self, message, reply: str, *, chat_id: int, user_id: int, text: str, direct: bool, private: bool) -> None:
-        """Prefer a guarded voice note when explicitly requested or naturally selected."""
+        """Send one guarded voice note for explicit requests, otherwise normal text."""
         explicit=wants_voice(text)
-        decision=self.voice.decide(chat_id=chat_id,user_id=user_id,text=text,direct=direct,private=private)
-        blocking={'chat_cooldown','daily_cap','duplicate','voice_unconfigured'}
-        if explicit and decision.reason not in blocking:
-            decision=decision.__class__(True,'explicit_voice')
+        decision=self.voice.decide(chat_id=chat_id,user_id=user_id,text=text,direct=direct,private=private,explicit=explicit)
         if decision.should_send:
             audio=await self.voice.synthesize(reply)
             if audio is not None:
                 try:
                     await message.reply_voice(voice=audio, reply_to_message_id=message.message_id)
                     self.voice.record(chat_id,user_id,reply)
+                    audio.close()
                     return
                 except Exception as exc:
                     await soft_alert(None,'voice_delivery',exc)
+                finally:
+                    try: audio.close()
+                    except Exception: pass
         await self._reply(message,reply)
 
     async def _announce_achievements(self,message,member,group_id,event):
@@ -77,7 +78,8 @@ class MessageRouter:
             if not text or text.startswith('/'):return
             private=chat.type=='private'; group=chat.type in {'group','supergroup'}
             if not private and not group:return
-            direct=private or self._is_direct_summon(text,context,message)
+            explicit_voice=wants_voice(text)
+            direct=private or explicit_voice or self._is_direct_summon(text,context,message)
             if is_cooling(f'{chat.id}:{user.id}',cooldown_seconds(chat.type,direct)):return
             application=getattr(context,'application',None); bot_data=getattr(application,'bot_data',{}) if application else {}; storage_client=bot_data.get('storage_client'); db=getattr(self.engine,'db',None)
             if not db:return
@@ -108,7 +110,7 @@ class MessageRouter:
                 media=await self.stickers.evaluate(message,signal,ctx)
                 if media.should_send:
                     if media.sticker_id: await message.reply_sticker(media.sticker_id, reply_to_message_id=message.message_id)
-                    elif media.reaction_emoji: await context.bot.set_message_reaction(group_id,message.message_id,reaction=[ReactionTypeEmoji(media.reaction_emoji)])
+                    elif media.reaction_emoji: await context.bot.set_message_reaction(group_id,message.message_id,reaction=[ReactionTypeEmoji(media.reaction_emoji)] )
                     await self.stickers.record(group_id,'contextual',media.sticker_id); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(f'{ctx.sender_name}: {text}'); await save_recent(storage_client,str(group_id),recent); return
             decision=await self.engine.process_message(message,ctx); await self.memory.observe(user.id,group_id,ctx.sender_name,text,decision.should_reply or signal.social>=0.5); recent.append(f'{ctx.sender_name}: {text}')
             if decision.should_reply:

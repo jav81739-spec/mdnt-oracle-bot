@@ -17,6 +17,8 @@ from .handlers.world_handler import start_game,end_game,game_callback,handle_gam
 from .handlers.prediction_handler import predict,predictions
 from .handlers.webapp_handler import handle_webapp_data
 from .handlers.surprise_handler import mysterybox,nightgift,muse,glitch
+from .handlers.voice_handler import voice
+from .voice_triggers import wants_voice
 from .scheduler import OracleScheduler
 from .utils.logger import configure_logging,get_logger
 from storage import redis_client
@@ -75,7 +77,7 @@ async def _track_group_activity(update:Update,context:ContextTypes.DEFAULT_TYPE)
 def build_application()->Application:
     if not BOT_TOKEN:raise RuntimeError('BOT_TOKEN is required')
     app=Application.builder().token(BOT_TOKEN).post_init(_post_init).post_shutdown(_post_shutdown).build()
-    commands={'start':start,'help':help_command,'oracle':oracle,'truth':truth,'memory':memory,'mymemory':mymemory,'forget':forget,'quiet':quiet,'wake':wake,'house':house,'tod':start_game,'wyr':start_game,'nhie':start_game,'scramble':start_game,'unscramble':None,'predict':predict,'predictions':predictions,'endgame':end_game,'mysterybox':mysterybox,'nightgift':nightgift,'muse':muse,'glitch':glitch}
+    commands={'start':start,'help':help_command,'oracle':oracle,'truth':truth,'memory':memory,'mymemory':mymemory,'forget':forget,'quiet':quiet,'wake':wake,'house':house,'voice':voice,'tod':start_game,'wyr':start_game,'nhie':start_game,'scramble':start_game,'unscramble':None,'predict':predict,'predictions':predictions,'endgame':end_game,'mysterybox':mysterybox,'nightgift':nightgift,'muse':muse,'glitch':glitch}
     for name,cb in commands.items():
         if name=='unscramble':
             from handlers.games import unscramble as cb
@@ -113,7 +115,7 @@ async def _route_message(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
         username=str(getattr(context.bot,'username','') or '').casefold()
         replied=getattr(getattr(update.effective_message,'reply_to_message',None),'from_user',None) if update.effective_message else None
         bot_id=getattr(context.bot,'id',None)
-        direct=bool(replied and bot_id and getattr(replied,'id',None)==bot_id) or bool(username and f'@{username}' in low) or low in {'oracle','midnight'} or any(low==p or low.startswith(p+' ') for p in ('hey oracle','hello oracle','hi oracle','oracle suno','oracle bhai','oracle bro','oracle listen','hey midnight','hello midnight','hi midnight','midnight suno','midnight bhai','midnight bro'))
+        direct=wants_voice(text) or bool(replied and bot_id and getattr(replied,'id',None)==bot_id) or bool(username and f'@{username}' in low) or low in {'oracle','midnight'} or any(low==p or low.startswith(p+' ') for p in ('hey oracle','hello oracle','hi oracle','oracle suno','oracle bhai','oracle bro','oracle listen','hey midnight','hello midnight','hi midnight','midnight suno','midnight bhai','midnight bro'))
         try:
             from core.storage import storage
             trigger=await storage.load(f'v2:autonomous:trigger:{chat.id}',None)

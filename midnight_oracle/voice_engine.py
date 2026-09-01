@@ -1,13 +1,14 @@
 """Midnight Oracle voice-note engine.
 
-Voice is an optional response modality. Midnight keeps one original female
-voice identity while varying the spoken wording and delivery instructions
-naturally.
+Voice is an optional response modality. Midnight keeps one original voice
+identity while varying wording and delivery naturally. Explicit voice
+requests are deterministic; ambient voice remains rare and guarded.
 """
 from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import random
 import time
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from dataclasses import dataclass
 from openai import AsyncOpenAI
 
 from .config import OPENAI_API_KEY
+
+log = logging.getLogger("midnight.voice")
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,9 +27,9 @@ class VoiceDecision:
 
 
 VOICE_PROFILE = {
-    "name": "midnight_original_female",
-    "voice": "alloy",
-    "style": "natural conversational female voice; warm, expressive, intimate but not theatrical; human-like pauses and varied emphasis; Indian-English/Hinglish friendly; never imitate or impersonate a real person",
+    "name": "midnight_original_voice",
+    "voice": "shimmer",
+    "style": "natural conversational voice; warm, expressive, intimate but not theatrical; human-like pauses and varied emphasis; Indian-English/Hinglish friendly; never imitate or impersonate a real person",
 }
 
 
@@ -34,31 +37,49 @@ class VoiceEngine:
     """Generate short, varied, deduplicated Telegram voice notes."""
 
     def __init__(self, api_key: str | None = None) -> None:
-        # None means use configured application credentials; an explicit empty
-        # string intentionally disables voice so tests can isolate this path.
         self.api_key = (OPENAI_API_KEY if api_key is None else api_key).strip()
         self.client = AsyncOpenAI(api_key=self.api_key) if self.api_key else None
         self._recent: dict[str, tuple[float, str]] = {}
         self._last_chat: dict[int, float] = {}
         self._daily_count: dict[int, tuple[int, int]] = {}
 
-    def decide(self, *, chat_id: int, user_id: int, text: str, direct: bool, private: bool) -> VoiceDecision:
+    def decide(
+        self,
+        *,
+        chat_id: int,
+        user_id: int,
+        text: str,
+        direct: bool,
+        private: bool,
+        explicit: bool = False,
+    ) -> VoiceDecision:
         if not self.client or not text.strip():
             return VoiceDecision(False, "voice_unconfigured")
         now = time.time()
-        if now - self._last_chat.get(chat_id, 0.0) < 900:
-            return VoiceDecision(False, "chat_cooldown")
+        cooldown = 60 if explicit else 900
+        if now - self._last_chat.get(chat_id, 0.0) < cooldown:
+            return VoiceDecision(False, "explicit_cooldown" if explicit else "chat_cooldown")
+
         day = int(now // 86400)
         stored_day, count = self._daily_count.get(chat_id, (day, 0))
         if stored_day != day:
             count = 0
         if count >= 4:
             return VoiceDecision(False, "daily_cap")
+
+        key = f"{chat_id}:{user_id}"
+        digest = hashlib.sha256(text.strip().casefold().encode("utf-8")).hexdigest()
+        previous = self._recent.get(key)
+        if previous and previous[1] == digest and now - previous[0] < 86400:
+            return VoiceDecision(False, "duplicate")
+
+        if explicit:
+            return VoiceDecision(True, "explicit_voice")
+
         low = text.casefold()
         high_value = any(token in low for token in (
             "😭", "😂", "haha", "lol", "love", "sorry", "miss", "good night",
-            "good morning", "congrats", "congratulations", "voice", "say it",
-            "bol", "bolo", "sun", "suno", "feel", "feeling", "secret",
+            "good morning", "congrats", "congratulations", "feel", "feeling", "secret",
         ))
         emotional = any(token in low for token in ("🥺", "❤️", "🖤", "💔", "😂", "😭", "😌", "😏"))
         if not (direct or private or high_value or emotional):
@@ -68,11 +89,6 @@ class VoiceEngine:
             probability += 0.10
         if random.random() >= probability:
             return VoiceDecision(False, "oracle_chose_text")
-        key = f"{chat_id}:{user_id}"
-        digest = hashlib.sha256(text.strip().casefold().encode("utf-8")).hexdigest()
-        previous = self._recent.get(key)
-        if previous and previous[1] == digest and now - previous[0] < 86400:
-            return VoiceDecision(False, "duplicate")
         return VoiceDecision(True, "oracle_chose_voice")
 
     @staticmethod
@@ -87,11 +103,13 @@ class VoiceEngine:
             "warm and lightly playful, varied emphasis, unhurried delivery",
             "soft and reassuring, natural pauses, emotionally sincere",
             "bright and spontaneous, conversational rhythm, avoid announcer cadence",
+            "casual late-night conversation, subtle pauses, never announcer-like",
         ))
 
     async def synthesize(self, text: str, *, voice: str | None = None) -> io.BytesIO | None:
         """Return an Opus audio buffer suitable for Telegram send_voice."""
         if not self.client:
+            log.warning("VOICE_SYNTHESIS_UNAVAILABLE | reason=missing_openai_key")
             return None
         script = self._clean_script(text)
         if not script:
@@ -105,13 +123,17 @@ class VoiceEngine:
                 instructions=(VOICE_PROFILE["style"] + ". " + self._delivery_style()),
             )
             content = getattr(response, "content", None)
+            if not content and hasattr(response, "aread"):
+                content = await response.aread()
             if not content:
+                log.error("VOICE_SYNTHESIS_FAILED | reason=empty_audio_response")
                 return None
             audio = io.BytesIO(content)
             audio.name = "midnight-oracle.ogg"
             audio.seek(0)
             return audio
-        except Exception:
+        except Exception as exc:
+            log.error("VOICE_SYNTHESIS_FAILED | error=%s", type(exc).__name__)
             return None
 
     def record(self, chat_id: int, user_id: int, text: str) -> None:
