@@ -24,28 +24,14 @@ async def _store_setnx(key,value,ttl):
             result=method(key,value,ttl);return bool(await result if asyncio.iscoroutine(result) else result)
         return False
     except Exception:return False
-async def _store_compare_refresh(key,owner,ttl):
-    """Refresh a lease only if this process still owns it, atomically in Redis."""
-    if _storage is None:return False
-    evaluator=getattr(_storage,"eval",None)
-    if callable(evaluator):
-        script="if redis.call('GET',KEYS[1]) == ARGV[1] then redis.call('SET',KEYS[1],ARGV[1],'EX',ARGV[2]); return 1 end; return 0"
-        try:
-            result=evaluator(script,[key],[owner,str(max(1,int(ttl)))])
-            result=await result if asyncio.iscoroutine(result) else result
-            return int(result)==1
-        except Exception:log.exception("POLLING_LEASE_REFRESH_FAILED");return False
-    current=await _store_get(key)
-    if current!=owner:return False
-    return await _store_set(key,owner,ttl)
 async def _store_delete(key):
     try:
         if _storage is None:return False
         result=_storage.delete(key);return bool(await result if asyncio.iscoroutine(result) else result)
     except Exception:return False
 async def _refresh_lease():
-    owner=json.dumps({"instance":_INSTANCE_ID,"ts":time.time()})
-    # Preserve the legacy JSON value while using an ownership token for the CAS.
+    """Refresh only our lease; persistent Redis refresh is atomic."""
+    owner_json=json.dumps({"instance":_INSTANCE_ID,"ts":time.time()})
     raw=await _store_get(_LEASE_KEY)
     try:current=json.loads(raw).get("instance") if raw else None
     except Exception:current=None
@@ -54,11 +40,11 @@ async def _refresh_lease():
     if callable(evaluator):
         script="local v=redis.call('GET',KEYS[1]); if not v then return 0 end; local ok,cjson=pcall(cjson.decode,v); if not ok or cjson.instance ~= ARGV[1] then return 0 end; redis.call('SET',KEYS[1],ARGV[2],'EX',ARGV[3]); return 1"
         try:
-            result=evaluator(script,[_LEASE_KEY],[_INSTANCE_ID,owner,str(_LEASE_TTL)])
+            result=evaluator(script,[_LEASE_KEY],[_INSTANCE_ID,owner_json,str(_LEASE_TTL)])
             result=await result if asyncio.iscoroutine(result) else result
             return int(result)==1
         except Exception:log.exception("POLLING_LEASE_REFRESH_FAILED");return False
-    return await _store_set(_LEASE_KEY,owner,_LEASE_TTL)
+    return await _store_set(_LEASE_KEY,owner_json,_LEASE_TTL)
 async def _acquire_lease():
     raw=await _store_get(_LEASE_KEY)
     if raw:
@@ -80,8 +66,7 @@ async def _lease_heartbeat_loop():
         if _shutting_down:break
         if not await _refresh_lease():
             log.critical("POLLING_LEASE_LOST | instance=%s | stopping to prevent duplicate Telegram polling",_INSTANCE_ID)
-            await _graceful_shutdown()
-            break
+            await _graceful_shutdown();break
 _REGISTRY_KEY="midnight:chat_registry"
 async def register_chat(chat_id,chat_type,title=""):
     if chat_type=="private":return
@@ -126,17 +111,13 @@ async def _verify_command_menu(application):
     except Exception:log.exception("COMMAND_MENU_VERIFY_FAILED")
 def _install_live_runtime_bridges(application):
     """Startup owns lifecycle; activate the autonomous registry dispatcher once."""
-    if application.bot_data.get("_midnight_human_bridge_registered"):
-        log.info("LIVE_CHAT_BRIDGE_ALREADY_REGISTERED | owner=bot")
-    else:
-        log.info("LIVE_CHAT_BRIDGE_DELEGATED | owner=bot_entrypoint")
+    if application.bot_data.get("_midnight_human_bridge_registered"):log.info("LIVE_CHAT_BRIDGE_ALREADY_REGISTERED | owner=bot")
+    else:log.info("LIVE_CHAT_BRIDGE_DELEGATED | owner=bot_entrypoint")
     if not application.bot_data.get("_midnight_autonomous_scheduler_registered"):
         try:
             from handlers.autonomous_scheduler import register as register_autonomous_scheduler
-            if register_autonomous_scheduler(application):
-                log.info("AUTONOMOUS_SCHEDULER_ACTIVE | delivery=chat_registry")
-        except Exception:
-            log.exception("AUTONOMOUS_SCHEDULER_REGISTRATION_FAILED")
+            if register_autonomous_scheduler(application):log.info("AUTONOMOUS_SCHEDULER_ACTIVE | delivery=chat_registry")
+        except Exception:log.exception("AUTONOMOUS_SCHEDULER_REGISTRATION_FAILED")
 async def _stop_oracle_scheduler():
     scheduler=(_app.bot_data.get("oracle_scheduler") if _app else None)
     if scheduler is not None:
@@ -175,7 +156,7 @@ async def run(application,storage_client=None):
     except asyncio.CancelledError:pass
     except Exception:log.exception("Fatal error in polling loop")
     finally:await _graceful_shutdown()
-async def init(storage_client=None):
+def init(storage_client=None):
     global _storage;_storage=storage_client
 async def _wait_for_lease():
     deadline=time.time()+_LEASE_WAIT_MAX
