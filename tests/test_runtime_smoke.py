@@ -1,6 +1,7 @@
 """Import-level regression tests for the production command surface."""
 from __future__ import annotations
 
+import os
 import unittest
 
 
@@ -29,6 +30,7 @@ class RuntimeSmokeTests(unittest.TestCase):
             self.assertTrue(callable(getattr(chat, name)))
 
     def test_production_entrypoint_activates_v2_engine(self):
+        os.environ.setdefault("BOT_TOKEN", "123456789:ci-test-token")
         import bot
         import handlers.deathgames_v2 as v2
         # The V2 binding is part of production application construction, not
