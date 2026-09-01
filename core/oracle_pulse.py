@@ -47,7 +47,7 @@ async def _deliver_narrative_with_media(application, db, group_id: int, text: st
         if not media:
             return True
         if media["kind"] == "gif":
-            await application.bot.send_animation(group_id, media["url"])
+            await application.bot.send_animation(group_id, media["url"], caption="Powered By GIPHY")
         elif media["kind"] == "image":
             await application.bot.send_photo(group_id, media["url"])
         else:
