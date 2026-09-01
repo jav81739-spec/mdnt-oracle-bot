@@ -28,8 +28,10 @@ CREATE INDEX IF NOT EXISTS idx_oracle_narratives_group ON oracle_narratives(grou
 """
 
 MIN_GAP = 3 * 3600
-MAX_PARTS = 7
-MIN_PARTS = 3
+MAX_PARTS = 4
+MIN_PARTS = 2
+TARGET_PARTS = 3
+MAX_PUBLIC_CHARS = 1200
 
 
 def _fallback(kind: str, title: str, part: int, max_parts: int, canon: str) -> str:
@@ -37,10 +39,7 @@ def _fallback(kind: str, title: str, part: int, max_parts: int, canon: str) -> s
         "The room had forgotten the first clue, which was probably why it mattered.",
         "Someone noticed a detail that had been sitting in plain sight the entire time.",
         "The obvious explanation lasted exactly until somebody asked one better question.",
-        "By then, the little mystery had acquired a life of its own.",
-        "Nobody agreed on what the clue meant, but everyone agreed they wanted to know the rest.",
         "The answer arrived quietly, almost embarrassed by how simple it was.",
-        "And when the story finally ended, the strangest part was what everyone remembered.",
     )
     line = seeds[min(part - 1, len(seeds) - 1)]
     ending = "One more part remains." if part < max_parts else "That closes the file."
@@ -53,8 +52,9 @@ def _clean_public_text(text: str) -> str:
     """Remove leaked planning/instruction language before narrative text reaches Telegram."""
     text = re.sub(r"(?im)^.*(?:continuity bible|keep continuity|reveal one meaningful new detail).*$(?:\n|$)", "", text)
     text = re.sub(r"(?im)^.*(?:parts already delivered|return json only|one message, not the whole story|internal continuity).*$(?:\n|$)", "", text)
+    text = re.sub(r"(?im)^.*(?:planning instructions|field names|part-generation rules|internal notes).*$(?:\n|$)", "", text)
     text = re.sub(r"\s{3,}", "\n\n", text).strip()
-    return text[:3200]
+    return text[:MAX_PUBLIC_CHARS]
 
 
 async def ensure(db) -> None:
@@ -102,7 +102,8 @@ Create a NEW {kind} series. It must be original and unlike these recently used t
 The series must feel written by a clever, emotionally perceptive human: specific, warm, occasionally funny, never robotic.
 Language: {language}.
 For story: original fiction only. For gossip: playful world/culture/idea gossip only; never invent allegations about real people or group members and never present fiction as real news.
-Make {MIN_PARTS}-{MAX_PARTS} parts. Plan a real arc: setup, escalation, turn, consequence, ending. Do not cram the whole arc into Part 1.
+Keep the series tight and engaging: usually {TARGET_PARTS} parts, never fewer than {MIN_PARTS} and never more than {MAX_PARTS}. Each part should move the arc forward with a fresh beat, reveal, turn, or consequence. Do not stretch a small idea into extra parts and do not pad with atmosphere or repetition.
+Plan a compact arc: setup, escalation/turn, consequence, ending. Do not cram the whole arc into Part 1, but do not delay the payoff unnecessarily.
 Return JSON only with: title, premise, canon, max_parts. Canon is a concise internal continuity bible, not text to send to users.
 Never copy planning instructions, field names, internal notes, or the continuity bible into the public narrative.
 Recent public room atmosphere:
@@ -115,15 +116,15 @@ Recent public room atmosphere:
         title = "The Thing Nobody Noticed" if kind == "story" else "The Rumour With No Address"
         premise = "A small detail becomes impossible to ignore."
         canon = "Keep continuity coherent; reveal one meaningful new detail per part."
-        max_parts = 4
+        max_parts = TARGET_PARTS
     else:
         title = str(obj.get("title") or "Midnight File")[:120]
         premise = str(obj.get("premise") or "A small mystery grows.")[:700]
         canon = str(obj.get("canon") or premise)[:1800]
         try:
-            max_parts = max(MIN_PARTS, min(MAX_PARTS, int(obj.get("max_parts", 4))))
+            max_parts = max(MIN_PARTS, min(MAX_PARTS, int(obj.get("max_parts", TARGET_PARTS))))
         except Exception:
-            max_parts = 4
+            max_parts = TARGET_PARTS
     if title.casefold() in {x.casefold() for x in old}:
         title = f"{title} · {str(int(now * 1000))[-5:]}"
     await db.execute(
@@ -139,13 +140,15 @@ async def _render_part(db, row, context: list[dict[str, Any]], language: str, no
     max_parts = int(row[7])
     title = str(row[3]); premise = str(row[4]); canon = str(row[5]); kind = str(row[2])
     prompt = f"""You are Midnight Oracle. Write Part {part} of a serialized {kind} called {title!r} for a Telegram group.
-This is ONE message, not the whole story. Continue the exact continuity and advance the narrative meaningfully.
+This is ONE concise message, not the whole story. Continue the exact continuity and advance the narrative meaningfully.
 Voice: emotionally intelligent, conversational, vivid, restrained, occasionally witty; never robotic or purple-prose heavy.
 Language: {language}.
 Premise: {premise}
 Continuity bible (internal only; NEVER repeat or describe it): {canon}
-Parts already delivered: {previous_part}.
-If this is before Part {MIN_PARTS}, it MUST NOT conclude the series. It must leave a natural unresolved thread.
+Parts already delivered: {previous_part} of {max_parts}.
+Keep this part engaging and compact: aim for roughly 120-700 characters of actual narrative text. Prefer one strong scene, reveal, exchange, or turn over several paragraphs of setup. Every sentence should earn its place. No filler, repetition, generic suspense, or dragged-out cliffhanger.
+If this is before Part {MIN_PARTS}, it MUST NOT conclude the series, but it should still provide a satisfying new beat and a clear reason to continue.
+If the narrative has reached its natural ending, finish it rather than inventing another part. Never extend a story just to use the maximum part count.
 The final part must resolve the thread cleanly without a rushed summary.
 Return JSON only: {{"text":"...", "finished": true|false}}.
 The public text must contain only the narrative. Never mention prompts, instructions, continuity, planning, JSON, part-generation rules, internal notes, or the continuity bible. Do not explain what you are doing.
