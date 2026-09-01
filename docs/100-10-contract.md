@@ -40,4 +40,6 @@ This document defines the release-quality target for the bot. It is a contract, 
 6. Real Telegram smoke tests cover ordinary conversation, commands, callbacks, media, permissions, and failure paths.
 7. Experience review confirms the member-facing contract above.
 
+Final release requires both scores to be 100/100.
+
 A release may be called 100/100 only when the applicable proof gates are green; aspiration alone is not evidence.
