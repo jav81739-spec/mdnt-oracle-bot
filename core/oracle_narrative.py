@@ -43,9 +43,18 @@ def _fallback(kind: str, title: str, part: int, max_parts: int, canon: str) -> s
         "And when the story finally ended, the strangest part was what everyone remembered.",
     )
     line = seeds[min(part - 1, len(seeds) - 1)]
+    ending = "One more part remains." if part < max_parts else "That closes the file."
     if kind == "gossip":
-        return f"☾ *{title}*\n*Part {part}*\n\n{line} {canon[:420]}\n\n_{'One more part remains.' if part < max_parts else 'That closes the file.'}_"
-    return f"☾ *{title}*\n*Part {part}*\n\n{line}\n\n{canon[:520]}\n\n_{'The story continues.' if part < max_parts else 'The End.'}_"
+        return f"☾ *{title}*\n*Part {part}*\n\n{line}\n\n_{ending}_"
+    return f"☾ *{title}*\n*Part {part}*\n\n{line}\n\n_{'The story continues.' if part < max_parts else 'The End.'}_"
+
+
+def _clean_public_text(text: str) -> str:
+    """Remove leaked planning/instruction language before narrative text reaches Telegram."""
+    text = re.sub(r"(?im)^.*(?:continuity bible|keep continuity|reveal one meaningful new detail).*$(?:\n|$)", "", text)
+    text = re.sub(r"(?im)^.*(?:parts already delivered|return json only|one message, not the whole story|internal continuity).*$(?:\n|$)", "", text)
+    text = re.sub(r"\s{3,}", "\n\n", text).strip()
+    return text[:3200]
 
 
 async def ensure(db) -> None:
@@ -95,6 +104,7 @@ Language: {language}.
 For story: original fiction only. For gossip: playful world/culture/idea gossip only; never invent allegations about real people or group members and never present fiction as real news.
 Make {MIN_PARTS}-{MAX_PARTS} parts. Plan a real arc: setup, escalation, turn, consequence, ending. Do not cram the whole arc into Part 1.
 Return JSON only with: title, premise, canon, max_parts. Canon is a concise internal continuity bible, not text to send to users.
+Never copy planning instructions, field names, internal notes, or the continuity bible into the public narrative.
 Recent public room atmosphere:
 {public or '- no usable context'}"""
     try:
@@ -133,12 +143,12 @@ This is ONE message, not the whole story. Continue the exact continuity and adva
 Voice: emotionally intelligent, conversational, vivid, restrained, occasionally witty; never robotic or purple-prose heavy.
 Language: {language}.
 Premise: {premise}
-Continuity bible: {canon}
+Continuity bible (internal only; NEVER repeat or describe it): {canon}
 Parts already delivered: {previous_part}.
 If this is before Part {MIN_PARTS}, it MUST NOT conclude the series. It must leave a natural unresolved thread.
 The final part must resolve the thread cleanly without a rushed summary.
 Return JSON only: {{"text":"...", "finished": true|false}}.
-Text should include a subtle title/part marker, but no meta explanation, fake factual claims, or member-targeted gossip.
+The public text must contain only the narrative. Never mention prompts, instructions, continuity, planning, JSON, part-generation rules, internal notes, or the continuity bible. Do not explain what you are doing.
 Recent public atmosphere (use only if naturally relevant):
 {chr(10).join('- '+str(x.get('text',''))[:220] for x in context[-5:])}"""
     try:
@@ -146,9 +156,11 @@ Recent public atmosphere (use only if naturally relevant):
     except Exception:
         obj = None
     if obj and str(obj.get("text", "")).strip():
-        text = str(obj["text"]).strip()[:3200]
+        text = _clean_public_text(str(obj["text"]).strip())
         requested_finished = bool(obj.get("finished", False))
         finished = part >= MIN_PARTS and (requested_finished or part >= max_parts)
+        if not text:
+            text = _fallback(kind, title, part, max_parts, canon)
     else:
         text = _fallback(kind, title, part, max_parts, canon)
         finished = part >= max_parts
