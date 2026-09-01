@@ -1,7 +1,8 @@
 """Midnight Oracle voice-note engine.
 
-Voice is an optional response modality. Midnight keeps one original female voice
-identity while varying the spoken wording and delivery instructions naturally.
+Voice is an optional response modality. Midnight keeps one original female
+voice identity while varying the spoken wording and delivery instructions
+naturally.
 """
 from __future__ import annotations
 
@@ -33,7 +34,9 @@ class VoiceEngine:
     """Generate short, varied, deduplicated Telegram voice notes."""
 
     def __init__(self, api_key: str | None = None) -> None:
-        self.api_key = (api_key or OPENAI_API_KEY or "").strip()
+        # None means use configured application credentials; an explicit empty
+        # string intentionally disables voice so tests can isolate this path.
+        self.api_key = (OPENAI_API_KEY if api_key is None else api_key).strip()
         self.client = AsyncOpenAI(api_key=self.api_key) if self.api_key else None
         self._recent: dict[str, tuple[float, str]] = {}
         self._last_chat: dict[int, float] = {}
