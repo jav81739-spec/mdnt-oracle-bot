@@ -86,8 +86,6 @@ async def generate_reply(user_text: str, persona: str, history: list) -> str | N
     if not ai_service.api_key:
         return _casual_fallback(user_text)
 
-    # Handle unmistakable conversational bids before the model can turn them into
-    # generic support language. This keeps the character natural and deterministic.
     direct_fallback = _casual_fallback(user_text)
     if direct_fallback:
         return direct_fallback
@@ -113,7 +111,7 @@ async def generate_reply(user_text: str, persona: str, history: list) -> str | N
         "- Do not use canned assistant openings such as 'Noted', 'Certainly', 'Absolutely', 'I understand', 'Let's unpack that', 'I'm listening', 'No rush', 'I'm here', or 'How can I help?'.\n"
         "- Do not restate the user's message or explain your role.\n"
         f"- Language signal: {language_hint}. If the newest message is Romanized Bangla, understand it as Bangla and reply naturally in Romanized Bangla unless the conversation clearly switches language. Do not translate it unless asked.\n"
-        "- Track who said what using speaker labels and recent context. Resolve references only from explicit conversation evidence; never infer gender from names, usernames, avatars, photos, or stereotypes.\n"
+        "- Track who said what using speaker labels and recent context. Resolve references only from explicit conversation evidence. Never infer gender from a name, username, avatar, photo, or stereotype.\n"
         f"- Explicit reference cues currently visible: {reference_context}.\n"
         "- Prefer a short natural reply (usually one sentence, at most two). A fragment, emoji, playful reaction, or dry joke is fine when appropriate.\n"
         "- Do not force emojis, Hinglish, questions, empathy, mystery, or Oracle lore into every reply.\n"
