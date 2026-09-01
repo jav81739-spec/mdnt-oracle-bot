@@ -49,9 +49,7 @@ def _database_url(raw: str) -> str:
     if value.startswith("sqlite:///"):
         return value
     if value.startswith("sqlite://"):
-        raise ConfigurationError(
-            "DATABASE_URL must be a SQLAlchemy SQLite URL such as sqlite:///oracle.db"
-        )
+        raise ConfigurationError("DATABASE_URL must be a SQLAlchemy SQLite URL such as sqlite:///oracle.db")
     if "://" in value:
         raise ConfigurationError("Only SQLite DATABASE_URL values are supported by this build")
     path = Path(value).expanduser()
@@ -99,19 +97,16 @@ def load_settings() -> Settings:
     log_level = (_optional("LOG_LEVEL", "INFO") or "INFO").upper()
     if log_level not in {"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"}:
         raise ConfigurationError("LOG_LEVEL must be a valid Loguru level")
-
     timezone_name = _optional("ORACLE_TIMEZONE", "Asia/Kolkata") or "Asia/Kolkata"
     try:
         ZoneInfo(timezone_name)
     except Exception as exc:
         raise ConfigurationError(f"Invalid ORACLE_TIMEZONE: {timezone_name}") from exc
-
     _validate_token("TELEGRAM_BOT_TOKEN", telegram_token)
     _validate_token("OPENAI_API_KEY", openai_key)
     _validate_token("GIPHY_API_KEY", giphy_key)
     if master_id <= 0:
         raise ConfigurationError("ORACLE_MASTER_ID must be a positive Telegram user ID")
-
     return Settings(
         telegram_bot_token=telegram_token,
         openai_api_key=openai_key,
@@ -126,7 +121,6 @@ def load_settings() -> Settings:
 
 
 settings = load_settings()
-
 TELEGRAM_BOT_TOKEN = settings.telegram_bot_token
 OPENAI_API_KEY = settings.openai_api_key
 GIPHY_API_KEY = settings.giphy_api_key
@@ -145,21 +139,54 @@ GROUP_HOURLY_LIMIT = settings.group_hourly_limit
 GIF_MESSAGE_INTERVAL = settings.gif_message_interval
 RANDOM_STICKER_PROBABILITY = settings.random_sticker_probability
 
-# Compatibility names retained for the canonical runtime.  These aliases do
-# not create a second configuration source; they point at the validated values
-# above and prevent legacy imports from breaking the application.
+# Compatibility names retained for the canonical runtime. These aliases point
+# at validated values and do not create a second configuration source.
 BOT_TOKEN = TELEGRAM_BOT_TOKEN
 DATABASE_PATH = DATABASE_URL
 
+# Ambient conversation controls.
+ENGAGEMENT_THRESHOLD = 6
+AMBIENT_ENGAGEMENT_RATE = 0.30
+PER_MEMBER_COOLDOWN_SECONDS = 600
+PER_GROUP_COOLDOWN_SECONDS = 600
+MAX_AMBIENT_REPLIES_PER_HOUR = 2
+SERIOUS_CONVERSATION_COOLDOWN_SECONDS = 1200
+SCHEDULED_MESSAGE_GAP_SECONDS = 14400
+GROUP_RECENT_MESSAGE_LIMIT = 10
+MOOD_WINDOW = 10
+
+# Memory limits.
+MEMORY_INTEREST_LIMIT = 10
+MEMORY_THEME_LIMIT = 5
+MEMORY_WORRY_LIMIT = 10
+MEMORY_WIN_LIMIT = 10
+MEMORY_JOKE_LIMIT = 10
+MEMORY_RECENT_DAYS = 30
+
+# Schedule and interaction constants.
+MORNING_HOUR = 7
+MORNING_MINUTE = 30
+EVENING_HOUR = 20
+EVENING_MINUTE = 0
+LATE_NIGHT_START = 23
+LATE_NIGHT_END = 3
+THREE_AM_START = 0
+THREE_AM_END = 3
+JOKE_MAX_PER_GROUP = 20
+JOKE_CALLBACK_PROBABILITY = 0.15
+JOKE_CALLBACK_GAP_SECONDS = 172800
+ABSENCE_DAYS = 5
+ABSENCE_PING_GAP_DAYS = 14
+ABSENCE_CHECK_HOUR = 14
+MAX_STICKER_EVENTS_PER_HOUR = 3
+SECRET_EVENT_MAX_WEEKLY = 2
+MAX_ACHIEVEMENTS_PER_EVENT = 3
+GAME_POLL_SECONDS = 60
+
+# Oracle behaviour constants.
 MOOD_STATES = (
-    "MYSTICAL",
-    "PROPHETIC",
-    "PLAYFUL",
-    "TENDER",
-    "SHARP",
-    "DARK_HUMOR",
-    "SILENT_WISE",
-    "STORM",
+    "MYSTICAL", "PROPHETIC", "PLAYFUL", "TENDER",
+    "SHARP", "DARK_HUMOR", "SILENT_WISE", "STORM",
 )
 RECENT_MESSAGES_LIMIT = 20
 SOUL_SNAPSHOT_WORD_LIMIT = 200
@@ -178,3 +205,14 @@ AFTERNOON_START_HOUR = 12
 DUSK_START_HOUR = 17
 NIGHT_START_HOUR = 20
 DEEP_NIGHT_START_HOUR = 2
+
+FALLBACK_REPLIES = (
+    "Haan. Suna. ☾",
+    "Yahin hoon. Bolo.",
+    "Hmm… midnight sun raha hai.",
+    "Batao. Kya chal raha hai?",
+    "haan, bolo. 🌙",
+    "I’m listening. No rush.",
+    "Achha… ab asli baat batao.",
+    "Haan. I’m here.",
+)
