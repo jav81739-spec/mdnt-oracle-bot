@@ -7,6 +7,7 @@ on:
     branches:
       - main
       - 'rebuild/**'
+      - 'integration/**'
   pull_request:
     branches:
       - main
