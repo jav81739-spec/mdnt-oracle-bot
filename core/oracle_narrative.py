@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import random
 import re
 import time
 from typing import Any
@@ -34,12 +33,8 @@ MIN_GAP = 3 * 3600
 MAX_PARTS = 7
 
 
-def _hash(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
 def _fallback(kind: str, title: str, part: int, max_parts: int, canon: str) -> str:
-    seeds = [
+    seeds = (
         "The room had forgotten the first clue, which was probably why it mattered.",
         "Someone noticed a detail that had been sitting in plain sight the entire time.",
         "The obvious explanation lasted exactly until somebody asked one better question.",
@@ -47,7 +42,7 @@ def _fallback(kind: str, title: str, part: int, max_parts: int, canon: str) -> s
         "Nobody agreed on what the clue meant, but everyone agreed they wanted to know the rest.",
         "The answer arrived quietly, almost embarrassed by how simple it was.",
         "And when the story finally ended, the strangest part was what everyone remembered.",
-    ]
+    )
     line = seeds[min(part - 1, len(seeds) - 1)]
     if kind == "gossip":
         return f"☾ *{title}*\n*Part {part}*\n\n{line} {canon[:420]}\n\n_{'One more part remains.' if part < max_parts else 'That closes the file.'}_"
@@ -56,10 +51,7 @@ def _fallback(kind: str, title: str, part: int, max_parts: int, canon: str) -> s
 
 async def ensure(db) -> None:
     await db.execute(TABLE.split(";\nCREATE INDEX", 1)[0] + ";")
-    try:
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_oracle_narratives_group ON oracle_narratives(group_id,status,next_at)")
-    except Exception:
-        pass
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_oracle_narratives_group ON oracle_narratives(group_id,status,next_at)")
 
 
 async def active(db, group_id: int):
@@ -96,6 +88,7 @@ def _parse_json(raw: str) -> dict[str, Any] | None:
 
 
 async def _new_series(db, group_id: int, kind: str, context: list[dict[str, Any]], language: str, now: float):
+    kind = kind if kind in {"story", "gossip"} else "story"
     old = await recent_titles(db, group_id)
     recent = ", ".join(old[:12]) or "none"
     public = "\n".join(f"- {str(x.get('text',''))[:240]}" for x in context[-8:])
@@ -119,15 +112,14 @@ Recent public room atmosphere:
         max_parts = 4
     else:
         title = str(obj.get("title") or "Midnight File")[:120]
-        premise = str(obj.get("premise") or "A small mystery grows. ")[:700]
+        premise = str(obj.get("premise") or "A small mystery grows.")[:700]
         canon = str(obj.get("canon") or premise)[:1800]
         try:
             max_parts = max(3, min(MAX_PARTS, int(obj.get("max_parts", 4))))
         except Exception:
             max_parts = 4
-    # Deterministic freshness guard against accidental same-title regeneration.
     if title.casefold() in {x.casefold() for x in old}:
-        title = f"{title} · {now_ns_suffix(now)}"
+        title = f"{title} · {str(int(now * 1000))[-5:]}"
     await db.execute(
         "INSERT INTO oracle_narratives(group_id,kind,title,premise,canon,part_no,max_parts,status,created_at,updated_at,next_at) VALUES(?,?,?,?,?,?,?,'active',?,?,?)",
         (group_id, kind, title, premise, canon, 0, max_parts, now, now, now),
@@ -135,25 +127,20 @@ Recent public room atmosphere:
     return await active(db, group_id)
 
 
-def now_ns_suffix(now: float) -> str:
-    return str(int(now * 1000))[-5:]
-
-
-async def _render_part(db, row, context: list[dict[str, Any]], language: str, now: float) -> tuple[str, bool]:
+async def _render_part(db, row, context: list[dict[str, Any]], language: str, now: float) -> tuple[str, bool, str]:
     part = int(row[6]) + 1
     max_parts = int(row[7])
     title = str(row[3]); premise = str(row[4]); canon = str(row[5]); kind = str(row[2])
-    prior = f"Part {int(row[6])} was already delivered. Continue from the exact canon; do not recap unless a tiny reminder is natural."
     prompt = f"""You are Midnight Oracle. Write Part {part} of a serialized {kind} called {title!r} for a Telegram group.
-This is one message, not the whole story. Keep continuity exact and advance the narrative meaningfully.
+This is ONE message, not the whole story. Continue the exact continuity and advance the narrative meaningfully.
 Voice: emotionally intelligent, conversational, vivid, restrained, occasionally witty; never robotic or purple-prose heavy.
 Language: {language}.
 Premise: {premise}
 Continuity bible: {canon}
-{prior}
+Parts already delivered: {int(row[6])}.
 The final part must resolve the thread. Earlier parts must leave a reason to return.
 Return JSON only: {{"text":"...", "finished": true|false}}.
-Text should include a subtle title/part marker but no meta explanation, no fake factual claims, and no member-targeted gossip.
+Text should include a subtle title/part marker, but no meta explanation, fake factual claims, or member-targeted gossip.
 Recent public atmosphere (use only if naturally relevant):
 {chr(10).join('- '+str(x.get('text',''))[:220] for x in context[-5:])}"""
     try:
@@ -171,18 +158,20 @@ Recent public atmosphere (use only if naturally relevant):
         "UPDATE oracle_narratives SET part_no=?,updated_at=?,next_at=?,status=?,completed_at=? WHERE id=? AND status='active'",
         (part, now, next_at, "completed" if finished else "active", now if finished else None, int(row[0])),
     )
-    return text, finished
+    return text, finished, kind
 
 
-async def maybe_deliver(db, application, group_id: int, kind: str, context: list[dict[str, Any]], now: float) -> tuple[str | None, str]:
-    """Return one due narrative part, or None. At most one narrative part is emitted per pulse target."""
+async def maybe_deliver(db, application, group_id: int, kind: str, context: list[dict[str, Any]], now: float) -> tuple[str | None, str, str | None]:
+    """Return one due narrative part, or None; a group has only one active narrative at once."""
     await ensure(db)
     row = await active(db, group_id)
     if row:
-        if float(row[10]) > now:
-            return None, "active_wait"
-        text, finished = await _render_part(db, row, context, _language_hint(context), now)
-        return text, "finished" if finished else "continued"
+        if float(row[11]) > now:
+            return None, "active_wait", str(row[2])
+        text, finished, row_kind = await _render_part(db, row, context, _language_hint(context), now)
+        return text, "finished" if finished else "continued", row_kind
+    if kind not in {"story", "gossip"}:
+        return None, "no_narrative", None
     row = await _new_series(db, group_id, kind, context, _language_hint(context), now)
-    text, finished = await _render_part(db, row, context, _language_hint(context), now)
-    return text, "finished" if finished else "started"
+    text, finished, row_kind = await _render_part(db, row, context, _language_hint(context), now)
+    return text, "finished" if finished else "started", row_kind
