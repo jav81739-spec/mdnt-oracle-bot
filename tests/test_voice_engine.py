@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from midnight_oracle.voice_engine import VOICE_PROFILE, VoiceEngine
 
@@ -27,9 +27,10 @@ class VoiceEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_synthesis_uses_gemini_and_telegram_ogg_opus(self):
         engine = VoiceEngine(api_key="test-key")
-        response = AsyncMock()
+        response = Mock()
         response.status_code = 200
         response.json.return_value = {"output_audio": {"data": "YXVkaW8="}}
+        response.raise_for_status = Mock()
 
         client = AsyncMock()
         client.__aenter__.return_value = client
