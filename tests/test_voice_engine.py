@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from midnight_oracle.voice_engine import VoiceEngine
+from midnight_oracle.voice_engine import VOICE_PROFILE, VoiceEngine
 
 
 class VoiceEngineTests(unittest.IsolatedAsyncioTestCase):
@@ -17,16 +17,21 @@ class VoiceEngineTests(unittest.IsolatedAsyncioTestCase):
         text = "x" * 1000
         self.assertEqual(len(VoiceEngine._clean_script(text)), 700)
 
-    async def test_synthesis_uses_opus_and_returns_named_buffer(self):
+    async def test_synthesis_uses_profile_and_opus(self):
         engine = VoiceEngine(api_key="test-key")
         response = type("Response", (), {"content": b"audio"})()
         engine.client.audio.speech.create = AsyncMock(return_value=response)
-        audio = await engine.synthesize("hello")
+        with patch("midnight_oracle.voice_engine.random.choice", return_value="natural delivery"):
+            audio = await engine.synthesize("hello")
         self.assertIsNotNone(audio)
         self.assertEqual(audio.name, "midnight-oracle.ogg")
         self.assertEqual(audio.read(), b"audio")
         engine.client.audio.speech.create.assert_awaited_once_with(
-            model="gpt-4o-mini-tts", voice="alloy", input="hello", response_format="opus"
+            model="gpt-4o-mini-tts",
+            voice=VOICE_PROFILE["voice"],
+            input="hello",
+            response_format="opus",
+            instructions=VOICE_PROFILE["style"] + ". natural delivery",
         )
 
     def test_duplicate_is_rejected_after_recording(self):
