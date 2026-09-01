@@ -24,18 +24,47 @@ async def _store_setnx(key,value,ttl):
             result=method(key,value,ttl);return bool(await result if asyncio.iscoroutine(result) else result)
         return False
     except Exception:return False
+async def _store_compare_refresh(key,owner,ttl):
+    """Refresh a lease only if this process still owns it, atomically in Redis."""
+    if _storage is None:return False
+    evaluator=getattr(_storage,"eval",None)
+    if callable(evaluator):
+        script="if redis.call('GET',KEYS[1]) == ARGV[1] then redis.call('SET',KEYS[1],ARGV[1],'EX',ARGV[2]); return 1 end; return 0"
+        try:
+            result=evaluator(script,[key],[owner,str(max(1,int(ttl)))])
+            result=await result if asyncio.iscoroutine(result) else result
+            return int(result)==1
+        except Exception:log.exception("POLLING_LEASE_REFRESH_FAILED");return False
+    current=await _store_get(key)
+    if current!=owner:return False
+    return await _store_set(key,owner,ttl)
 async def _store_delete(key):
     try:
         if _storage is None:return False
         result=_storage.delete(key);return bool(await result if asyncio.iscoroutine(result) else result)
     except Exception:return False
-async def _refresh_lease():await _store_set(_LEASE_KEY,json.dumps({"instance":_INSTANCE_ID,"ts":time.time()}),_LEASE_TTL)
+async def _refresh_lease():
+    owner=json.dumps({"instance":_INSTANCE_ID,"ts":time.time()})
+    # Preserve the legacy JSON value while using an ownership token for the CAS.
+    raw=await _store_get(_LEASE_KEY)
+    try:current=json.loads(raw).get("instance") if raw else None
+    except Exception:current=None
+    if current!=_INSTANCE_ID:return False
+    evaluator=getattr(_storage,"eval",None) if _storage is not None else None
+    if callable(evaluator):
+        script="local v=redis.call('GET',KEYS[1]); if not v then return 0 end; local ok,cjson=pcall(cjson.decode,v); if not ok or cjson.instance ~= ARGV[1] then return 0 end; redis.call('SET',KEYS[1],ARGV[2],'EX',ARGV[3]); return 1"
+        try:
+            result=evaluator(script,[_LEASE_KEY],[_INSTANCE_ID,owner,str(_LEASE_TTL)])
+            result=await result if asyncio.iscoroutine(result) else result
+            return int(result)==1
+        except Exception:log.exception("POLLING_LEASE_REFRESH_FAILED");return False
+    return await _store_set(_LEASE_KEY,owner,_LEASE_TTL)
 async def _acquire_lease():
     raw=await _store_get(_LEASE_KEY)
     if raw:
         try:
             info=json.loads(raw);owner=info.get("instance");age=time.time()-info.get("ts",0)
-            if owner==_INSTANCE_ID:await _refresh_lease();return True
+            if owner==_INSTANCE_ID:return await _refresh_lease()
             if age<_LEASE_TTL:return False
         except Exception:pass
     return await _store_setnx(_LEASE_KEY,json.dumps({"instance":_INSTANCE_ID,"ts":time.time()}),_LEASE_TTL)
@@ -45,9 +74,14 @@ async def _release_lease():
         if raw and json.loads(raw).get("instance")==_INSTANCE_ID:await _store_delete(_LEASE_KEY)
     except Exception:pass
 async def _lease_heartbeat_loop():
+    global _shutting_down
     while not _shutting_down:
         await asyncio.sleep(_LEASE_REFRESH)
-        if not _shutting_down:await _refresh_lease()
+        if _shutting_down:break
+        if not await _refresh_lease():
+            log.critical("POLLING_LEASE_LOST | instance=%s | stopping to prevent duplicate Telegram polling",_INSTANCE_ID)
+            await _graceful_shutdown()
+            break
 _REGISTRY_KEY="midnight:chat_registry"
 async def register_chat(chat_id,chat_type,title=""):
     if chat_type=="private":return
@@ -141,7 +175,7 @@ async def run(application,storage_client=None):
     except asyncio.CancelledError:pass
     except Exception:log.exception("Fatal error in polling loop")
     finally:await _graceful_shutdown()
-def init(storage_client=None):
+async def init(storage_client=None):
     global _storage;_storage=storage_client
 async def _wait_for_lease():
     deadline=time.time()+_LEASE_WAIT_MAX
