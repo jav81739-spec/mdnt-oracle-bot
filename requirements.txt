@@ -5,6 +5,7 @@ httpx==0.28.1
 aiosqlite==0.20.0
 apscheduler==3.10.4
 openai==1.68.2
+SQLAlchemy==2.0.38
 # Legacy modules remain available during the migration; the Phase 1 package does not use them.
 aiohttp==3.9.5
 requests==2.32.3
