@@ -50,7 +50,8 @@ class AIService:
     def __post_init__(self):
         self.api_key = self.api_key or os.getenv("GEMINI_API_KEY", "")
         configured = os.getenv("GEMINI_MODEL", "").strip()
-        self.model = self.model or (configured if configured and configured not in self.RETIRED_MODELS else self.DEFAULT_MODEL)
+        candidate = self.model or configured
+        self.model = candidate if candidate and candidate not in self.RETIRED_MODELS else self.DEFAULT_MODEL
         self._client = None
         self._client_lock = asyncio.Lock()
 
@@ -80,11 +81,13 @@ class AIService:
                 str(item.get("name", "")).removeprefix("models/")
                 for item in models
                 if "generateContent" in (item.get("supportedGenerationMethods") or [])
+                and str(item.get("name", "")).removeprefix("models/") not in self.RETIRED_MODELS
+                and "preview" not in str(item.get("name", "")).casefold()
             }
             for candidate in self.FALLBACK_MODELS:
                 if candidate in available:
                     return candidate
-            preferred = sorted(name for name in available if "flash" in name and "preview" not in name)
+            preferred = sorted(name for name in available if "flash" in name)
             return preferred[0] if preferred else None
         except Exception:
             return None
@@ -139,8 +142,6 @@ class AIService:
                 try:
                     return await self._interactions(client, prompt, request_timeout)
                 except httpx.HTTPStatusError as exc:
-                    # Interactions is the primary path. A 404/405/410 is a
-                    # transport/model compatibility signal, not a user error.
                     if exc.response.status_code not in {404, 405, 410}:
                         raise
                     return await self._legacy_generate_content(client, prompt, request_timeout)
