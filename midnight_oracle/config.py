@@ -7,12 +7,12 @@ ENGAGEMENT_THRESHOLD=6; AMBIENT_ENGAGEMENT_RATE=.30; PER_MEMBER_COOLDOWN_SECONDS
 MORNING_HOUR=7; MORNING_MINUTE=30; EVENING_HOUR=20; EVENING_MINUTE=0; LATE_NIGHT_START=23; LATE_NIGHT_END=3; THREE_AM_START=0; THREE_AM_END=3
 JOKE_MAX_PER_GROUP=20; JOKE_CALLBACK_PROBABILITY=.15; JOKE_CALLBACK_GAP_SECONDS=172800; ABSENCE_DAYS=5; ABSENCE_PING_GAP_DAYS=14; ABSENCE_CHECK_HOUR=14; MAX_STICKER_EVENTS_PER_HOUR=3; SECRET_EVENT_MAX_WEEKLY=2; MAX_ACHIEVEMENTS_PER_EVENT=3; GAME_POLL_SECONDS=60
 FALLBACK_REPLIES=(
-    'Haan. Suna. ☾',
-    'Yahin hoon. Bolo.',
-    'Hmm… midnight sun raha hai.',
-    'Batao. Kya chal raha hai?',
-    'haan, bolo. 🌙',
-    'I’m listening. No rush.',
-    'Achha… ab asli baat batao.',
-    'Haan. I’m here.',
+    'Haan, got you.',
+    'Achha. Keep going.',
+    'Hmm. I’m with you.',
+    'Okay, that caught my attention.',
+    'Haan… continue.',
+    'Wait, interesting.',
+    'Achha, ye wala part interesting hai.',
+    'Yeah. I get what you mean.',
 )
