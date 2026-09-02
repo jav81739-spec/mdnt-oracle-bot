@@ -32,7 +32,7 @@ async def deliver(application: Any, chat_id: int, text: str) -> bool:
         if permission_blocked:
             if db:
                 await db.set_cooldown("group", str(chat_id), "delivery_blocked", BLOCK_EXPIRES_AT)
-            log.error(
+            log.info(
                 "ORACLE_DELIVERY_BLOCKED | chat=%s | reason=insufficient_send_rights",
                 chat_id,
             )
@@ -50,13 +50,13 @@ async def deliver(application: Any, chat_id: int, text: str) -> bool:
         if "not enough rights to send" in message or "not enough rights" in message:
             if db:
                 await db.set_cooldown("group", str(chat_id), "delivery_blocked", BLOCK_EXPIRES_AT)
-            log.error(
+            log.info(
                 "ORACLE_DELIVERY_BLOCKED | chat=%s | reason=insufficient_send_rights",
                 chat_id,
             )
         else:
-            log.error("ORACLE_DELIVERY_FAILED | chat=%s | error=%s", chat_id, exc)
+            log.warning("ORACLE_DELIVERY_FAILED | chat=%s | error=%s", chat_id, exc)
         return False
     except Exception as exc:
-        log.error("ORACLE_DELIVERY_FAILED | chat=%s | error=%s", chat_id, exc)
+        log.warning("ORACLE_DELIVERY_FAILED | chat=%s | error=%s", chat_id, exc)
         return False
