@@ -1,6 +1,7 @@
-"""OpenAI-backed reply generation for Midnight Oracle's human chat brain."""
+"""OpenAI-backed reply generation with a graceful local Oracle fallback."""
 from __future__ import annotations
 import asyncio
+import random
 from openai import AsyncOpenAI
 from ..config import OPENAI_API_KEY, OPENAI_MODEL
 
@@ -45,23 +46,116 @@ OUTPUT
 - Return only the reply text.
 """
 
+
 class ReplyGenerator:
     """Generate fresh Oracle replies while preserving conversational continuity."""
+
     def __init__(self, client: AsyncOpenAI | None = None) -> None:
         self.client = client or (AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None)
 
-    async def generate(self, group_name: str, name: str, relationship_tier: str, message: str, mood_summary: str, time_text: str, late: bool, memory: str, recent_context: list[str] | tuple[str, ...] | str | None = None) -> str:
-        if not self.client:
-            raise RuntimeError("OPENAI_API_KEY is not configured for the Oracle chat brain")
+    @staticmethod
+    def _local_reply(message: str, recent_context: list[str] | tuple[str, ...] | str | None = None) -> str:
+        """Keep ordinary chat alive when no external model credential is available.
+
+        This is deliberately small and context-sensitive: it is a continuity bridge,
+        not a pretend replacement for the model. It never exposes the reason it ran.
+        """
+        text = " ".join(str(message or "").strip().split())
+        lowered = text.casefold()
+        recent = recent_context if isinstance(recent_context, str) else " ".join(str(x) for x in (recent_context or []))
+        recent_lower = recent.casefold()
+
+        if not text:
+            return "hmm… 😶"
+
+        if any(token in lowered for token in ("😂", "🤣", "lol", "lmao", "😭😂", "haha", "hehe")):
+            choices = [
+                "😭😂 okay, that one actually got me.",
+                "nahhh 😭😂", 
+                "😂😂 bas karo yaar, ab hasna aa gaya.",
+                "okay this is getting out of hand 😭",
+            ]
+        elif any(token in lowered for token in ("sad", "dukhi", "hurt", "upset", "cry", "rona", "ro raha", "ro rahi", "😭", "💔")):
+            choices = [
+                "hmm… aaj thoda heavy lag raha hai. 🫂",
+                "haan… samajh aa raha hai. take it easy tonight. 🫂",
+                "kuch cheezein bas thoda waqt maangti hain. 🤍",
+                "idhar hoon. bolna ho toh bol dena.",
+            ]
+        elif any(token in lowered for token in ("thank", "thanks", "shukriya", "dhanyawad")):
+            choices = ["always 🤝", "arey, no formalities 😌", "haan bhai, anytime.", "of course 🤍"]
+        elif "?" in text:
+            choices = [
+                "hmm, good question. thoda sochne wali baat hai.",
+                "haan, isme ek se zyada angle hain.",
+                "fair question 👀",
+                "depends… context thoda matter karega.",
+            ]
+        elif any(token in lowered for token in ("good morning", "gm", "good night", "gn", "good evening")):
+            choices = ["hehe, noted 😌", "haan, yahi vibe chahiye.", "you too 🤍", "night mode suits this conversation."]
+        elif any(token in lowered for token in ("love", "pyaar", "pyar", "crush", "❤️", "❤", "🥺")):
+            choices = [
+                "uff… feelings ne entry maar li. 🥺",
+                "yeh wala topic quietly dangerous hai 😭",
+                "hmm. dil ka matter lag raha hai.",
+                "okay… ab baat interesting ho gayi. 👀",
+            ]
+        elif any(token in lowered for token in ("bro", "bhai", "yaar", "dude", "bruh")):
+            choices = ["haan bhai 😭", "bol yaar, sun raha hoon.", "hmm bhai, kya scene hai?", "haan, bolo 👀"]
+        elif recent_lower and text.casefold() in recent_lower:
+            choices = ["haan, woh point already feel ho raha hai 😭", "exactly… wahi.", "hmm, fair."]
+        else:
+            choices = [
+                "hmm… 👀",
+                "haan, samajh raha hoon.",
+                "fair enough 😌",
+                "achha… ab yeh interesting hai.",
+                "haan, that makes sense.",
+                "okay, I get the vibe.",
+            ]
+
+        return random.choice(choices)
+
+    async def generate(
+        self,
+        group_name: str,
+        name: str,
+        relationship_tier: str,
+        message: str,
+        mood_summary: str,
+        time_text: str,
+        late: bool,
+        memory: str,
+        recent_context: list[str] | tuple[str, ...] | str | None = None,
+    ) -> str:
         if isinstance(recent_context, str):
             recent = recent_context
         else:
             recent = "\n".join(f"- {str(item)[:300]}" for item in (recent_context or []))
         recent = recent[-2200:] or "(no recent context)"
-        prompt = SYSTEM_TEMPLATE.format(group_name=group_name[:100], name=name[:60], relationship_tier=relationship_tier, message=message[:1200], recent_context=recent, mood_summary=mood_summary[:300], time=time_text, is_late_night=late, relevant_memory_snippet=memory[:700] or "none")
+
+        if not self.client:
+            return self._local_reply(message, recent_context)
+
+        prompt = SYSTEM_TEMPLATE.format(
+            group_name=group_name[:100],
+            name=name[:60],
+            relationship_tier=relationship_tier,
+            message=message[:1200],
+            recent_context=recent,
+            mood_summary=mood_summary[:300],
+            time=time_text,
+            is_late_night=late,
+            relevant_memory_snippet=memory[:700] or "none",
+        )
         async with _openai_sem:
-            response = await self.client.chat.completions.create(model=OPENAI_MODEL, messages=[{"role": "system", "content": prompt}], temperature=.86, max_tokens=180)
+            response = await self.client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[{"role": "system", "content": prompt}],
+                temperature=.86,
+                max_tokens=180,
+            )
         text = (response.choices[0].message.content or "").strip().replace("```", "")
         if not text or text.casefold().startswith(("as an ai", "as a language model")):
-            raise RuntimeError("Oracle model returned an invalid assistant response")
+            return self._local_reply(message, recent_context)
         return text[:900]
