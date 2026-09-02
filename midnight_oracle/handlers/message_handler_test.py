@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 
 from .message_handler import _is_continuation_request, _reply_context
-from ..oracle_media import build_original_gif
+from core.oracle_media import build_original_gif
 
 
 class MessageHandlerRegressionTests(unittest.TestCase):
