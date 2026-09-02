@@ -21,14 +21,15 @@ class RuntimeManifestTests(unittest.TestCase):
         duplicates=sorted({name for name in commands if commands.count(name)>1})
         self.assertEqual(duplicates, [], f"Duplicate Telegram commands: {duplicates}")
 
-    def test_canonical_runtime_owns_phase_surface_registration(self):
+    def test_canonical_runtime_owns_live_surface_registration(self):
         entrypoint=(ROOT/"bot.py").read_text(encoding="utf-8")
+        startup=(ROOT/"startup.py").read_text(encoding="utf-8")
         runtime=(ROOT/"midnight_oracle"/"main.py").read_text(encoding="utf-8")
-        self.assertIn("import legacy_bot", entrypoint)
         self.assertIn("build_application", entrypoint)
-        self.assertIn("register_legacy_surface", runtime)
-        self.assertIn("register_v2_unique", runtime)
-        self.assertIn("register_v2_autonomous_commands", runtime)
+        self.assertIn("_install_live_runtime_bridges", startup)
+        self.assertIn("register_jobs", startup)
+        self.assertIn("post_init(_post_init)", runtime)
+        self.assertIn("MessageHandler(filters.TEXT & ~filters.COMMAND,_route_message)", runtime)
 
     def test_no_legacy_redis_fallback_is_used_by_entrypoint(self):
         entrypoint=(ROOT/"bot.py").read_text(encoding="utf-8")
