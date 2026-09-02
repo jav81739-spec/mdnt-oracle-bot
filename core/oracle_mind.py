@@ -34,39 +34,19 @@ _GOSSIP_BITS=(
     ("Scientists can measure astonishing things and still lose their keys.","Balance, apparently, is important."),
 )
 
-_GOSSIP_FORMS=(
-    "rumour",
-    "oddity",
-    "midnight_thought",
-    "found_thread",
-    "tiny_confession",
-    "curious_turn",
-    "unfinished_clue",
+_GOSSIP_FORMS=("rumour","oddity","midnight_thought","found_thread","tiny_confession","curious_turn","unfinished_clue")
+
+_STORY_SCENES=(
+    ("At 02:17, the night watchman at a railway station heard a suitcase ring.","It was an old brown suitcase, locked, abandoned beside platform four. The strange part was that nobody had put a phone inside it.","He opened the case and found dozens of postcards, each dated exactly one year apart. Every card showed the same station, photographed from a different angle.","On the back of the newest card, someone had written tomorrow's date and one sentence: 'Leave the light on this time.'","He did. Nothing supernatural happened. At 02:19, an old woman walked in, looked at the light, and quietly said she had finally found the right year."),
+    ("The librarian noticed that one book kept returning to the wrong shelf.","It was a thin blue novel nobody had borrowed in years. Every morning it appeared between completely unrelated books, as if someone had moved it during the night.","On the seventh morning she opened it and found a pencil mark beside a sentence she had never noticed before: 'Some doors only look like walls when you are in a hurry.'","She spent her lunch break walking through the building, looking at every wall she had stopped seeing years ago.","Behind a filing cabinet she found a narrow door, a forgotten reading room, and a handwritten note from the librarian who had worked there forty years earlier. It simply said, 'You took your time.'"),
+    ("A taxi driver picked up a passenger who asked to be taken to a street that had disappeared twenty years ago.","The driver laughed, checked the map twice, and then realised he knew exactly where the passenger meant.","They drove past a supermarket, a school and a row of new apartments. At the end of the road stood one untouched blue gate.","The passenger paid before getting out. The note attached to the money carried the driver's own handwriting, although he had never seen it before.","He kept the note. Years later, whenever someone asked him about that night, he never mentioned the impossible part. He only said the city sometimes forgets things before people do."),
+    ("Every evening, a woman in a yellow coat left a cup of tea on an empty park bench.","Nobody knew for whom. She never waited beside it. She simply placed the cup down and walked home before the streetlights came on.","One rainy night a curious teenager followed her and found a tiny brass plaque underneath the bench, almost hidden by rust.","It carried the name of a man and a date from forty-three years earlier. The teenager searched the local archive and found one photograph of him sitting on that exact bench.","The next evening the teenager left the tea instead. The woman in the yellow coat saw it, smiled without surprise, and sat down for the first time."),
+    ("The astronomer found a new point of light just above the horizon.","It appeared for eleven seconds every night and vanished before any telescope could properly resolve it.","After three weeks she stopped trying to prove what it was and started writing down what she felt whenever it appeared: homesickness, then calm, then an odd certainty that someone had remembered her.","The next night the light did not appear. Instead, an envelope was waiting beneath the observatory door.","Inside was a photograph of the same sky taken by her father decades earlier, with one line on the back: 'You were always looking up.' She kept observing, but she stopped demanding that the sky explain itself."),
+    ("The old watchmaker repaired a clock that had stopped at 11:48 every winter.","He replaced the spring, cleaned the gears and tested it for three days. It kept perfect time.","Then winter returned and the hands stopped again. Annoyed, he opened the back and found a tiny folded photograph tucked beneath the mechanism.","It showed his workshop as it had looked when he was a child, with his father standing in the doorway. On the wall behind him was the same clock.","He put the photograph back. The clock started ticking. He never repaired it again; some things, he decided, were allowed to keep one secret."),
+    ("A girl found a voicemail on a phone that had been disconnected for years.","The message lasted nine seconds. There was traffic in the background, a dog barking, and someone laughing very softly.","At first she assumed it was a glitch. Then she recognised the laugh from an old family recording.","She played the message for her mother, who went completely still. She knew the voice too, but neither of them tried to explain how it had arrived.","They listened once more, then deleted it together. Some mysteries become smaller when you solve them, and some become more precious when you don't."),
+    ("The rain stopped falling over one particular house but nowhere else in the neighbourhood.","For twenty minutes the clouds opened around it like a hole cut into the sky. Children ran into the street to stare.","Inside, the family kept eating dinner. They could hear the rain on every other roof and the silence above their own.","Then the youngest child noticed an old photograph on the fridge showing the same house, the same table, and the same impossible patch of dry sky.","Nobody had ever remembered taking the photograph. The rain returned a minute later, and the family decided not to throw the picture away."),
 )
 
-_STORY_OPENERS=(
-    "At 02:17, a city discovered that one of its clocks was always four minutes ahead.",
-    "The letter arrived without a stamp, a sender, or any explanation.",
-    "Every night the same train stopped at a platform that did not exist on the map.",
-    "A small library kept one locked shelf that nobody remembered installing.",
-    "The astronomer noticed one star that seemed to blink in punctuation marks.",
-    "On the first morning of winter, every umbrella in town turned inside out at once.",
-)
-_STORY_TURNS=(
-    "Nobody agreed on what it meant, so they did what humans usually do: they invented a story.",
-    "The obvious explanation was wrong. The second obvious explanation was worse.",
-    "By sunrise, the rumour had become three rumours and one very convincing lie.",
-    "The clue was tiny enough to miss and strange enough to remember.",
-    "Someone finally asked the one question everyone else had been avoiding.",
-    "The truth turned out to be less dramatic, but somehow more beautiful.",
-)
-_STORY_ENDINGS=(
-    "And that is how a completely ordinary night became a story people kept retelling.",
-    "No one solved the mystery. They simply got better at living with it.",
-    "The clock was repaired. The story was not.",
-    "Years later, nobody remembered the explanation. Everyone remembered the night.",
-    "The last person to leave switched off the light and left the mystery where it belonged.",
-)
 _MEMORY_SAFE_PATTERNS=(re.compile(r"\bmy favorite (?:movie|film|song|book|game|food|color|colour) is\s+(.+)",re.I),re.compile(r"\bi (?:really )?(?:like|love|prefer)\s+(.+)",re.I),re.compile(r"\bi(?:'m| am) a fan of\s+(.+)",re.I),re.compile(r"\bcall me\s+([\w .'-]{1,80})",re.I))
 _SENSITIVE_MARKERS=re.compile(r"\b(password|otp|pin|cvv|bank|account number|card number|medical|diagnos|medicine|political party|religion|sexual|address|passport|aadhaar|ssn)\b",re.I)
 
@@ -77,52 +57,24 @@ def _footer()->str:return "🌙 *— Midnight Oracle*"
 def generate_gossip(seed:str|None=None)->CreativePiece:
     """Create varied, social-feeling world gossip without targeting real people."""
     actual_seed=str(seed or time.time_ns());rng=random.Random(_seed(actual_seed,"gossip-v3"))
-    form=rng.choice(_GOSSIP_FORMS)
-    theme=rng.choice(_WORLD_THEMES)
-    lead,tail=rng.choice(_GOSSIP_BITS)
-    if form=="rumour":
-        body=f"{lead}\n\n{tail}"
-    elif form=="oddity":
-        body=rng.choice((
-            f"Here's a strange little thing: {tail} It somehow circles back to *{theme}*.",
-            f"The odd part about *{theme}* is that the best stories are usually hiding in the boring details. {tail}",
-        ))
-    elif form=="midnight_thought":
-        body=rng.choice((
-            f"Random midnight thought: *{theme}* has a habit of making ordinary things feel suspiciously interesting.",
-            f"I keep thinking about *{theme}*. Not because it makes sense. Mostly because it doesn't quite stop being interesting.",
-        ))
-    elif form=="found_thread":
-        body=rng.choice((
-            f"I wandered into a strange little corner of *{theme}* and found this: {tail}",
-            f"There is a thread connecting *{theme}* to a surprisingly ordinary question: why do some stories refuse to disappear?",
-        ))
-    elif form=="tiny_confession":
-        body=rng.choice((
-            f"Tiny Oracle confession: I have a weakness for *{theme}* when one small detail refuses to behave normally.",
-            f"Confession: give me one unexplained detail in *{theme}* and I will immediately start inventing three harmless theories.",
-        ))
-    elif form=="curious_turn":
-        body=f"The funny thing about *{theme}* is that it starts ordinary and then takes one very strange turn. {tail}"
-    else:
-        body=rng.choice((
-            f"There is a clue hiding somewhere in the story of *{theme}*. Nobody seems to agree what it means yet.",
-            f"One small detail about *{theme}* keeps getting overlooked. Maybe that's why it is the interesting part.",
-        ))
-    endings=(
-        "Anyway. I thought the room deserved that little mystery. 🌙",
-        "File that under: things worth thinking about after midnight.",
-        "No conclusion yet. Which, honestly, makes it better.",
-        "The Oracle has theories. The Oracle is keeping the best one to itself. 👀",
-        "That is probably enough mystery for one message. Probably.",
-    )
+    form=rng.choice(_GOSSIP_FORMS);theme=rng.choice(_WORLD_THEMES);lead,tail=rng.choice(_GOSSIP_BITS)
+    if form=="rumour":body=f"{lead}\n\n{tail}"
+    elif form=="oddity":body=rng.choice((f"Here's a strange little thing: {tail} It somehow circles back to *{theme}*.",f"The odd part about *{theme}* is that the best stories are usually hiding in the boring details. {tail}"))
+    elif form=="midnight_thought":body=rng.choice((f"Random midnight thought: *{theme}* has a habit of making ordinary things feel suspiciously interesting.",f"I keep thinking about *{theme}*. Not because it makes sense. Mostly because it doesn't quite stop being interesting."))
+    elif form=="found_thread":body=rng.choice((f"I wandered into a strange little corner of *{theme}* and found this: {tail}",f"There is a thread connecting *{theme}* to a surprisingly ordinary question: why do some stories refuse to disappear?"))
+    elif form=="tiny_confession":body=rng.choice((f"Tiny Oracle confession: I have a weakness for *{theme}* when one small detail refuses to behave normally.",f"Confession: give me one unexplained detail in *{theme}* and I will immediately start inventing three harmless theories."))
+    elif form=="curious_turn":body=f"The funny thing about *{theme}* is that it starts ordinary and then takes one very strange turn. {tail}"
+    else:body=rng.choice((f"There is a clue hiding somewhere in the story of *{theme}*. Nobody seems to agree what it means yet.",f"One small detail about *{theme}* keeps getting overlooked. Maybe that's why it is the interesting part."))
+    endings=("Anyway. I thought the room deserved that little mystery. 🌙","File that under: things worth thinking about after midnight.","No conclusion yet. Which, honestly, makes it better.","The Oracle has theories. The Oracle is keeping the best one to itself. 👀","That is probably enough mystery for one message. Probably.")
     text=f"☾ *MIDNIGHT GOSSIP*\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n\n{body}\n\n_{rng.choice(endings)}_\n\n{_footer()}"
     return CreativePiece("gossip",text,actual_seed)
 
 def generate_story(seed:str|None=None)->CreativePiece:
-    actual_seed=str(seed or time.time_ns());rng=random.Random(_seed(actual_seed,"story-v2"))
-    opener,turn,ending=rng.choice(_STORY_OPENERS),rng.choice(_STORY_TURNS),rng.choice(_STORY_ENDINGS);theme=rng.choice(_WORLD_THEMES)
-    text=f"☾ *MIDNIGHT STORY*\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n\n_{opener}_\n\nThe night had the strange atmosphere of *{theme}*.\n\n{turn}\n\n_{ending}_\n\n{_footer()}"
+    """Create a self-contained micro-story for fallback use; avoid stitched topic templates."""
+    actual_seed=str(seed or time.time_ns());rng=random.Random(_seed(actual_seed,"story-v3"))
+    scene=rng.choice(_STORY_SCENES)
+    paragraphs=[scene[0],f"{scene[1]} {scene[2]}",f"{scene[3]} {scene[4]}"]
+    text=f"☾ *MIDNIGHT STORY*\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n\n"+"\n\n".join(paragraphs)+f"\n\n{_footer()}"
     return CreativePiece("story",text,actual_seed)
 
 def _language_hint(items:list[dict[str,Any]])->str:
@@ -141,10 +93,10 @@ async def generate_contextual_piece(context_items:list[dict[str,Any]], seed:str|
     hint=_language_hint(context_items);strategy=(strategy or "curiosity").strip().lower();actual_seed=str(seed or time.time_ns())
     fallback=generate_story(actual_seed) if strategy=="story" else generate_gossip(actual_seed) if strategy=="gossip" else (generate_story(actual_seed) if random.SystemRandom().random()<0.5 else generate_gossip(actual_seed))
     if not clean:return fallback
-    if strategy=="story": rule="Create a tiny original fictional story with a strong opening, a turn and a memorable closing."
-    elif strategy=="gossip": rule="Create playful fictional gossip about an idea, mystery, culture, object, place or strange fact. Never about a group member. Never present invented claims as real news. Do not add a safety disclaimer unless needed. Avoid topic labels, 'rabbit hole' headings, fixed openings, fixed closings, and repeated meta-gossip phrases. Choose a natural social shape: a rumour, oddity, curious observation, tiny confession, found thread, unfinished clue, or spontaneous thought."
-    elif strategy=="playful_observation": rule="Make one playful, harmless observation about the public conversational atmosphere, without naming, profiling or targeting members."
-    else: rule="Make one genuinely interesting conversation-opening thought tied to the public topic; avoid generic greetings and avoid pretending to know private facts."
+    if strategy=="story":rule="Create a tiny original fictional story with a strong opening, a turn and a memorable closing."
+    elif strategy=="gossip":rule="Create playful fictional gossip about an idea, mystery, culture, object, place or strange fact. Never about a group member. Never present invented claims as real news. Do not add a safety disclaimer unless needed. Avoid topic labels, 'rabbit hole' headings, fixed openings, fixed closings, and repeated meta-gossip phrases. Choose a natural social shape: a rumour, oddity, curious observation, tiny confession, found thread, unfinished clue, or spontaneous thought."
+    elif strategy=="playful_observation":rule="Make one playful, harmless observation about the public conversational atmosphere, without naming, profiling or targeting members."
+    else:rule="Make one genuinely interesting conversation-opening thought tied to the public topic; avoid generic greetings and avoid pretending to know private facts."
     prompt=("You are Midnight Oracle, a mysterious but warm social presence. Create ONE original message for a Telegram group. "
             "Use recent public conversation only as topical atmosphere. Never expose, profile, diagnose, target, or invent personal facts about members. "
             f"Language: {hint}. Strategy: {strategy}. {rule} "
