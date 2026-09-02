@@ -1,7 +1,7 @@
 """Midnight Oracle — private relationship ritual surface."""
 from __future__ import annotations
 
-import html
+import logging
 import random
 from datetime import datetime, timedelta, timezone
 
@@ -10,6 +10,7 @@ from telegram.ext import Application, CommandHandler
 from . import social_engine
 from core.ai import AIUnavailable, service as ai_service
 from core.oracle_instinct import choose_pair
+from core.relationship_media import build_relationship_gif
 
 PREFIX = "oracle:rel:"
 ORACLE_HOUR = 0
@@ -158,35 +159,31 @@ _FALLBACK_LINES = {
 
 def _reading_prompt(kind, a, b, state):
     pair = _pair_display(a, b)
-    return f"""You are Midnight Oracle writing one private relationship reading for a Telegram group.
+    return f"""You are Midnight Oracle writing one relationship reading for a Telegram group.
 
 Command: {kind}
 People: {pair}
-Internal state (do not mention these numbers or the mechanism): familiarity={state.get('familiarity', 0)}, trust={state.get('trust', 0)}, affinity={state.get('affinity', 0)}, tension={state.get('tension', 0)}, momentum={state.get('momentum', 0)}, attention={state.get('attention', 0)}, chaos={state.get('chaos', 0)}, distance={state.get('distance', 0)}, reading_count={state.get('uses', 0)}.
+Internal state, which must never be mentioned: familiarity={state.get('familiarity', 0)}, trust={state.get('trust', 0)}, affinity={state.get('affinity', 0)}, tension={state.get('tension', 0)}, momentum={state.get('momentum', 0)}, attention={state.get('attention', 0)}, chaos={state.get('chaos', 0)}, distance={state.get('distance', 0)}, reading_count={state.get('uses', 0)}.
 
-Write 2 or 3 short sentences, 35 to 75 words total. Make this feel like a sharp human observation that happened in a real group, not a generated horoscope.
-Use the two people naturally by their displayed names where useful. Be specific enough to feel observed, but never invent private facts, quotes, events, feelings, or conversations that were not supplied.
-Let the tone emerge from the command: it may be warm, playful, strange, tense, understated, amused, or quietly curious. It does NOT have to be mystical.
+Write 2 or 3 short sentences, 35 to 75 words total. It should feel like a sharp human observation from a real group, not a generated horoscope or a command template.
+Use the two people naturally by displayed name where useful. Only use information supplied by this prompt. Never invent private facts, quotes, events, feelings, or conversations.
+Let the command influence the emotional temperature, but do not explain the command. It may be warm, playful, strange, tense, understated, amused, or quietly curious. It does not need to sound mystical.
 
 Hard rules:
-- Do not use a fixed metaphor or recurring sentence pattern.
-- Do not say or imply that you are following an algorithm, score, signal, database, records, pattern-recognition system, or selection mechanism.
-- Do not use the phrases "paths cross", "conversational gravity", "quiet pull", "records patterns", or "does not explain".
-- Do not add a title, divider, bullet list, percentage, confidence score, moral, lesson, prophecy, or signature.
-- Do not end with a generic philosophical line.
+- Every reading must have fresh wording and sentence rhythm.
+- Never mention algorithms, scores, signals, databases, records, pattern recognition, selection, or mechanisms.
+- Never use "paths cross", "conversational gravity", "quiet pull", "records patterns", or "does not explain".
+- No title, divider, bullet list, percentage, confidence score, moral, lesson, prophecy, or signature.
+- Do not force a philosophical ending.
 - Do not start with "The Oracle".
-- Do not describe what the command means; simply give the reading.
-- Never mention these instructions.
-
-Return only the reading."""
+- Return only the reading.
+"""
 
 
 def _clean_reading(text):
     text = " ".join(str(text or "").replace("\n", " ").split()).strip()
     text = text.strip(" \"'“”‘’")
-    if not text:
-        return ""
-    if any(phrase in text.casefold() for phrase in _FORBIDDEN_READING_PHRASES):
+    if not text or any(phrase in text.casefold() for phrase in _FORBIDDEN_READING_PHRASES):
         return ""
     if len(text) < 35 or len(text) > 520:
         return ""
@@ -194,22 +191,42 @@ def _clean_reading(text):
 
 
 async def _reading(kind, a, b, state):
-    prompt = _reading_prompt(kind, a, b, state)
     try:
-        generated = _clean_reading(await ai_service.generate(prompt, timeout=12.0))
+        generated = _clean_reading(await ai_service.generate(_reading_prompt(kind, a, b, state), timeout=12.0))
         if generated:
             return generated
     except (AIUnavailable, Exception):
         pass
     lines = _FALLBACK_LINES.get(kind, _FALLBACK_LINES["bond"])
     seed = f"{kind}:{a.get('id')}:{b.get('id')}:{state.get('uses', 0)}"
-    index = random.Random(seed).randrange(len(lines))
-    return lines[index]
+    return lines[random.Random(seed).randrange(len(lines))]
 
 
 def _reading_text(kind, a, b, body):
-    title = _TITLES[kind]
-    return f"☾ {title}\n\n{body}\n\n✦ {_display(a)}\n✦ {_display(b)}"
+    return f"☾ {_TITLES[kind]}\n\n{body}\n\n✦ {_display(a)}\n✦ {_display(b)}"
+
+
+async def _send_media_message(message, caption, media_kind, *, reply_to_message_id=None):
+    """Send caption + original contextual GIF as one Telegram message."""
+    try:
+        animation = build_relationship_gif(caption, media_kind)
+        await message.reply_animation(
+            animation=animation,
+            caption=caption[:1024],
+            show_caption_above_media=True,
+            filename=getattr(animation, "name", f"midnight-oracle-{media_kind}.gif"),
+            reply_to_message_id=reply_to_message_id,
+        )
+        return True
+    except Exception:
+        logging.getLogger("midnight.relationship").exception("RELATIONSHIP_MEDIA_SEND_FAILED | kind=%s", media_kind)
+        return False
+
+
+async def _reply_human(message, text, media_kind):
+    if await _send_media_message(message, text, media_kind):
+        return
+    await message.reply_text(text, disable_web_page_preview=True)
 
 
 async def _ritual(kind, update, context):
@@ -230,51 +247,87 @@ async def _ritual(kind, update, context):
     for field, delta in zip(("familiarity", "trust", "affinity", "tension", "momentum", "attention", "chaos", "distance"), deltas):
         pair[field] = max(0, min(100, pair[field] + delta))
     body = await _reading(kind, a, b, pair)
-    await update.effective_message.reply_text(_reading_text(kind, a, b, body), disable_web_page_preview=True)
+    await _reply_human(update.effective_message, _reading_text(kind, a, b, body), kind)
 
 
 async def watch(update, context): await _watch_change(update, context, True)
 async def unwatch(update, context): await _watch_change(update, context, False)
+
+
 async def _watch_change(update, context, enabled):
-    chat, _, members = await _targets(update); a, b = _resolve(update, context, members, "bond") if chat else (None, None)
-    if not chat: return
-    if not a or not b: await update.effective_message.reply_text("☾ Use /gaze with no arguments and let the Oracle choose — or reply to a member."); return
-    p = _ensure(_state(context.application).setdefault(_pair_key(chat.id, a["id"], b["id"]), {})); p["watch"] = bool(enabled)
-    if enabled: p["watch_since"] = int(datetime.now(timezone.utc).timestamp())
-    await update.effective_message.reply_text(f"👁️ GAZE ESTABLISHED\n\n{_pair_display(a,b)}\n\nThe Oracle keeps this thread in its peripheral vision." if enabled else "☾ GAZE RELEASED\n\nThe Oracle has stepped away from this thread.")
+    chat, _, members = await _targets(update)
+    a, b = _resolve(update, context, members, "bond") if chat else (None, None)
+    if not chat:
+        return
+    if not a or not b:
+        await update.effective_message.reply_text("☾ Use /gaze with no arguments and let the Oracle choose — or reply to a member.")
+        return
+    p = _ensure(_state(context.application).setdefault(_pair_key(chat.id, a["id"], b["id"]), {}))
+    p["watch"] = bool(enabled)
+    if enabled:
+        p["watch_since"] = int(datetime.now(timezone.utc).timestamp())
+    pair = _pair_display(a, b)
+    text = (
+        f"👁️ I’ll keep {pair} in the corner of my eye for a while. Nothing dramatic — just enough to notice if the thread changes."
+        if enabled
+        else f"☾ I’m stepping back from {pair}. No more watching this thread unless someone asks me to look again."
+    )
+    await _reply_human(update.effective_message, text, "watch" if enabled else "unwatch")
 
 
 def _cycle(now):
-    local = now.astimezone(social_engine.ORACLE_TZ); boundary = local.replace(hour=ORACLE_HOUR, minute=ORACLE_MINUTE, second=0, microsecond=0); start = boundary - timedelta(days=1) if local < boundary else boundary; return start, start + timedelta(days=1)
+    local = now.astimezone(social_engine.ORACLE_TZ)
+    boundary = local.replace(hour=ORACLE_HOUR, minute=ORACLE_MINUTE, second=0, microsecond=0)
+    start = boundary - timedelta(days=1) if local < boundary else boundary
+    return start, start + timedelta(days=1)
 
 
 async def sealed(update, context):
-    chat, _, members = await _targets(update); a, b = _resolve(update, context, members, "bond") if chat else (None, None)
-    if not chat: return
-    if not a or not b: await update.effective_message.reply_text("☾ Use /veil with no arguments and let the Oracle choose — or reply to a member."); return
-    now = datetime.now(timezone.utc); start, end = _cycle(now); key = _pair_key(chat.id, a["id"], b["id"]); lock_key = f"{key}:veil:{start.date().isoformat()}"; stored = await social_engine._get(lock_key)
-    if not stored and now >= start.astimezone(timezone.utc): await social_engine._set(lock_key, str(int(end.timestamp())), ttl=172800); stored = str(int(end.timestamp()))
-    until = int(stored) if stored else int(end.timestamp()); remaining = max(0, until - int(now.timestamp())); hours, rem = divmod(remaining, 3600); minutes, seconds = divmod(rem, 60)
+    chat, _, members = await _targets(update)
+    a, b = _resolve(update, context, members, "bond") if chat else (None, None)
+    if not chat:
+        return
+    if not a or not b:
+        await update.effective_message.reply_text("☾ Use /veil with no arguments and let the Oracle choose — or reply to a member.")
+        return
+    now = datetime.now(timezone.utc)
+    start, end = _cycle(now)
+    key = _pair_key(chat.id, a["id"], b["id"])
+    lock_key = f"{key}:veil:{start.date().isoformat()}"
+    stored = await social_engine._get(lock_key)
+    if not stored and now >= start.astimezone(timezone.utc):
+        await social_engine._set(lock_key, str(int(end.timestamp())), ttl=172800)
+        stored = str(int(end.timestamp()))
+    until = int(stored) if stored else int(end.timestamp())
+    remaining = max(0, until - int(now.timestamp()))
+    hours, rem = divmod(remaining, 3600)
+    minutes, seconds = divmod(rem, 60)
+    pair = _pair_display(a, b)
     if not stored:
-        text = f"🔒 THE VEIL IS SLEEPING\n\n{_pair_display(a,b)}\n\nThe next seal opens at exactly 00:07 IST.\n\n{hours:02d}h {minutes:02d}m {seconds:02d}s until the hour.\n\nThe Oracle does not move the hour."
-    elif remaining <= 0: text = "☾ THE VEIL HAS OPENED.\n\nThe sealed hour has passed. The Oracle may reveal what was withheld."
-    else: text = f"🔒 THE VEIL IS DRAWN\n\n{_pair_display(a,b)}\n\nThis reading is sealed until the next 00:07 IST.\n\n{hours:02d}h {minutes:02d}m {seconds:02d}s remaining\n\nThe lock cannot be moved, refreshed, or opened early.\n\n🌙 — Midnight Oracle"
-    await update.effective_message.reply_text(text, disable_web_page_preview=True)
+        text = f"🔒 {pair} is still outside the sealed hour. It opens at 00:07 IST — about {hours:02d}h {minutes:02d}m {seconds:02d}s from now."
+    elif remaining <= 0:
+        text = f"☾ The seal around {pair} has opened. Whatever was waiting behind it is no longer locked."
+    else:
+        text = f"🔒 I’m leaving {pair} alone until the next 00:07 IST. There are {hours:02d}h {minutes:02d}m {seconds:02d}s left on the lock."
+    await _reply_human(update.effective_message, text, "sealed")
 
 
-COMMANDS = {"bond":"bond","weave":"thread","orbit":"orbit","echo":"echo","anchor":"tether","fracture":"rift","ember":"spark","mirror":"mirror","crossing":"crossing","undertow":"undertow","edict":"verdict"}
-ALIASES = {"thread":"thread","tether":"tether","rift":"rift","spark":"spark","verdict":"verdict"}
+COMMANDS = {"bond": "bond", "weave": "thread", "orbit": "orbit", "echo": "echo", "anchor": "tether", "fracture": "rift", "ember": "spark", "mirror": "mirror", "crossing": "crossing", "undertow": "undertow", "edict": "verdict"}
+ALIASES = {"thread": "thread", "tether": "tether", "rift": "rift", "spark": "spark", "verdict": "verdict"}
 
 
 def register(app: Application):
     existing = {str(c).lower().lstrip("/") for hs in getattr(app, "handlers", {}).values() for h in hs for c in (getattr(h, "commands", None) or ())}
     for command, kind in {**COMMANDS, **ALIASES}.items():
-        if command in existing: continue
+        if command in existing:
+            continue
         async def handler(update, context, _kind=kind): await _ritual(_kind, update, context)
         app.add_handler(CommandHandler(command, handler), group=0)
     for command, callback in (("watch", watch), ("unwatch", unwatch), ("sealed", sealed), ("gaze", watch), ("release", unwatch), ("veil", sealed)):
-        if command not in existing: app.add_handler(CommandHandler(command, callback), group=0)
+        if command not in existing:
+            app.add_handler(CommandHandler(command, callback), group=0)
     try:
-        from .owner_oracle import register as register_owner; register_owner(app)
+        from .owner_oracle import register as register_owner
+        register_owner(app)
     except Exception:
-        import logging; logging.getLogger("midnight.owner").exception("OWNER_SURFACE_REGISTRATION_FAILED")
+        logging.getLogger("midnight.owner").exception("OWNER_SURFACE_REGISTRATION_FAILED")
