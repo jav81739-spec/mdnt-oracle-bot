@@ -6,7 +6,7 @@ import time
 
 from .oracle_delivery import deliver
 from .oracle_freshness import FreshnessGovernor
-from .oracle_media import MEDIA_COOLDOWN, choose_media
+from .oracle_media import MEDIA_COOLDOWN, build_original_gif, choose_media
 from .oracle_mind import generate_contextual_piece, language_hint
 from .oracle_narrative import maybe_deliver as maybe_deliver_narrative, rollback as rollback_narrative
 from .oracle_presence import decide_presence
@@ -30,7 +30,7 @@ def _part_index(state: str | None) -> int | None:
 
 
 async def _deliver_narrative_with_media(application, db, group_id: int, text: str, kind: str, state: str | None, now: float) -> bool:
-    """Text is primary; autonomous media is optional and never an unsolicited sticker."""
+    """Text is primary; one original contextual GIF/image may accompany it."""
     if not await deliver(application, group_id, text):
         return False
     if await db.cooldown_active("group", str(group_id), MEDIA_COOLDOWN_TYPE, now):
@@ -41,13 +41,17 @@ async def _deliver_narrative_with_media(application, db, group_id: int, text: st
         if not media:
             return True
         if media["kind"] == "gif":
-            await application.bot.send_animation(group_id, media["url"], caption="Powered By GIPHY")
+            if media.get("source") == "original":
+                animation = build_original_gif(media.get("text", text), kind, media.get("part_index", part_index))
+                await application.bot.send_animation(group_id, animation)
+            else:
+                await application.bot.send_animation(group_id, media["url"], caption="Powered By GIPHY")
         elif media["kind"] == "image":
             await application.bot.send_photo(group_id, media["url"])
         else:
             return True
         await db.set_cooldown("group", str(group_id), MEDIA_COOLDOWN_TYPE, now + MEDIA_COOLDOWN)
-        _log("ORACLE_PULSE_STAGE | stage=media | chat=%s | kind=%s | delivered=true", group_id, media["kind"])
+        _log("ORACLE_PULSE_STAGE | stage=media | chat=%s | kind=%s | source=%s | delivered=true", group_id, media["kind"], media.get("source", "provider"))
     except Exception:
         _log("ORACLE_PULSE_STAGE | stage=media | chat=%s | delivered=false", group_id)
     return True
