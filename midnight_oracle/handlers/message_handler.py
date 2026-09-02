@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 
 from telegram import ReactionTypeEmoji, Update
 from telegram.ext import ContextTypes
@@ -19,6 +20,54 @@ from ..engines.joke_engine import JokeEngine
 from middleware.alert import soft_alert
 from middleware.cooldown import cooldown_seconds, is_cooling
 from middleware.recent_buffer import load_recent, save_recent
+
+
+_CONTINUATION_RE = re.compile(
+    r"^(?:more|more\s+please|tell\s+me\s+more|go\s+on|continue|keep\s+going|and\?|then\?|what\s+happened\s+next|aur\s+batao|aur\s+bata|aage\s+bolo|phir\s+what)\W*$",
+    re.IGNORECASE,
+)
+
+
+def _message_text(message) -> str:
+    """Extract visible text from a Telegram message without exposing internals."""
+    return (getattr(message, "text", None) or getattr(message, "caption", None) or "").strip()
+
+
+def _reply_context(message, bot_id: int | None) -> list[str]:
+    """Recover the Oracle text behind a replied-to GIF/photo, including one reply hop."""
+    target = getattr(message, "reply_to_message", None)
+    if not target or not bot_id:
+        return []
+    target_user = getattr(target, "from_user", None)
+    if getattr(target_user, "id", None) != bot_id:
+        return []
+
+    lines: list[str] = []
+    target_text = _message_text(target)
+    if target_text:
+        lines.append(f"Oracle message being answered: {target_text[:1200]}")
+    elif getattr(target, "animation", None) or getattr(target, "photo", None):
+        lines.append("Oracle media message being answered: [visual companion]")
+
+    original = getattr(target, "reply_to_message", None)
+    original_user = getattr(original, "from_user", None)
+    if original and getattr(original_user, "id", None) == bot_id:
+        original_text = _message_text(original)
+        if original_text:
+            lines.append(f"Original Oracle message behind that media: {original_text[:1200]}")
+    return lines
+
+
+def _is_continuation_request(text: str) -> bool:
+    """Recognise natural short follow-ups such as 'More' without hijacking normal chat."""
+    return bool(_CONTINUATION_RE.fullmatch((text or "").strip()))
+
+
+def _continuation_fallback(text: str) -> str:
+    """Keep an obvious continuation turn alive if the provider is temporarily unavailable."""
+    if _is_continuation_request(text):
+        return "Haan — ruk, ussi baat ko thoda aur kholte hain. 🌙"
+    return "Haan, bolo."
 
 
 class MessageRouter:
@@ -90,7 +139,9 @@ class MessageRouter:
                 return
 
             explicit_voice = wants_voice(text)
-            direct = private or explicit_voice or self._is_direct_summon(text, context, message)
+            reply_context = _reply_context(message, getattr(getattr(context, "bot", None), "id", None))
+            continuation = _is_continuation_request(text)
+            direct = private or explicit_voice or bool(reply_context) or continuation or self._is_direct_summon(text, context, message)
             if is_cooling(f"{chat.id}:{user.id}", cooldown_seconds(chat.type, direct)):
                 return
 
@@ -108,6 +159,10 @@ class MessageRouter:
             recent = await load_recent(storage_client, str(group_id))
             self.recent[group_id] = recent
             recent_context = list(recent)[-8:]
+            if reply_context:
+                recent_context.extend(reply_context)
+            if continuation:
+                recent_context.append("The member is asking for the continuation of the Oracle message they just replied to.")
             now = datetime.now()
             signal = self.mood.estimate(text)
             ctx = GroupContext(
@@ -127,7 +182,10 @@ class MessageRouter:
                     signal.summary(), str(ctx.hour), ctx.is_late_night, ctx.memory_snippet, recent_context,
                 )
                 if not reply:
-                    return
+                    if continuation:
+                        reply = _continuation_fallback(text)
+                    else:
+                        return
                 if await self._send_reply(message, reply, chat_id=group_id, user_id=user.id, text=text, direct=True, private=True):
                     await self.memory.observe(user.id, group_id, ctx.sender_name, text, True)
                     recent.append(f"{ctx.sender_name}: {text}")
@@ -159,7 +217,10 @@ class MessageRouter:
                     signal.summary(), str(ctx.hour), ctx.is_late_night, ctx.memory_snippet, recent_context,
                 )
                 if not reply:
-                    return
+                    if continuation:
+                        reply = _continuation_fallback(text)
+                    else:
+                        return
                 if await self._send_reply(message, reply, chat_id=group_id, user_id=user.id, text=text, direct=True, private=False):
                     await self.memory.observe(user.id, group_id, ctx.sender_name, text, True)
                     recent.append(f"{ctx.sender_name}: {text}")
