@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 
 class RuntimeSmokeTests(unittest.TestCase):
@@ -31,10 +32,10 @@ class RuntimeSmokeTests(unittest.TestCase):
     def test_production_entrypoint_activates_v2_engine(self):
         import bot
         import handlers.deathgames_v2 as v2
-        # The V2 binding is part of production application construction, not
-        # import-time side effects. Build the application before asserting the
-        # live compatibility surface.
-        app = bot.build_application()
+        # Application construction is intentionally exercised with a dummy
+        # token so CI can validate the production wiring without a secret.
+        with patch("midnight_oracle.main.BOT_TOKEN", "ci-test-token"):
+            app = bot.build_application()
         self.assertIs(bot.legacy_bot.deathgames, v2)
         for name in ("survive", "revive", "deathstatus", "roulette", "deathgame", "joingame", "startround", "kill", "vote", "endgame"):
             self.assertTrue(callable(getattr(v2, name)))
