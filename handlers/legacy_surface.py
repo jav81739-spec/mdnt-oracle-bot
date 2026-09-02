@@ -15,6 +15,24 @@ from handlers import chat, games, moderation, utility, aesthetic, friendship, fu
 log = logging.getLogger("midnight.legacy_surface")
 
 
+def _assert_no_duplicate_declarations(modules: dict[str, dict[str, str]], direct: dict[str, str]) -> None:
+    """Fail fast when two registration surfaces claim the same command."""
+    owners: dict[str, str] = {}
+    for module_name, commands in modules.items():
+        for command in commands:
+            name = command.lower().lstrip("/")
+            previous = owners.get(name)
+            if previous and previous != module_name:
+                raise RuntimeError(f"COMMAND_OWNER_COLLISION: /{name} ({previous} vs {module_name})")
+            owners[name] = module_name
+    for command in direct:
+        name = command.lower().lstrip("/")
+        previous = owners.get(name)
+        if previous and previous != "direct":
+            raise RuntimeError(f"COMMAND_OWNER_COLLISION: /{name} ({previous} vs direct)")
+        owners[name] = "direct"
+
+
 def _callback(target, name: str):
     cb = getattr(target, name, None)
     return cb if callable(cb) else None
@@ -73,23 +91,17 @@ def register_legacy_surface(app) -> dict[str, object]:
     for module_name, commands in module_commands.items():
         module = module_map[module_name]
         for command, callback_name in commands.items():
-            if command in reserved or command in existing:
-                continue
-            if _add_command(app, existing, command, module, callback_name):
-                added.append(command)
-            else:
-                skipped.append(command)
+            if command in reserved or command in existing: continue
+            if _add_command(app, existing, command, module, callback_name): added.append(command)
+            else: skipped.append(command)
 
     direct_commands = {
         "gif": "giphy_command", "checkin": "checkin_command", "streakcheck": "streakcheck_command", "vent": "vent_command", "cgift": "cgift_command", "coinboard": "coinboard_command", "rob": "eng_rob_command", "oraclehour": "oraclehour_command", "enter": "enter_command", "eventcheck": "eventcheck_command", "mines": "mines_command", "bet": "bet_command", "betstats": "betstats_command", "topbet": "topbet_command", "wallet": "wallet_command", "deposit": "deposit_command", "withdraw": "withdraw_command", "setpass": "setpass_command", "changepass": "changepass_command", "recover": "recover_command", "hug": "hug_cmd", "pat": "pat_cmd", "highfive": "highfive_cmd", "slap": "slap_cmd", "kiss": "kiss_cmd", "poke": "poke_cmd", "cuddle": "cuddle_cmd", "wave": "wave_cmd", "bite": "bite_cmd", "tickle": "tickle_cmd", "fastmath": "fastmath_command", "wordbomb": "wordbomb_command", "mysterybox": "mysterybox_command", "duel": "duel_command", "confess": "confess_command", "rank": "rank_command", "muse": "muse_command", "bond": "bond_command", "signal": "signal_command", "couples": "couples_command", "bondstatus": "bondstatus_command", "verdict": "verdict_command", "hotseat": "hotseat_command", "silence": "silence_command", "cricket": "cricket_command", "call": "cricket_predict_command", "cpredict": "cricket_predict_command", "cbet": "cricket_bet_command", "cwin": "cricket_win_command", "ctournament": "cricket_tournament_command", "cpick": "cricket_pick_command", "cplay": "cricket_play_command", "broadcast": "broadcast_command", "announce": "announce_command", "deathgame": "deathgame_start", "dgjoin": "dgjoin_command", "dgstatus": "dgstatus_command", "startcouple": "startcouple_command", "joincouple": "joincouple_command", "couplestatus": "couplestatus_command",
     }
     for command, callback_name in direct_commands.items():
-        if command in reserved or command in existing:
-            continue
-        if _add_command(app, existing, command, legacy_bot, callback_name):
-            added.append(command)
-        else:
-            skipped.append(command)
+        if command in reserved or command in existing: continue
+        if _add_command(app, existing, command, legacy_bot, callback_name): added.append(command)
+        else: skipped.append(command)
 
     try:
         if callable(getattr(legacy_bot, "mines_cb", None)): app.add_handler(CallbackQueryHandler(legacy_bot.mines_cb, pattern=r"^mn_"), group=0)
