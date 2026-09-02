@@ -45,6 +45,13 @@ def _register_preserved_surfaces(application: Application) -> None:
     except Exception:
         log.exception("LEGACY_SURFACE_WIRING_FAILED")
         raise
+    try:
+        from handlers.organic_relationships import ship
+        _add_handler_once(application, CommandHandler("ship", ship), group=-40)
+        log.info("ORGANIC_RELATIONSHIP_SURFACE_READY | ship=on")
+    except Exception:
+        log.exception("ORGANIC_RELATIONSHIP_SURFACE_WIRING_FAILED")
+        raise
     for label, importer in (
         ("FRIEND_SURFACE", "handlers.friend_engine"),
         ("V2_UNIQUE_SURFACE", "core.v2_unique"),
