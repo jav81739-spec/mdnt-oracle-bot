@@ -1,7 +1,52 @@
 """Handler package bootstrap with preserved legacy command registration."""
 from . import games
 from core.game_runtime import persistent_game_state
-from telegram.ext import CommandHandler
+from telegram.ext import Application, CommandHandler
+
+
+def _install_oracle_expression_bridge() -> None:
+    """Wrap expressive command callbacks without changing business mechanics."""
+    try:
+        from core.oracle_expression import wrap_callback, MECHANICAL_COMMANDS
+    except Exception:
+        return
+    original = getattr(Application, "add_handler", None)
+    if not original or getattr(original, "_oracle_expression_bridge", False):
+        return
+
+    def wrap_existing(application):
+        for handlers in getattr(application, "handlers", {}).values():
+            for handler in handlers:
+                commands = getattr(handler, "commands", None) or ()
+                callback = getattr(handler, "callback", None)
+                if not commands or not callback or getattr(callback, "_oracle_expression_wrapped", False):
+                    continue
+                command = str(next(iter(commands))).lower().lstrip("/")
+                if command in MECHANICAL_COMMANDS:
+                    continue
+                wrapped = wrap_callback(callback, command)
+                if wrapped is not callback:
+                    setattr(wrapped, "_oracle_expression_wrapped", True)
+                    handler.callback = wrapped
+
+    def add_handler(self, handler, *args, **kwargs):
+        wrap_existing(self)
+        commands = getattr(handler, "commands", None) or ()
+        if commands and hasattr(handler, "callback"):
+            command = str(next(iter(commands))).lower().lstrip("/")
+            callback = getattr(handler, "callback", None)
+            if callback and command not in MECHANICAL_COMMANDS and not getattr(callback, "_oracle_expression_wrapped", False):
+                wrapped = wrap_callback(callback, command)
+                if wrapped is not callback:
+                    setattr(wrapped, "_oracle_expression_wrapped", True)
+                    handler.callback = wrapped
+        return original(self, handler, *args, **kwargs)
+
+    add_handler._oracle_expression_bridge = True
+    Application.add_handler = add_handler
+
+
+_install_oracle_expression_bridge()
 
 
 def _wrap(name: str, *state: str, key: str) -> None:
@@ -69,7 +114,7 @@ def _register_legacy_surface(app) -> None:
         "moderation": {"mute": ("mute",), "unmute": ("unmute",), "ban": ("ban",), "kick": ("kick",), "warn": ("warn",), "warnings": ("check_warnings",), "clearwarns": ("clear_warnings",), "pin": ("pin",), "unpin": ("unpin",), "purge": ("purge",), "rules": ("show_rules",), "setrules": ("set_rules",), "lock": ("lock",), "unlock": ("unlock",)},
         "utility": {"id": ("get_id",), "info": ("user_info",), "remind": ("remind",), "groupinfo": ("group_info",), "afk": ("set_afk",), "report": ("report",)},
         "aesthetic": {"aura": ("aura_command",), "vibecheck": ("vibecheck_command",), "identity": ("identity_command",), "shadow": ("shadow_command",), "element": ("element_command",), "corecode": ("corecode_command",), "universe": ("universe_command",), "ritual": ("ritual_command",), "duality": ("duality_command",), "nightreport": ("nightreport_command",), "sigil": ("sigil_command",), "glitch": ("glitch_command",)},
-        "friendship": {"bestie": ("bestie",), "duo": ("duo",), "friendship": ("friendship_score",), "ship": ("ship",), "tagbestie": ("tag_bestie",), "squad": ("squad",), "loyalty": ("loyalty",), "friendshiptest": ("friendship_test",), "hug": ("hug",), "pat": ("pat",), "highfive": ("highfive",), "slap": ("slap",), "kiss": ("kiss",), "poke": ("poke",), "cuddle": ("cuddle",), "wave": ("wave",), "bite": ("bite",), "tickle": ("tickle",)},
+        "friendship": {"bestie": ("bestie",), "duo": ("duo",), "friendship": ("friendship_score",), "ship": ("ship",), "tagbestie": ("tag_bestie",), "squad": ("squad",), "loyalty": ("loyalty",), "hug": ("hug",), "pat": ("pat",), "highfive": ("highfive",), "slap": ("slap",), "kiss": ("kiss",), "poke": ("poke",), "cuddle": ("cuddle",), "wave": ("wave",), "bite": ("bite",), "tickle": ("tickle",)},
         "fun": {"roast": ("roast",), "compliment": ("compliment",), "8ball": ("eight_ball",), "vibe": ("vibe",), "quote": ("quote",), "poll": ("poll",), "rank": ("rank",), "ratethis": ("rate_this",), "impostor": ("impostor_start",), "revealimpostor": ("impostor_reveal",)},
         "matchmaking": {"crush": ("set_crush",), "clearcrush": ("clear_crush",), "randomship": ("random_ship",), "secretadmirer": ("secret_admirer",), "matchmaker": ("matchmaker",)},
         "stats": {"stats": ("stats",), "topactive": ("top_active",), "msgcount": ("msg_count",)},
