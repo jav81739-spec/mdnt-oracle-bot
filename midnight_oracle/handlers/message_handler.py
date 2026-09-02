@@ -26,10 +26,10 @@ class MessageRouter:
         self.engine=engine; self.memory=memory; self.mood=mood; self.replies=replies or ReplyGenerator(); self.recent={}; self._seen_updates=deque(maxlen=4096)
         db=getattr(engine,'db',None); self.jokes=JokeEngine(db) if db else None; self.identity=GroupIdentityEngine(db) if db else None; self.achievements=AchievementEngine(db) if db else None; self.stickers=StickerHandler(db) if db else None; self.voice=VoiceEngine()
 
-    async def _send_reply(self,message,context,reply:str,*,chat_id:int,user_id:int,text:str,direct:bool,private:bool)->None:
-        explicit=wants_voice(text); decision=self.voice.decide(chat_id=chat_id,user_id=user_id,text=text,direct=direct,private=private)
-        if explicit: decision=decision.__class__(decision.should_send or decision.reason in {'oracle_chose_text','low_voice_value'},'explicit_voice')
-        if decision.should_send:
+    async def _send_reply(self,update,message,context,reply:str,*,chat_id:int,user_id:int,text:str,direct:bool,private:bool)->None:
+        explicit=wants_voice(text); voice_decision=self.voice.decide(chat_id=chat_id,user_id=user_id,text=text,direct=direct,private=private)
+        if explicit: voice_decision=voice_decision.__class__(voice_decision.should_send or voice_decision.reason in {'oracle_chose_text','low_voice_value'},'explicit_voice')
+        if voice_decision.should_send:
             audio=await self.voice.synthesize(reply,voice='shimmer')
             if audio:
                 try:
@@ -38,19 +38,12 @@ class MessageRouter:
         await message.reply_text(reply)
         if media_enabled():
             try:
-                media=media_decide(context.application.bot_data.get('_oracle_media_update',context.update if hasattr(context,'update') else None),text=text) if False else None
-            except Exception: media=None
-        # Media is intentionally selected from the actual user message, not from hidden state.
-        if media_enabled():
-            try:
-                from handlers.chat import get_gif_url
-                media=media_decide(message._effective_update if hasattr(message,'_effective_update') else None,text=text)
-            except Exception: media=None
-            if media:
-                try:
+                media=media_decide(update,text=text)
+                if media:
+                    from handlers.chat import get_gif_url
                     url=await get_gif_url(media.query)
                     if url: await context.bot.send_animation(chat_id=chat_id,animation=url)
-                except Exception as exc: await soft_alert(None,'media_delivery',exc)
+            except Exception as exc: await soft_alert(None,'media_delivery',exc)
 
     async def _announce_achievements(self,message,member,group_id,event):
         if not self.achievements:return
@@ -80,14 +73,14 @@ class MessageRouter:
             profile=await self.memory.get(user.id,group_id); recent=await load_recent(storage_client,str(group_id)); self.recent[group_id]=recent
             now=datetime.now(); signal=self.mood.estimate(text); ctx=GroupContext(str(user.id),str(group_id),list(recent)[-10:],now.hour,now.hour>=23 or now.hour<3,group_name,profile.relationship_tier,profile.preferred_name or user.first_name or 'friend',now_ts(),(' | '.join(list(profile.themes[:2])+list(profile.worries[:1]))) or 'none')
             if private:
-                reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet); await self._send_reply(message,context,reply,chat_id=group_id,user_id=user.id,text=text,direct=True,private=True); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(text); await save_recent(storage_client,str(group_id),recent); return
+                reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet); await self._send_reply(update,message,context,reply,chat_id=group_id,user_id=user.id,text=text,direct=True,private=True); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(text); await save_recent(storage_client,str(group_id),recent); return
             if self.jokes:
                 await self.jokes.observe(text,user.id,group_id); callback=await self.jokes.detect_callback_opportunity(text,group_id)
                 if callback and not direct and not await db.cooldown_active('group',str(group_id),'ambient'):
                     await message.reply_text(callback); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(text); await save_recent(storage_client,str(group_id),recent); return
             if self.identity: await self.identity.update(group_id,text,signal)
             if direct:
-                reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet); await self._send_reply(message,context,reply,chat_id=group_id,user_id=user.id,text=text,direct=True,private=False); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(text); await save_recent(storage_client,str(group_id),recent); await self._announce_achievements(message,user,group_id,'oracle_reply'); return
+                reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet); await self._send_reply(update,message,context,reply,chat_id=group_id,user_id=user.id,text=text,direct=True,private=False); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(text); await save_recent(storage_client,str(group_id),recent); await self._announce_achievements(message,user,group_id,'oracle_reply'); return
             if self.stickers:
                 media=await self.stickers.evaluate(message,signal,ctx)
                 if media.should_send:
@@ -96,7 +89,7 @@ class MessageRouter:
                     await self.stickers.record(group_id,'contextual',media.sticker_id); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(text); await save_recent(storage_client,str(group_id),recent); return
             decision=await self.engine.process_message(message,ctx); await self.memory.observe(user.id,group_id,ctx.sender_name,text,decision.should_reply or signal.social>=0.5); recent.append(text); await save_recent(storage_client,str(group_id),recent)
             if decision.should_reply:
-                reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet); await self._send_reply(message,context,reply,chat_id=group_id,user_id=user.id,text=text,direct=False,private=False); await self._announce_achievements(message,user,group_id,'oracle_reply')
+                reply=await self.replies.generate(group_name,ctx.sender_name,ctx.relationship_tier,text,signal.summary(),str(ctx.hour),ctx.is_late_night,ctx.memory_snippet); await self._send_reply(update,message,context,reply,chat_id=group_id,user_id=user.id,text=text,direct=False,private=False); await self._announce_achievements(message,user,group_id,'oracle_reply')
         except Exception as exc:
             application=getattr(context,'application',None); storage_client=getattr(application,'bot_data',{}).get('storage_client') if application else None; await soft_alert(storage_client,'message_router',exc)
 
