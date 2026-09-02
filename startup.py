@@ -34,6 +34,15 @@ async def _store_setnx(key:str,value:str,ttl:int)->bool:
         if asyncio.iscoroutine(result):result=await result
         return bool(result)
     except Exception as exc:log.debug("storage.setnx(%s) failed: %s",key,exc);return False
+async def _store_compare_set(key:str,expected:str,value:str,ttl:int)->bool:
+    try:
+        if _storage is None:return False
+        setter=getattr(_storage,"compare_set",None)
+        if setter is None:return False
+        result=setter(key,expected,value,ttl=ttl)
+        if asyncio.iscoroutine(result):result=await result
+        return bool(result)
+    except Exception as exc:log.debug("storage.compare_set(%s) failed: %s",key,exc);return False
 async def _store_delete(key:str)->bool:
     try:
         if _storage is None:return False
@@ -41,14 +50,21 @@ async def _store_delete(key:str)->bool:
         if asyncio.iscoroutine(result):await result
         return True
     except Exception as exc:log.debug("storage.delete(%s) failed: %s",key,exc);return False
-async def _refresh_lease():
-    await _store_set(_LEASE_KEY,json.dumps({"instance":_INSTANCE_ID,"ts":time.time()}),ttl=_LEASE_TTL)
+async def _refresh_lease(raw:str|None=None)->bool:
+    current=raw if raw is not None else await _store_get(_LEASE_KEY)
+    if not current:return False
+    try:
+        info=json.loads(current)
+        if info.get("instance")!=_INSTANCE_ID:return False
+    except Exception:return False
+    replacement=json.dumps({"instance":_INSTANCE_ID,"ts":time.time()})
+    return await _store_compare_set(_LEASE_KEY,current,replacement,_LEASE_TTL)
 async def _acquire_lease()->bool:
     raw=await _store_get(_LEASE_KEY)
     if raw:
         try:
             info=json.loads(raw);owner=info.get("instance");age=time.time()-info.get("ts",0)
-            if owner==_INSTANCE_ID:await _refresh_lease();return True
+            if owner==_INSTANCE_ID:return await _refresh_lease(raw)
             if age<_LEASE_TTL:log.info("POLLING_LEASE held by %s (age %.0fs, TTL %ds)",owner,age,_LEASE_TTL);return False
             log.warning("Stale lease from %s (age %.0fs > TTL %ds) — reclaiming",owner,age,_LEASE_TTL)
         except Exception:pass
@@ -67,7 +83,10 @@ async def _lease_heartbeat_loop():
     while not _shutting_down:
         await asyncio.sleep(_LEASE_REFRESH)
         if _shutting_down:break
-        try:await _refresh_lease()
+        try:
+            if not await _refresh_lease():
+                log.error("Polling lease ownership lost — stopping heartbeat")
+                break
         except Exception as exc:log.warning("Lease refresh failed: %s",exc)
 async def _wait_for_lease()->bool:
     deadline=time.time()+_LEASE_WAIT_MAX
