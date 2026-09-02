@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import quote
 
 from .storage import Storage, StorageError, storage
 
@@ -28,9 +29,19 @@ class EconomyService:
         return f"economy:balance:{scope}:{int(user_id)}" if scope is not None else f"economy:balance:{int(user_id)}"
 
     async def balance(self, user_id: int, scope: int | str | None = None) -> int:
-        value = await self.store.get(self.key(user_id, scope), "0")
-        try: return max(0, int(value or 0))
-        except (TypeError, ValueError): return 0
+        key = self.key(user_id, scope)
+        try:
+            if getattr(self.store, "configured", False):
+                # Economy must never interpret a persistent-store outage as a zero balance.
+                value = await self.store._request("GET", f"/get/{quote(key, safe='')}")
+            else:
+                value = await self.store.get(key, "0")
+        except StorageError as exc:
+            raise EconomyError("persistent economy is temporarily unavailable") from exc
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError) as exc:
+            raise EconomyError("economy balance data is invalid") from exc
 
     async def add(self, user_id: int, amount: int, reason: str = "adjustment", scope: int | str | None = None) -> Transaction:
         amount = int(amount)
