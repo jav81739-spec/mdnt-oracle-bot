@@ -2,14 +2,16 @@
 
 The production application is built by ``midnight_oracle.main``. This module
 keeps the historical production-entrypoint contracts that the runtime and
-regression suite rely on, without starting any service merely by importing it.
+regression suite rely on, without importing the obsolete monolithic legacy
+runner or starting any service merely by importing it.
 """
 from __future__ import annotations
 
 import asyncio
-import legacy_bot
 import logging
 import os
+from types import SimpleNamespace
+
 import startup
 from telegram.ext import Application, ContextTypes
 
@@ -25,7 +27,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 log = logging.getLogger("midnight.entrypoint")
-legacy_bot.deathgames = _deathgames_v2
+legacy_bot = SimpleNamespace(deathgames=_deathgames_v2)
 
 
 async def _error(update, context: ContextTypes.DEFAULT_TYPE) -> None:
