@@ -182,11 +182,6 @@ async def _send_one_message_with_gif(bot, chat_id, text: str, term: str, reply_t
     )
 
 
-async def _send_message_via_bot(bot, command: str, context_text: str, chat_id, text, *args, **kwargs):
-    rendered = await render(str(text or ""), command=command, context=context_text)
-    return await bot._oracle_original_send_message(chat_id, rendered, *args, **kwargs)
-
-
 class BotProxy:
     """Bot facade used only inside expressive command callbacks."""
 
@@ -194,14 +189,16 @@ class BotProxy:
         self._bot = bot
         self._command = command
         self._context = context
+        self._original_send_message = bot.send_message
 
     def __getattr__(self, name):
         return getattr(self._bot, name)
 
     async def send_message(self, chat_id, text=None, *args, **kwargs):
-        return await _send_message_via_bot(
-            self._bot, self._command, self._context, chat_id, text, *args, **kwargs
+        rendered = await render(
+            str(text or ""), command=self._command, context=self._context
         )
+        return await self._original_send_message(chat_id, rendered, *args, **kwargs)
 
 
 class ContextProxy:
@@ -264,3 +261,29 @@ def wrap_callback(callback, command: str):
     wrapped.__name__ = getattr(callback, "__name__", f"oracle_{command}")
     wrapped.__doc__ = getattr(callback, "__doc__", None)
     return wrapped
+
+
+def _install_media_bridge() -> None:
+    """Replace the old two-message text+GIF helper with one coherent message."""
+    global _MEDIA_BRIDGE_INSTALLED
+    if _MEDIA_BRIDGE_INSTALLED:
+        return
+    try:
+        import handlers.chat as chat_module
+    except Exception:
+        return
+
+    async def send_text_with_gif(update, context, text=None, term=None):
+        if hasattr(update, "message") or hasattr(update, "effective_message"):
+            message = update.effective_message
+            chat_id = update.effective_chat.id
+            return await _send_one_message_with_gif(
+                context.bot, chat_id, text or "", term or "",
+                getattr(message, "message_id", None),
+            )
+        bot = update
+        chat_id = context
+        return await _send_one_message_with_gif(bot, chat_id, text or "", term or "")
+
+    chat_module.send_text_with_gif = send_text_with_gif
+    _MEDIA_BRIDGE_INSTALLED = True
