@@ -42,8 +42,10 @@ class MessageRouter:
                 media=media_decide(update,text=text)
                 if media and media.kind=='gif':
                     from handlers.chat import get_gif_url
+                    from core.oracle_media import send_additive_gif
                     url=await get_gif_url(media.query)
-                    if url: await context.bot.send_animation(chat_id=chat_id,animation=url)
+                    if url:
+                        await send_additive_gif(context.bot,chat_id,url,reply_to_message_id=getattr(message,'message_id',None))
             except Exception as exc: await soft_alert(None,'media_delivery',exc)
 
     async def _announce_achievements(self,message,member,group_id,event):
