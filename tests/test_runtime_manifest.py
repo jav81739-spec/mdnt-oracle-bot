@@ -30,6 +30,7 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertIn("register_jobs", startup)
         self.assertIn("post_init(_post_init)", runtime)
         self.assertIn("MessageHandler(filters.TEXT & ~filters.COMMAND,_route_message)", runtime)
+        self.assertNotIn("import legacy_bot", entrypoint)
 
     def test_no_legacy_redis_fallback_is_used_by_entrypoint(self):
         entrypoint=(ROOT/"bot.py").read_text(encoding="utf-8")
