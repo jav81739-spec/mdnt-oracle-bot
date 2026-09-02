@@ -6,6 +6,7 @@ lookups never become a delivery requirement.
 """
 from __future__ import annotations
 
+from io import BytesIO
 import hashlib
 import os
 import random
@@ -13,6 +14,7 @@ import re
 from typing import Any
 
 import httpx
+from PIL import Image, ImageDraw, ImageFont
 
 from midnight_oracle.utils.logger import get_logger
 
@@ -31,6 +33,24 @@ _VISUAL_CUES = {
 _REACTION_CUES = {
     "😂", "🤣", "😭", "🥲", "lol", "lmao", "haha", "funny", "ridiculous", "absurd",
     "wild", "wtf", "bruh", "oops", "congrats", "congratulations", "damn",
+}
+
+_ORIGINAL_GIF_LINES = {
+    "gossip": (
+        "Okay… keep going.",
+        "Wait. That's not the whole story.",
+        "Don't leave it there.",
+        "Now you've got my attention.",
+        "You can't end it there.",
+        "Hmm. Continue.",
+    ),
+    "story": (
+        "Hmm… that detail matters.",
+        "Okay. I'm following this.",
+        "There's more in that.",
+        "Wait… I caught that.",
+        "Now that's interesting.",
+    ),
 }
 
 
@@ -68,16 +88,16 @@ def _media_kind(text: str, narrative_kind: str, part_index: int | None) -> str |
     roll = rng.random()
 
     if narrative_kind == "story":
+        if has_reaction and roll < 0.30:
+            return "gif"
         if part_index == 1 and has_visual and roll < 0.55:
             return "image"
         if has_visual and roll < 0.24:
             return "image"
     elif narrative_kind == "gossip":
-        if has_reaction and roll < 0.22:
+        if has_reaction and roll < 0.40:
             return "gif"
     elif narrative_kind == "chat":
-        # Ordinary chat gets media only when the content itself supplies a visual
-        # or reaction beat. A long-running chat cannot accumulate media spam.
         if has_reaction and roll < 0.16:
             return "gif"
         if has_visual and roll < 0.12:
@@ -88,6 +108,42 @@ def _media_kind(text: str, narrative_kind: str, part_index: int | None) -> str |
         if has_visual and roll < 0.55:
             return "image"
     return None
+
+
+def _original_gif_line(text: str, narrative_kind: str, part_index: int | None) -> str:
+    lines = _ORIGINAL_GIF_LINES.get(narrative_kind, _ORIGINAL_GIF_LINES["gossip"])
+    return _stable_rng("original-gif-line", narrative_kind, part_index or 0, text[:240]).choice(lines)
+
+
+def build_original_gif(text: str, narrative_kind: str, part_index: int | None = None) -> BytesIO:
+    """Create a small original reaction GIF with Midnight-written words."""
+    phrase = _original_gif_line(text, narrative_kind, part_index)
+    width, height = 720, 360
+    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    font = ImageFont.truetype(font_path, 42)
+    small = ImageFont.truetype(font_path, 22)
+    frames = []
+    for index in range(6):
+        image = Image.new("RGB", (width, height), (15, 22, 31))
+        draw = ImageDraw.Draw(image)
+        pulse = 10 + index * 2 if index <= 3 else 16 - (index - 3) * 2
+        draw.ellipse((54 - pulse, 54 - pulse, 118 + pulse, 118 + pulse), fill=(235, 214, 138))
+        draw.ellipse((78 - pulse // 2, 47 - pulse // 2, 128 + pulse // 2, 98 + pulse // 2), fill=(15, 22, 31))
+        for star in ((180, 70), (590, 82), (640, 260), (100, 285), (530, 55)):
+            r = 2 + ((index + star[0]) % 3)
+            draw.ellipse((star[0] - r, star[1] - r, star[0] + r, star[1] + r), fill=(220, 224, 228))
+        bbox = draw.multiline_textbbox((0, 0), phrase, font=font, spacing=8, align="center")
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        x = (width - tw) / 2
+        y = 150 + (2 if index in (1, 2, 4) else 0)
+        draw.rounded_rectangle((x - 28, y - 22, x + tw + 28, y + th + 22), radius=24, fill=(29, 40, 52), outline=(87, 101, 116), width=2)
+        draw.multiline_text((x, y), phrase, font=font, fill=(246, 247, 244), spacing=8, align="center")
+        draw.text((width - 180, height - 44), "— Midnight Oracle", font=small, fill=(170, 178, 188))
+        frames.append(image)
+    output = BytesIO()
+    frames[0].save(output, format="GIF", save_all=True, append_images=frames[1:], duration=130, loop=0, optimize=True)
+    output.seek(0)
+    return output
 
 
 def sticker_ids() -> list[str]:
@@ -159,12 +215,14 @@ async def _wikimedia(term: str) -> str | None:
 
 
 async def choose_media(text: str, narrative_kind: str, part_index: int | None = None) -> dict[str, Any] | None:
-    """Return at most one useful companion; never make media a delivery requirement."""
+    """Return at most one useful companion; autonomous story/gossip GIFs are original."""
     kind = _media_kind(text, narrative_kind, part_index)
     if not kind:
         return None
+    if kind == "gif" and narrative_kind in {"story", "gossip"}:
+        return {"kind": "gif", "source": "original", "text": text, "part_index": part_index}
     term = _term(text, narrative_kind)
     url = await (_giphy(term) if kind == "gif" else _wikimedia(term))
     if not url:
         return None
-    return {"kind": kind, "url": url}
+    return {"kind": kind, "url": url, "source": "provider"}
