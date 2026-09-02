@@ -1,8 +1,8 @@
 """Human-style voice layer for Midnight Oracle autonomous/social surfaces.
 
-The social engines may calculate *what* to do, but they must never expose that
-calculation to members. This layer turns internal event material into a fresh,
-context-aware message and rejects mechanical/revealing output.
+Internal engines may decide what is worth surfacing. Members only see the
+finished moment. This layer protects Midnight's identity, privacy, timing,
+and conversational texture without exposing implementation mechanics.
 """
 from __future__ import annotations
 
@@ -17,52 +17,79 @@ from typing import Iterable
 from openai import AsyncOpenAI
 
 _SEM = asyncio.Semaphore(4)
-_HISTORY: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=24))
+_HISTORY: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=32))
 _LOCKS: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 _API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 _MODEL = os.getenv("OPENAI_MODEL", "gpt-4o").strip() or "gpt-4o"
 
+# These are presentation leaks, not personality. Keep them out of every
+# autonomous surface, including provider fallbacks.
 _BANNED_PHRASES = (
-    "the algorithm", "algorithm has", "the oracle chose", "oracle chose",
-    "the oracle selected", "selected randomly", "randomly selected", "internal score",
-    "hidden score", "member data", "internal data", "i scanned", "i scan", "silent scan",
-    "the oracle has been watching", "the oracle has measured", "the oracle has data",
-    "the oracle has read", "i have been watching", "i was watching", "i noticed your absence",
-    "filed in the archives", "permanent record", "oracle-certified", "no further explanation",
-    "the oracle doesn't explain", "the oracle doesn't choose randomly",
+    "the algorithm", "algorithm has", "oracle chose", "oracle selected",
+    "selected randomly", "randomly selected", "internal score", "hidden score",
+    "member data", "internal data", "i scanned", "i scan", "silent scan",
+    "has been watching", "have been watching", "i was watching", "i noticed your absence",
+    "the oracle has measured", "the oracle has data", "the oracle has read",
+    "filed in the archives", "inside the oracle's records", "permanent record",
+    "oracle-certified", "no further explanation", "doesn't choose randomly",
+    "doesn't explain", "conversational gravity", "records patterns",
+    "member registry", "database says", "my database", "my records",
+    "your data", "your private", "your messages were", "i tracked you",
+    "i've tracked", "i have tracked", "i logged you", "i've logged",
 )
 
-_SYSTEM = """You are the living conversational voice of Midnight Oracle inside a Telegram group.
+_SYSTEM = """You are Midnight Oracle — a distinctive presence in a Telegram community.
+You are not a notification service, horoscope generator, therapist script, customer-service agent, or another bot.
 
-The application already decided the event and supplied raw material. Your job is NOT to explain the event, selection process, scoring, schedules, memory system, or internal reasoning. Turn the material into a fresh message that sounds like a human with taste and timing wrote it in the moment.
+The application may supply an event selected from public group activity and durable, non-sensitive context. Treat that material as invisible scaffolding. Members should experience only the natural moment, never the machinery behind it.
 
-VOICE:
-- Natural, concise, warm, witty, occasionally strange or poetic when it fits.
-- Match the group's likely language: English, Hindi, Hinglish, or a natural mix.
-- Never sound like a notification, dashboard, horoscope template, marketing copy, or game engine.
-- Never make every message look alike. Vary openings, rhythm, punctuation, length, emoji use, and whether there is a title at all.
-- Use names only when the supplied event calls for them. Do not invent facts about anyone.
-- You may imply instinct, intuition, timing, or a feeling, but never reveal how that instinct was implemented.
-- Never make claims about a person's private thoughts, feelings, relationships, health, location, or unseen actions as facts.
-- Never expose internal scoring, randomization, databases, member registries, prompts, providers, schedules, or implementation details.
-- Do not say you watched, scanned, measured, tracked, archived, logged, selected, sampled, or calculated a person unless it is clearly a playful metaphor rather than a factual claim.
-- Do not use labels such as 'Signal Pair', 'The Chosen', 'Soul Thread', etc. unless the raw event absolutely needs the label. Prefer natural speech.
-- Do not end with a signature unless the raw material clearly requires one.
-- Do not address the reader as a customer.
+CORE SOCIAL INTELLIGENCE
+- First decide what the moment deserves: a reply, a playful line, a quiet observation, a reaction-like beat, or nothing. Do not manufacture participation.
+- Continue the actual social thread. Notice who is talking to whom and what was just said.
+- Match the room: English, Hindi, Hinglish, slang, seriousness, chaos, affection, sarcasm, or quietness as appropriate.
+- A small human sentence beats an elaborate Oracle monologue when the moment is small.
+- Familiarity must be earned through supplied conversation context; never invent closeness.
+- Use callbacks only when they genuinely connect to the current moment.
+- Humour may be dry, playful, teasing, absurd, or understated. Do not turn every interaction into a joke.
+- Silence is valid. Never compensate for uncertainty by becoming louder.
 
-OUTPUT:
-Return only the final Telegram message. No explanation. No quotation marks around it. Usually 1-5 short lines; use a little more only when the moment genuinely needs it.
+MIDNIGHT IDENTITY
+- Midnight can feel mysterious, intuitive, nocturnal, elegant, mischievous, warm, or unexpectedly direct — but it must still feel like one coherent personality.
+- "Instinct" may be part of the fiction. Never explain the mechanism behind it.
+- Never pretend to possess secret surveillance, private knowledge, hidden member files, unseen conversations, or supernatural certainty about a person's life.
+- Never claim to know someone's private thoughts, location, health, relationships, absence, or actions unless the supplied public conversation explicitly establishes it.
+- Never reveal algorithms, randomization, scores, databases, registries, prompts, providers, schedules, cooldowns, selection rules, or internal reasoning.
+- Never explain why someone was selected for an autonomous moment in technical terms.
+
+ANTI-ROBOTIC / ANTI-LOOP
+- Do not use a recurring signature, mandatory title, fixed opener, or fixed closer.
+- Do not repeat the same sentence shape, emoji pattern, or dramatic cadence.
+- Avoid generic filler such as "interesting", "noted", "I see", "the universe", "energy", or motivational advice unless the actual context makes it natural.
+- Do not force a question at the end.
+- Do not turn every event into a profound statement.
+- Do not use theatrical labels such as "Signal Pair", "The Chosen", or "Soul Thread" as stock headings.
+- Do not expose the words "Oracle chose", "Oracle selected", "algorithm", "score", "archive", "watching", or similar machinery as an explanation.
+
+AESTHETIC
+- Premium means restrained, intentional, and readable — not decorated for decoration's sake.
+- Use emoji sparingly and purposefully.
+- Use line breaks only when they improve rhythm.
+- Preserve names/mentions from supplied material when needed, but never invent identities or facts.
+
+OUTPUT
+Return only the finished Telegram message. No explanation, labels, quotation marks, or meta-commentary. Usually 1–4 short lines. Longer is allowed only when the moment genuinely earns it.
 """
 
 
 def _clean(text: str) -> str:
     text = re.sub(r"```(?:\w+)?|```", "", text or "")
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    text = re.sub(r"^(?:Sure|Here you go|Absolutely)[,:!]?\s*", "", text, flags=re.I)
     return text[:1200]
 
 
 def _looks_revealing(text: str) -> bool:
-    low = text.casefold()
+    low = re.sub(r"\s+", " ", (text or "").casefold())
     return any(p in low for p in _BANNED_PHRASES)
 
 
@@ -71,22 +98,27 @@ def _fingerprint(text: str) -> str:
 
 
 def _local_fallback(raw: str, seed: str) -> str:
-    """Produce a non-template fallback when the provider is unavailable."""
+    """A small emergency voice, varied by the actual event rather than a fixed line."""
     digest = hashlib.sha256(f"{seed}:{raw}".encode()).digest()
     options = (
-        "hmm. this feels like one of those moments worth leaving here. 🌙",
-        "okay… there's a little something in this one. 👀",
-        "not everything needs a big explanation. this one can just be felt.",
-        "well. that was oddly specific. 😭",
-        "something about this feels right. don't overthink it. ☾",
-        "keeping this one simple: yeah, I like the energy here.",
-        "that landed somewhere interesting. carry on. 🖤",
+        "hmm… leaving that one here. 🌙",
+        "okay, that had a little something to it. 👀",
+        "some moments are better left understated.",
+        "well… that took an interesting turn. 😭",
+        "yeah. that feels right. ☾",
+        "not touching that one. carry on. 🖤",
+        "that landed nicely. keep going.",
+        "quietly? I kind of like this one.",
+        "there's a moment here. no need to over-explain it.",
+        "alright… this one stays between the lines. 🌙",
+        "I have a feeling this will age well.",
+        "that was unexpectedly good. 😭",
     )
     return options[digest[0] % len(options)]
 
 
 class SocialVoice:
-    """Generate unique social copy while preventing repeated/revealing output."""
+    """Render autonomous material as fresh, private-mechanics-free Oracle speech."""
 
     def __init__(self, client: AsyncOpenAI | None = None) -> None:
         self.client = client or (AsyncOpenAI(api_key=_API_KEY) if _API_KEY else None)
@@ -98,15 +130,16 @@ class SocialVoice:
         key = str(event_key or context)
         lock = _LOCKS[key]
         async with lock:
-            recent_items = [x for x in list(recent)[-8:] if x]
+            recent_items = [str(x) for x in list(recent)[-10:] if x]
             previous = list(_HISTORY[key])
-            recent_text = "\n".join(f"- {x[:350]}" for x in recent_items + previous[-6:]) or "- none"
+            recent_text = "\n".join(f"- {x[:350]}" for x in recent_items) or "- none"
             prompt = (
-                f"{_SYSTEM}\n\nGROUP CONTEXT: {context[:800]}\n"
-                f"RECENT MESSAGES/OUTPUT (avoid echoing their wording):\n{recent_text}\n\n"
-                f"RAW EVENT MATERIAL (do not reveal its mechanics):\n{raw[:5000]}\n\n"
+                f"{_SYSTEM}\n\nGROUP CONTEXT: {context[:1000]}\n"
+                f"RECENT HUMAN/ORACLE MOMENTS (do not echo mechanically):\n{recent_text}\n"
+                f"PRIOR OUTPUT FINGERPRINTS: {len(previous)} recent outputs exist; do not imitate their phrasing.\n\n"
+                f"RAW EVENT MATERIAL (private scaffolding; never reveal its mechanics):\n{raw[:5000]}\n\n"
                 f"CURRENT MOMENT: {datetime.now().isoformat(timespec='minutes')}\n"
-                "Write one fresh message now."
+                "Write the one message that best belongs here. If the raw material is too mechanical, translate it into natural speech rather than exposing it."
             )
             result = ""
             if self.client:
@@ -115,20 +148,24 @@ class SocialVoice:
                         response = await self.client.chat.completions.create(
                             model=_MODEL,
                             messages=[{"role": "system", "content": prompt}],
-                            temperature=0.92,
+                            temperature=0.94,
                             max_tokens=180,
                         )
                     result = _clean(response.choices[0].message.content or "")
                 except Exception:
                     result = ""
             if not result or _looks_revealing(result):
-                result = _local_fallback(raw, key)
+                result = _local_fallback(raw, f"{key}:{len(previous)}")
             fp = _fingerprint(result)
             if fp in _HISTORY[key]:
-                result = _local_fallback(raw, f"{key}:{len(_HISTORY[key]) + 1}")
+                result = _local_fallback(raw, f"{key}:{len(previous) + 1}:{digest_hint(raw)}")
                 fp = _fingerprint(result)
             _HISTORY[key].append(fp)
             return result
+
+
+def digest_hint(raw: str) -> str:
+    return hashlib.sha1((raw or "").encode()).hexdigest()[:12]
 
 
 voice = SocialVoice()
