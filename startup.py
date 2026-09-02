@@ -25,6 +25,15 @@ async def _store_set(key:str,value:str,ttl:int=0)->bool:
         if asyncio.iscoroutine(result):await result
         return True
     except Exception as exc:log.debug("storage.set(%s) failed: %s",key,exc);return False
+async def _store_setnx(key:str,value:str,ttl:int)->bool:
+    try:
+        if _storage is None:return False
+        setter=getattr(_storage,"setnx",None)
+        if setter is None:return False
+        result=setter(key,value,ttl=ttl)
+        if asyncio.iscoroutine(result):result=await result
+        return bool(result)
+    except Exception as exc:log.debug("storage.setnx(%s) failed: %s",key,exc);return False
 async def _store_delete(key:str)->bool:
     try:
         if _storage is None:return False
@@ -43,9 +52,10 @@ async def _acquire_lease()->bool:
             if age<_LEASE_TTL:log.info("POLLING_LEASE held by %s (age %.0fs, TTL %ds)",owner,age,_LEASE_TTL);return False
             log.warning("Stale lease from %s (age %.0fs > TTL %ds) — reclaiming",owner,age,_LEASE_TTL)
         except Exception:pass
-    ok=await _store_set(_LEASE_KEY,json.dumps({"instance":_INSTANCE_ID,"ts":time.time()}),ttl=_LEASE_TTL)
-    if ok:log.info("Polling lease acquired by %s",_INSTANCE_ID)
-    return ok
+    token=json.dumps({"instance":_INSTANCE_ID,"ts":time.time()})
+    if await _store_setnx(_LEASE_KEY,token,_LEASE_TTL):
+        log.info("Polling lease acquired by %s",_INSTANCE_ID);return True
+    return False
 async def _release_lease():
     raw=await _store_get(_LEASE_KEY)
     if raw:
@@ -114,7 +124,7 @@ async def _graceful_shutdown():
         except asyncio.CancelledError:pass
     if _app is not None:
         try:
-            scheduler=_app.bot_data.get("oracle_scheduler")
+            scheduler=_app.bot_data.get('oracle_scheduler')
             if scheduler and scheduler.scheduler.running:scheduler.scheduler.shutdown(wait=False)
             if _app.updater and _app.updater.running:await _app.updater.stop()
             if _app.running:await _app.stop()
