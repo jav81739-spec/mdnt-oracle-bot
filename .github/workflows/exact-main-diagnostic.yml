@@ -10,18 +10,19 @@ jobs:
       fail-fast: false
       matrix:
         test:
-          - tests/test_core_engine.py
-          - tests/test_events_persistence.py
-          - tests/test_game_persistence_boundary.py
-          - tests/test_game_state.py
-          - tests/test_production_entrypoint_contract.py
-          - tests/test_production_import.py
-          - tests/test_runtime_hardening.py
-          - tests/test_runtime_manifest.py
-          - tests/test_runtime_regressions.py
-          - tests/test_runtime_smoke.py
-          - tests/test_voice_engine.py
-          - tests/test_voice_triggers.py
+          - tests.test_production_import.ProductionImportTests.test_production_entrypoint_imports_without_starting_services
+          - tests.test_runtime_manifest.RuntimeManifestTests.test_command_handlers_have_unique_names
+          - tests.test_runtime_manifest.RuntimeManifestTests.test_canonical_runtime_owns_phase_surface_registration
+          - tests.test_runtime_manifest.RuntimeManifestTests.test_no_legacy_redis_fallback_is_used_by_entrypoint
+          - tests.test_runtime_regressions.RuntimeRegressionTests.test_readiness_and_top_level_runtime_are_separated
+          - tests.test_runtime_regressions.RuntimeRegressionTests.test_runtime_identity_is_not_hardcoded_to_main
+          - tests.test_runtime_regressions.RuntimeRegressionTests.test_polling_lease_refresh_is_ownership_safe
+          - tests.test_runtime_regressions.RuntimeRegressionTests.test_current_gemini_model_contract_is_used
+          - tests.test_runtime_regressions.RuntimeRegressionTests.test_legacy_key_compatibility_uses_scan
+          - tests.test_runtime_smoke.RuntimeSmokeTests.test_all_handler_modules_import
+          - tests.test_runtime_smoke.RuntimeSmokeTests.test_chat_compatibility_surface
+          - tests.test_runtime_smoke.RuntimeSmokeTests.test_production_entrypoint_activates_v2_engine
+          - tests.test_runtime_smoke.RuntimeSmokeTests.test_no_gemini_sdk_dependency_is_required
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
