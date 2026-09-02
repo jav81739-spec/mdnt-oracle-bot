@@ -5,24 +5,23 @@ on:
 permissions:
   contents: read
 jobs:
-  probes:
+  tests:
     strategy:
       fail-fast: false
       matrix:
-        probe:
-          - message-handler
-          - callback-handler
-          - command-handler
-          - voice-handler
-          - inline-handler
-          - world-handler
-          - prediction-handler
-          - webapp-handler
-          - surprise-handler
-          - scheduler
-          - main
-          - bot-import
-          - build-application
+        test:
+          - tests/test_core_engine.py
+          - tests/test_events_persistence.py
+          - tests/test_game_persistence_boundary.py
+          - tests/test_game_state.py
+          - tests/test_production_entrypoint_contract.py
+          - tests/test_production_import.py
+          - tests/test_runtime_hardening.py
+          - tests/test_runtime_manifest.py
+          - tests/test_runtime_regressions.py
+          - tests/test_runtime_smoke.py
+          - tests/test_voice_engine.py
+          - tests/test_voice_triggers.py
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -30,7 +29,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r requirements.txt
-      - name: Probe ${{ matrix.probe }}
+      - name: Run ${{ matrix.test }}
         env:
           BOT_TOKEN: test-token
           TELEGRAM_BOT_TOKEN: ci-telegram-token-1234567890
@@ -42,19 +41,4 @@ jobs:
           ORACLE_DATABASE_PATH: ci.sqlite3
           GROUP_CHAT_ID: '0'
           OWNER_ID: '0'
-        run: |
-          case "${{ matrix.probe }}" in
-            message-handler) python -c 'import midnight_oracle.handlers.message_handler; print("message handler ok")' ;;
-            callback-handler) python -c 'import midnight_oracle.handlers.callback_handler; print("callback handler ok")' ;;
-            command-handler) python -c 'import midnight_oracle.handlers.command_handler; print("command handler ok")' ;;
-            voice-handler) python -c 'import midnight_oracle.handlers.voice_handler; print("voice handler ok")' ;;
-            inline-handler) python -c 'import midnight_oracle.handlers.inline_handler; print("inline handler ok")' ;;
-            world-handler) python -c 'import midnight_oracle.handlers.world_handler; print("world handler ok")' ;;
-            prediction-handler) python -c 'import midnight_oracle.handlers.prediction_handler; print("prediction handler ok")' ;;
-            webapp-handler) python -c 'import midnight_oracle.handlers.webapp_handler; print("webapp handler ok")' ;;
-            surprise-handler) python -c 'import midnight_oracle.handlers.surprise_handler; print("surprise handler ok")' ;;
-            scheduler) python -c 'import midnight_oracle.scheduler; print("scheduler ok")' ;;
-            main) python -c 'import midnight_oracle.main; print("main ok")' ;;
-            bot-import) python -c 'import bot; print("bot ok")' ;;
-            build-application) python -c 'import bot; app=bot.build_application(); print("application build ok", len(app.handlers)); app.handlers.clear()' ;;
-          esac
+        run: python -m unittest "${{ matrix.test }}" -v
