@@ -20,10 +20,8 @@ _SEM = asyncio.Semaphore(4)
 _HISTORY: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=32))
 _LOCKS: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 _API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o").strip() or "gpt-4o"
+_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-mini").strip() or "gpt-5.6-mini"
 
-# These are presentation leaks, not personality. Keep them out of every
-# autonomous surface, including provider fallbacks.
 _BANNED_PHRASES = (
     "the algorithm", "algorithm has", "oracle chose", "oracle selected",
     "selected randomly", "randomly selected", "internal score", "hidden score",
@@ -36,6 +34,8 @@ _BANNED_PHRASES = (
     "member registry", "database says", "my database", "my records",
     "your data", "your private", "your messages were", "i tracked you",
     "i've tracked", "i have tracked", "i logged you", "i've logged",
+    "the oracle sees the shadow", "the oracle keeps records", "the oracle ran a scan",
+    "the oracle tracks", "the oracle maps what people don't say",
 )
 
 _SYSTEM = """You are Midnight Oracle — a distinctive presence in a Telegram community.
@@ -98,7 +98,7 @@ def _fingerprint(text: str) -> str:
 
 
 def _local_fallback(raw: str, seed: str) -> str:
-    """A small emergency voice, varied by the actual event rather than a fixed line."""
+    """Safe emergency voice that never repeats internal event material."""
     digest = hashlib.sha256(f"{seed}:{raw}".encode()).digest()
     options = (
         "hmm… leaving that one here. 🌙",
