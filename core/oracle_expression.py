@@ -17,6 +17,7 @@ from core.ai import AIUnavailable, service
 _SEM = asyncio.Semaphore(3)
 _LOCKS: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 _HISTORY: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=18))
+_MEDIA_BRIDGE_INSTALLED = False
 
 _BANNED = (
     "the algorithm", "internal score", "hidden score", "selected randomly",
@@ -27,24 +28,19 @@ _BANNED = (
     "quiet pull", "signal ·", "signal:",
 )
 
-# These are operational/factual commands. Their output must not be cosmetically
-# rewritten because exact state, permissions, counters, IDs or game mechanics
-# are more important than style.
 MECHANICAL_COMMANDS = {
-    "id", "info", "remind", "groupinfo", "afk", "report",
-    "stats", "topactive", "msgcount", "balance", "daily", "richest",
-    "coinboard", "rob", "withdraw", "deposit", "wallet", "buy",
-    "inventory", "chests", "shop", "settings", "fastmath", "wordbomb",
-    "riddleanswer", "hangmanguess", "wordleguess", "ttt", "chainword",
-    "unscramble", "survive", "revive", "deathstatus", "roulette", "kill",
-    "vote", "startround", "endgame", "deathgame", "mute", "unmute", "ban",
-    "kick", "warn", "warnings", "clearwarns", "pin", "unpin", "purge",
-    "rules", "setrules", "lock", "unlock", "setwelcome", "setgoodbye",
-    "invite", "setcommands", "reload", "shutdown", "restart", "admin",
-    "broadcast", "announce", "ownerstatus", "ownerstats", "midnightmap",
-    "chat", "persona", "quiet", "wake", "forget", "memory", "mymemory",
-    "help", "start", "predict", "predictions", "tod", "wyr", "nhie",
-    "scramble", "poll", "settrigger", "triggerinfo",
+    "id", "info", "remind", "groupinfo", "afk", "report", "stats", "topactive",
+    "msgcount", "balance", "daily", "richest", "coinboard", "rob", "withdraw",
+    "deposit", "wallet", "buy", "inventory", "chests", "shop", "settings",
+    "fastmath", "wordbomb", "riddleanswer", "hangmanguess", "wordleguess", "ttt",
+    "chainword", "unscramble", "survive", "revive", "deathstatus", "roulette", "kill",
+    "vote", "startround", "endgame", "deathgame", "mute", "unmute", "ban", "kick",
+    "warn", "warnings", "clearwarns", "pin", "unpin", "purge", "rules", "setrules",
+    "lock", "unlock", "setwelcome", "setgoodbye", "invite", "setcommands", "reload",
+    "shutdown", "restart", "admin", "broadcast", "announce", "ownerstatus", "ownerstats",
+    "midnightmap", "chat", "persona", "quiet", "wake", "forget", "memory", "mymemory",
+    "help", "start", "predict", "predictions", "tod", "wyr", "nhie", "scramble",
+    "poll", "settrigger", "triggerinfo",
 }
 
 
@@ -59,13 +55,9 @@ def _fingerprint(text: str) -> str:
 
 
 def _protected_tokens(text: str) -> list[str]:
-    """Tokens that a presentation pass must never silently alter."""
     patterns = (
-        r"@[A-Za-z0-9_]{2,}",
-        r"\b\d{1,3}(?:[.,:]\d{1,3})*(?:%|/100)?\b",
-        r"\b\d{1,2}:\d{2}(?::\d{2})?\b",
-        r"https?://\S+",
-        r"tg://\S+",
+        r"@[A-Za-z0-9_]{2,}", r"\b\d{1,3}(?:[.,:]\d{1,3})*(?:%|/100)?\b",
+        r"\b\d{1,2}:\d{2}(?::\d{2})?\b", r"https?://\S+", r"tg://\S+",
     )
     found: list[str] = []
     for pattern in patterns:
@@ -79,16 +71,10 @@ def _safe(text: str, raw: str) -> bool:
     low = text.casefold()
     if any(item in low for item in _BANNED):
         return False
-    for token in _protected_tokens(raw):
-        if token not in text:
-            return False
-    return True
+    return all(token in text for token in _protected_tokens(raw))
 
 
 def _fallback(raw: str, command: str) -> str:
-    """Correctness-first fallback when Gemini is unavailable."""
-    # Keep exact operational content. The deterministic command itself remains
-    # authoritative; pretending to be more human by inventing facts is worse.
     return raw.strip()
 
 
@@ -146,23 +132,64 @@ async def render(raw: str, *, command: str = "oracle", context: str = "", recent
                 result = _clean(await service.generate(prompt, timeout=18.0))
         except (AIUnavailable, Exception):
             result = ""
-
         if not _safe(result, raw):
             result = _fallback(raw, command)
-
         fp = _fingerprint(result)
         if fp in _HISTORY[key]:
-            # A duplicate generated answer is not allowed. The safe fallback is
-            # preferable to fabricating a different factually risky answer.
             result = _fallback(raw, command)
             fp = _fingerprint(result)
         _HISTORY[key].append(fp)
         return result
 
 
-class MessageProxy:
-    """Proxy a Telegram Message while replacing only expressive text sends."""
+async def _send_one_message_with_gif(bot, chat_id, text: str, term: str, reply_to_message_id=None):
+    """Send expressive text + provider media as one Telegram message."""
+    from handlers.chat import get_gif_url
+    from telegram.constants import ParseMode
 
+    rendered = await render(text, command="social-action", context=f"chat:{chat_id}")
+    url = await get_gif_url(term) if term else None
+    if not url:
+        return await bot.send_message(chat_id, rendered, reply_to_message_id=reply_to_message_id)
+    caption = rendered[:900].rstrip()
+    caption += "\n\nPowered By GIPHY"
+    return await bot.send_animation(
+        chat_id,
+        url,
+        caption=caption[:1024],
+        parse_mode=ParseMode.MARKDOWN,
+        show_caption_above_media=True,
+        reply_to_message_id=reply_to_message_id,
+    )
+
+
+def _install_media_bridge() -> None:
+    """Replace the old two-message text+GIF helper with one coherent message."""
+    global _MEDIA_BRIDGE_INSTALLED
+    if _MEDIA_BRIDGE_INSTALLED:
+        return
+    try:
+        import handlers.chat as chat_module
+    except Exception:
+        return
+
+    async def send_text_with_gif(update, context, text=None, term=None):
+        if hasattr(update, "message") or hasattr(update, "effective_message"):
+            message = update.effective_message
+            chat_id = update.effective_chat.id
+            return await _send_one_message_with_gif(
+                context.bot, chat_id, text or "", term or "",
+                getattr(message, "message_id", None),
+            )
+        bot = update
+        chat_id = context
+        return await _send_one_message_with_gif(bot, chat_id, text or "", term or "")
+
+    chat_module.send_text_with_gif = send_text_with_gif
+    _MEDIA_BRIDGE_INSTALLED = True
+
+
+class MessageProxy:
     def __init__(self, message, command: str, context: str):
         self._message = message
         self._command = command
@@ -177,8 +204,6 @@ class MessageProxy:
 
 
 class UpdateProxy:
-    """Duck-typed Update proxy used by legacy command callbacks."""
-
     def __init__(self, update, command: str, context: str):
         self._update = update
         self._command = command
@@ -198,6 +223,7 @@ def wrap_callback(callback, command: str):
     """Wrap a legacy command callback without changing its business logic."""
     if command in MECHANICAL_COMMANDS:
         return callback
+    _install_media_bridge()
 
     async def wrapped(update, context):
         chat = getattr(update, "effective_chat", None)
