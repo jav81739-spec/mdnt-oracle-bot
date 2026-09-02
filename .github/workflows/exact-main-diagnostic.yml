@@ -10,8 +10,15 @@ jobs:
       fail-fast: false
       matrix:
         probe:
-          - import-bot
-          - import-main
+          - config
+          - database
+          - friend-engine
+          - memory-engine
+          - mood-engine
+          - reply-generator
+          - message-handler
+          - main
+          - bot-import
           - build-application
     runs-on: ubuntu-latest
     steps:
@@ -34,7 +41,14 @@ jobs:
           OWNER_ID: '0'
         run: |
           case "${{ matrix.probe }}" in
-            import-bot) python -c 'import bot; print("bot import ok")' ;;
-            import-main) python -c 'import midnight_oracle.main; print("main import ok")' ;;
+            config) python -c 'import midnight_oracle.config; print("config ok")' ;;
+            database) python -c 'from midnight_oracle.database import Database, now_ts; print("database ok")' ;;
+            friend-engine) python -c 'import midnight_oracle.friend_engine; print("friend engine ok")' ;;
+            memory-engine) python -c 'import midnight_oracle.memory_engine; print("memory engine ok")' ;;
+            mood-engine) python -c 'import midnight_oracle.mood_engine; print("mood engine ok")' ;;
+            reply-generator) python -c 'import midnight_oracle.generators.reply_generator; print("reply generator ok")' ;;
+            message-handler) python -c 'import midnight_oracle.handlers.message_handler; print("message handler ok")' ;;
+            main) python -c 'import midnight_oracle.main; print("main ok")' ;;
+            bot-import) python -c 'import bot; print("bot ok")' ;;
             build-application) python -c 'import bot; app=bot.build_application(); print("application build ok", len(app.handlers)); app.handlers.clear()' ;;
           esac
