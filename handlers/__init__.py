@@ -138,6 +138,7 @@ def _register_legacy_surface(app) -> None:
 
 _legacy_wrapped=False
 
+
 def register_legacy_surface(app) -> None:
     global _legacy_wrapped
     if _legacy_wrapped:return
@@ -163,10 +164,3 @@ def _friend_register_with_legacy(app):
     return _original_friend_register(app)
 
 _friend_engine.register=_friend_register_with_legacy
-
-try:
-    import legacy_bot as _legacy_bot
-    from . import deathgames_v2 as _deathgames_v2
-    _legacy_bot.deathgames = _deathgames_v2
-except Exception:
-    pass
