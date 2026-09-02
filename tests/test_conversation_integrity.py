@@ -1,10 +1,45 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 
 from midnight_oracle.friend_engine import FriendEngine
 from midnight_oracle.generators.reply_generator import ReplyGenerator
 from midnight_oracle.handlers.sticker_handler import StickerHandler
+
+
+class _Message:
+    def __init__(self, content):
+        self.content = content
+
+
+class _Choice:
+    def __init__(self, content):
+        self.message = _Message(content)
+
+
+class _Response:
+    def __init__(self, content="hello back"):
+        self.choices = [_Choice(content)]
+
+
+class _Completions:
+    def __init__(self):
+        self.calls = []
+
+    async def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return _Response()
+
+
+class _Chat:
+    def __init__(self):
+        self.completions = _Completions()
+
+
+class _Client:
+    def __init__(self):
+        self.chat = _Chat()
 
 
 class ConversationIntegrityTests(unittest.TestCase):
@@ -28,15 +63,22 @@ class ConversationIntegrityTests(unittest.TestCase):
             )
         )
 
-    def test_gemini_3_request_has_no_legacy_sampling_or_prefilled_model_turns(self):
-        generator = ReplyGenerator()
-        payload = generator._request(
-            "Room", "Member", "known", "hello", "neutral", "22", False, "none", ["Member: old", "Oracle: old reply"]
+    def test_openai_request_uses_single_system_prompt_and_recent_context(self):
+        client = _Client()
+        generator = ReplyGenerator(client=client)
+        result = asyncio.run(
+            generator.generate(
+                "Room", "Member", "known", "hello", "neutral", "22:00", False,
+                "none", ["Member: old", "Oracle: old reply"]
+            )
         )
-        self.assertEqual([item["role"] for item in payload["contents"]], ["user"])
-        self.assertNotIn("candidateCount", payload["generationConfig"])
-        self.assertNotIn("temperature", payload["generationConfig"])
-        self.assertEqual(payload["contents"][0]["parts"][0]["text"], "hello")
+        self.assertEqual(result, "hello back")
+        payload = client.chat.completions.calls[0]
+        self.assertEqual(len(payload["messages"]), 1)
+        self.assertEqual(payload["messages"][0]["role"], "system")
+        self.assertIn("Member: old", payload["messages"][0]["content"])
+        self.assertEqual(payload["max_tokens"], 180)
+        self.assertEqual(payload["temperature"], .86)
 
     def test_sticker_requires_a_clear_request(self):
         self.assertTrue(StickerHandler._REQUEST.fullmatch("send me a sticker"))
