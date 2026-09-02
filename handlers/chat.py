@@ -14,7 +14,7 @@ DEFAULT_PERSONA="friendly, casual, playful, naturally Hinglish when appropriate"
 MAX_HISTORY=10; COOLDOWN_SECONDS=8; _AI_CONCURRENCY=2; _ai_slots=asyncio.Semaphore(_AI_CONCURRENCY); STORAGE_KEY="chat_settings"
 
 async def load_from_storage():
-    global chat_enabled,chat_persona
+    global chat_enabled, chat_persona
     saved=await storage.load(STORAGE_KEY,{"enabled":{},"persona":{}})
     if not isinstance(saved,dict): saved={}
     chat_enabled=dict(saved.get("enabled",{})); chat_persona=dict(saved.get("persona",{}))
@@ -91,17 +91,13 @@ async def send_random_gif(update,context):
 
 async def send_text_with_gif(update,context,*args,**kwargs):
     """Compatibility helper supporting both handler and legacy bot call styles."""
+    from core.oracle_media import send_text_with_optional_gif
     if hasattr(update,"effective_message"):
         message=update.effective_message; bot=context.bot; chat_id=update.effective_chat.id; text=args[0] if args else kwargs.get("text",""); term=args[1] if len(args)>1 else kwargs.get("term")
+        await send_text_with_optional_gif(bot,chat_id,text or "☾ Midnight Oracle is here.",term=term,reply_to_message_id=getattr(message,"message_id",None))
     else:
-        bot=update; chat_id=context; message=None; text=args[0] if args else kwargs.get("text",""); term=args[1] if len(args)>1 else kwargs.get("term")
-    if message is not None:await message.reply_text(text or "☾ Midnight Oracle is here.")
-    else:await bot.send_message(chat_id=chat_id,text=text or "☾ Midnight Oracle is here.")
-    if term:
-        url=await get_gif_url(term)
-        if url:
-            try:await bot.send_animation(chat_id=chat_id,animation=url)
-            except Exception:log.exception("GIF_SEND_FAILED")
+        bot=update; chat_id=context; text=args[0] if args else kwargs.get("text",""); term=args[1] if len(args)>1 else kwargs.get("term")
+        await send_text_with_optional_gif(bot,chat_id,text or "☾ Midnight Oracle is here.",term=term)
 
 async def send_mood_gif(update,context,mood=""):return await send_random_gif(update,context)
 async def gif_reply(update,context):return await send_random_gif(update,context)
