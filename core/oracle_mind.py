@@ -33,7 +33,6 @@ _GOSSIP_BITS=(
     ("A city can change its name, its borders and its skyline and still accidentally keep the same old ghost story.","Cities are terrible at throwing things away."),
     ("Scientists can measure astonishing things and still lose their keys.","Balance, apparently, is important."),
 )
-
 _GOSSIP_FORMS=("rumour","oddity","midnight_thought","found_thread","tiny_confession","curious_turn","unfinished_clue")
 
 _STORY_SCENES=(
@@ -47,17 +46,33 @@ _STORY_SCENES=(
     ("The rain stopped falling over one particular house but nowhere else in the neighbourhood.","For twenty minutes the clouds opened around it like a hole cut into the sky. Children ran into the street to stare.","Inside, the family kept eating dinner. They could hear the rain on every other roof and the silence above their own.","Then the youngest child noticed an old photograph on the fridge showing the same house, the same table, and the same impossible patch of dry sky.","Nobody had ever remembered taking the photograph. The rain returned a minute later, and the family decided not to throw the picture away."),
 )
 
+_STORY_BANNED_PATTERNS=(
+    re.compile(r"\bthe night had the strange atmosphere of\b",re.I),
+    re.compile(r"\bthe obvious explanation was wrong\b",re.I),
+    re.compile(r"\bthe second obvious explanation\b",re.I),
+    re.compile(r"\bthe story was not\b",re.I),
+    re.compile(r"\bthe oracle has (?:a )?theor(?:y|ies)\b",re.I),
+    re.compile(r"\bfile that under\b",re.I),
+    re.compile(r"\brandom midnight thought\b",re.I),
+    re.compile(r"\bthe night had\b",re.I),
+)
 _MEMORY_SAFE_PATTERNS=(re.compile(r"\bmy favorite (?:movie|film|song|book|game|food|color|colour) is\s+(.+)",re.I),re.compile(r"\bi (?:really )?(?:like|love|prefer)\s+(.+)",re.I),re.compile(r"\bi(?:'m| am) a fan of\s+(.+)",re.I),re.compile(r"\bcall me\s+([\w .'-]{1,80})",re.I))
 _SENSITIVE_MARKERS=re.compile(r"\b(password|otp|pin|cvv|bank|account number|card number|medical|diagnos|medicine|political party|religion|sexual|address|passport|aadhaar|ssn)\b",re.I)
 
 def _seed(*parts:Any)->int:return int(hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest(),16)
-
 def _footer()->str:return "🌙 *— Midnight Oracle*"
 
+def _story_quality_ok(text:str)->bool:
+    value=(text or "").strip()
+    if not value or any(pattern.search(value) for pattern in _STORY_BANNED_PATTERNS):return False
+    body=re.sub(r"\s+"," ",value.casefold())
+    if body.count("midnight story")>1:return False
+    sentences=[x.strip() for x in re.split(r"(?<=[.!?])\s+",body) if x.strip()]
+    if len(sentences)>=3 and len(sentences)!=len(set(sentences)):return False
+    return True
+
 def generate_gossip(seed:str|None=None)->CreativePiece:
-    """Create varied, social-feeling world gossip without targeting real people."""
-    actual_seed=str(seed or time.time_ns());rng=random.Random(_seed(actual_seed,"gossip-v3"))
-    form=rng.choice(_GOSSIP_FORMS);theme=rng.choice(_WORLD_THEMES);lead,tail=rng.choice(_GOSSIP_BITS)
+    actual_seed=str(seed or time.time_ns());rng=random.Random(_seed(actual_seed,"gossip-v3"));form=rng.choice(_GOSSIP_FORMS);theme=rng.choice(_WORLD_THEMES);lead,tail=rng.choice(_GOSSIP_BITS)
     if form=="rumour":body=f"{lead}\n\n{tail}"
     elif form=="oddity":body=rng.choice((f"Here's a strange little thing: {tail} It somehow circles back to *{theme}*.",f"The odd part about *{theme}* is that the best stories are usually hiding in the boring details. {tail}"))
     elif form=="midnight_thought":body=rng.choice((f"Random midnight thought: *{theme}* has a habit of making ordinary things feel suspiciously interesting.",f"I keep thinking about *{theme}*. Not because it makes sense. Mostly because it doesn't quite stop being interesting."))
@@ -65,48 +80,54 @@ def generate_gossip(seed:str|None=None)->CreativePiece:
     elif form=="tiny_confession":body=rng.choice((f"Tiny Oracle confession: I have a weakness for *{theme}* when one small detail refuses to behave normally.",f"Confession: give me one unexplained detail in *{theme}* and I will immediately start inventing three harmless theories."))
     elif form=="curious_turn":body=f"The funny thing about *{theme}* is that it starts ordinary and then takes one very strange turn. {tail}"
     else:body=rng.choice((f"There is a clue hiding somewhere in the story of *{theme}*. Nobody seems to agree what it means yet.",f"One small detail about *{theme}* keeps getting overlooked. Maybe that's why it is the interesting part."))
-    endings=("Anyway. I thought the room deserved that little mystery. 🌙","File that under: things worth thinking about after midnight.","No conclusion yet. Which, honestly, makes it better.","The Oracle has theories. The Oracle is keeping the best one to itself. 👀","That is probably enough mystery for one message. Probably.")
+    endings=("Anyway. I thought the room deserved that little mystery. 🌙","No conclusion yet. Which, honestly, makes it better.","The Oracle has theories. The Oracle is keeping the best one to itself. 👀","That is probably enough mystery for one message. Probably.")
     text=f"☾ *MIDNIGHT GOSSIP*\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n\n{body}\n\n_{rng.choice(endings)}_\n\n{_footer()}"
     return CreativePiece("gossip",text,actual_seed)
 
 def generate_story(seed:str|None=None)->CreativePiece:
-    """Create a self-contained micro-story for fallback use; avoid stitched topic templates."""
-    actual_seed=str(seed or time.time_ns());rng=random.Random(_seed(actual_seed,"story-v3"))
-    scene=rng.choice(_STORY_SCENES)
+    actual_seed=str(seed or time.time_ns());rng=random.Random(_seed(actual_seed,"story-v3"));scene=rng.choice(_STORY_SCENES)
     paragraphs=[scene[0],f"{scene[1]} {scene[2]}",f"{scene[3]} {scene[4]}"]
     text=f"☾ *MIDNIGHT STORY*\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n\n"+"\n\n".join(paragraphs)+f"\n\n{_footer()}"
     return CreativePiece("story",text,actual_seed)
 
 def _language_hint(items:list[dict[str,Any]])->str:
-    joined=" ".join(str(x.get("text","")) for x in items[-10:]).lower()
-    hindi=sum(1 for token in (" hai "," hain "," yaar "," bhai "," kya "," nahi "," tum "," mujhe "," aaj "," kal "," bas "," suno ") if token in f" {joined} ")
-    latin=len(re.findall(r"\b(the|and|is|are|what|why|how|this|that|you|we|I)\b",joined))
+    joined=" ".join(str(x.get("text","")) for x in items[-10:]).lower();hindi=sum(1 for token in (" hai "," hain "," yaar "," bhai "," kya "," nahi "," tum "," mujhe "," aaj "," kal "," bas "," suno ") if token in f" {joined} ");latin=len(re.findall(r"\b(the|and|is|are|what|why|how|this|that|you|we|I)\b",joined))
     if hindi>latin:return "natural Hinglish; Hindi/English mix, not translation"
     if hindi and latin:return "balanced natural Hinglish/English mix"
     return "natural English"
 
 def language_hint(items:list[dict[str,Any]])->str:return _language_hint(items)
 
-async def generate_contextual_piece(context_items:list[dict[str,Any]], seed:str|None=None, strategy:str="curiosity")->CreativePiece:
+async def generate_contextual_piece(context_items:list[dict[str,Any]],seed:str|None=None,strategy:str="curiosity")->CreativePiece:
     """Generate one relevant Oracle presence while keeping member content non-invasive."""
-    clean=[str(x.get("text",""))[:300] for x in context_items[-8:] if str(x.get("text","")).strip()]
-    hint=_language_hint(context_items);strategy=(strategy or "curiosity").strip().lower();actual_seed=str(seed or time.time_ns())
+    clean=[str(x.get("text",""))[:300] for x in context_items[-8:] if str(x.get("text","")).strip()];hint=_language_hint(context_items);strategy=(strategy or "curiosity").strip().lower();actual_seed=str(seed or time.time_ns())
     fallback=generate_story(actual_seed) if strategy=="story" else generate_gossip(actual_seed) if strategy=="gossip" else (generate_story(actual_seed) if random.SystemRandom().random()<0.5 else generate_gossip(actual_seed))
     if not clean:return fallback
-    if strategy=="story":rule="Create a tiny original fictional story with a strong opening, a turn and a memorable closing."
+    if strategy=="story":rule=("Tell ONE original micro-story, not a topic essay. Begin inside a concrete moment with a person, place, object or action. "
+        "Let the story discover its meaning through what happens. Include a specific detail, a small turn or reveal, and an ending that changes the feeling of the opening. "
+        "The recent conversation is only optional atmosphere; do not force its topic into the story. If the conversation is about a concept, you may ignore the concept entirely if another story is more natural. "
+        "Never write phrases such as 'the night had the strange atmosphere of', 'the obvious explanation was wrong', 'the second obvious explanation', or 'the story was not'. "
+        "Never explain the moral, theme, writing technique, or why the story is interesting. Never make the story sound like a generated prompt response. Avoid generic cosmic/philosophical filler. "
+        "Do not turn the first sentence into a title-like premise followed by an explanatory paragraph. Write lived-in fiction with sensory detail, choices and consequences.")
     elif strategy=="gossip":rule="Create playful fictional gossip about an idea, mystery, culture, object, place or strange fact. Never about a group member. Never present invented claims as real news. Do not add a safety disclaimer unless needed. Avoid topic labels, 'rabbit hole' headings, fixed openings, fixed closings, and repeated meta-gossip phrases. Choose a natural social shape: a rumour, oddity, curious observation, tiny confession, found thread, unfinished clue, or spontaneous thought."
     elif strategy=="playful_observation":rule="Make one playful, harmless observation about the public conversational atmosphere, without naming, profiling or targeting members."
     else:rule="Make one genuinely interesting conversation-opening thought tied to the public topic; avoid generic greetings and avoid pretending to know private facts."
     prompt=("You are Midnight Oracle, a mysterious but warm social presence. Create ONE original message for a Telegram group. "
-            "Use recent public conversation only as topical atmosphere. Never expose, profile, diagnose, target, or invent personal facts about members. "
-            f"Language: {hint}. Strategy: {strategy}. {rule} "
-            "The result must feel spontaneous, specific and human, not like a template, topic label, trivia heading, disclaimer, or AI explanation. "
-            "For gossip, gossip about the world of ideas rather than people. For storytelling, tell a real-feeling piece of original fiction. "
-            "Do not fabricate breaking news or attribute invented claims to real people. Do not explain your generation process. Return only the message.\nRecent public conversation:\n"
-            +"\n".join(f"- {x}" for x in clean))
+        "Use recent public conversation only as optional atmosphere. Never expose, profile, diagnose, target, or invent personal facts about members. "
+        f"Language: {hint}. Strategy: {strategy}. {rule} "
+        "The result must feel spontaneous, specific and human, not like a template, topic label, trivia heading, disclaimer, or AI explanation. "
+        "For gossip, gossip about the world of ideas rather than people. For storytelling, tell a real-feeling piece of original fiction. "
+        "Do not fabricate breaking news or attribute invented claims to real people. Do not explain your generation process. Return only the message.\n"
+        "QUALITY BAR FOR STORIES: the story must stand on its own if every line of recent conversation is removed. It must not contain a forced topical bridge. Prefer an unusual human detail over a grand abstract statement. "
+        "If the newest conversation contains an interesting topic, borrow only a tiny spark when it naturally belongs; never announce or name the topic as a theme. "
+        "Before returning a story, silently rewrite any sentence that sounds like a stock AI story opener, stock twist, stock moral, or recurring Midnight phrase.\n"
+        "Recent public conversation:\n"+"\n".join(f"- {x}" for x in clean))
     try:
         generated=(await service.generate(prompt,timeout=20.0) or "").strip()[:2200]
-        if generated:return CreativePiece(strategy,generated,actual_seed)
+        if strategy!="story" or _story_quality_ok(generated):return CreativePiece(strategy,generated,actual_seed)
+        retry_prompt=prompt+"\n\nINTERNAL REWRITE: The draft failed the story quality gate. Throw it away completely. Write a different story with a different setting, different first sentence, different central object, and different ending. Do not mention the failed draft. Do not use any banned or stock phrases. Make it feel like a human remembered a strange little incident and decided to tell the room about it."
+        retry=(await service.generate(retry_prompt,timeout=20.0) or "").strip()[:2200]
+        if _story_quality_ok(retry):return CreativePiece(strategy,retry,actual_seed)
     except Exception:pass
     return fallback
 
