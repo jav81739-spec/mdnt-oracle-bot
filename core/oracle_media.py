@@ -23,13 +23,17 @@ MEDIA_COOLDOWN = 12 * 3600
 def _term(text: str, kind: str) -> str:
     value = re.sub(r"[^\w\s'-]", " ", text or "", flags=re.UNICODE)
     words = [w for w in value.split() if len(w) > 2]
-    # Prefer scene-bearing words over Telegram formatting/meta words.
-    stop = {"part", "the", "and", "with", "that", "this", "from", "then", "when", "there", "someone", "nobody", "oracle"}
+    stop = {
+        "part", "the", "and", "with", "that", "this", "from", "then",
+        "when", "there", "someone", "nobody", "oracle", "room", "had",
+        "forgotten", "first", "clue",
+    }
     meaningful = [w for w in words if w.casefold() not in stop]
-    base = " ".join(meaningful[:10] or words[:10])
+    base_words = meaningful[:4] or words[:4]
+    base = " ".join(base_words)[:48].strip()
     if kind == "story":
-        return f"cinematic {base} night"[:120]
-    return f"curious {base}"[:120]
+        return f"cinematic {base} night"[:72].strip()
+    return f"curious {base}"[:72].strip()
 
 
 def _stable_rng(*values: str | int | None) -> random.Random:
@@ -78,7 +82,7 @@ async def _giphy(term: str) -> str | None:
         async with httpx.AsyncClient(timeout=8) as client:
             response = await client.get(
                 "https://api.giphy.com/v1/gifs/search",
-                params={"api_key": key, "q": term, "limit": 8, "rating": "pg-13"},
+                params={"api_key": key, "q": term[:72], "limit": 8, "rating": "pg-13"},
             )
             response.raise_for_status()
             data = response.json().get("data", [])
@@ -88,8 +92,8 @@ async def _giphy(term: str) -> str | None:
             if item.get("images", {}).get("original", {}).get("url")
         ]
         return _stable_rng("giphy", term).choice(urls) if urls else None
-    except Exception:
-        log.exception("ORACLE_MEDIA_GIF_LOOKUP_FAILED")
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning("ORACLE_MEDIA_GIF_LOOKUP_SKIPPED | reason=%s", type(exc).__name__)
         return None
 
 
@@ -123,8 +127,8 @@ async def _wikimedia(term: str) -> str | None:
             if url and mime.startswith("image/") and mime not in {"image/svg+xml", "image/gif"}:
                 urls.append(url)
         return _stable_rng("image", term).choice(urls) if urls else None
-    except Exception:
-        log.exception("ORACLE_MEDIA_IMAGE_LOOKUP_FAILED")
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning("ORACLE_MEDIA_IMAGE_LOOKUP_SKIPPED | reason=%s", type(exc).__name__)
         return None
 
 
