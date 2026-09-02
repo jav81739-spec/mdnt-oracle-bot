@@ -24,16 +24,22 @@ CREATE TABLE IF NOT EXISTS group_identity (group_id INTEGER PRIMARY KEY,humour_l
 CREATE TABLE IF NOT EXISTS secret_events_log (id INTEGER PRIMARY KEY AUTOINCREMENT,group_id INTEGER NOT NULL,event_type TEXT NOT NULL,content TEXT NOT NULL,sent_at REAL NOT NULL);
 """
 
-def now_ts()->float:
-    """Return current UTC Unix timestamp."""; return datetime.now(timezone.utc).timestamp()
+def now_ts()->float:return datetime.now(timezone.utc).timestamp()
+
+def _sqlite_path(value:str)->str:
+    raw=str(value).strip()
+    if raw.startswith("sqlite:///"): return raw[10:]
+    if raw.startswith("sqlite://"): return raw[9:]
+    return raw
 
 class Database:
     """Own one async SQLite connection and its persistence operations."""
     def __init__(self,path:str)->None:
-        """Create a database manager."""; self.path=str(Path(path));self._db:aiosqlite.Connection|None=None;self._lock=asyncio.Lock()
+        self.path=str(Path(_sqlite_path(path)).expanduser());self._db:aiosqlite.Connection|None=None;self._lock=asyncio.Lock()
     async def connect(self)->None:
-        """Open SQLite, apply schema, and run safe additive migrations."""
         if self._db is not None:return
+        parent=Path(self.path).parent
+        if str(parent) not in (".",""):parent.mkdir(parents=True,exist_ok=True)
         self._db=await aiosqlite.connect(self.path);self._db.row_factory=aiosqlite.Row;await self._db.execute('PRAGMA journal_mode=WAL');await self._db.execute('PRAGMA busy_timeout=5000');await self._db.executescript(SCHEMA)
         cols=await self._table_columns('secret_events_log')
         for name,definition in [('revealed_at','TEXT DEFAULT NULL'),('revealed_by','INTEGER DEFAULT NULL'),('teaser_message_id','INTEGER DEFAULT NULL')]:
@@ -48,8 +54,7 @@ class Database:
         if self._db is None:raise RuntimeError('Database is not connected')
         return self._db
     async def execute(self,sql:str,params:tuple=())->None:
-        async with self._lock:
-            await self.db.execute(sql,params);await self.db.commit()
+        async with self._lock:await self.db.execute(sql,params);await self.db.commit()
     async def fetchone(self,sql:str,params:tuple=())->aiosqlite.Row|None:
         async with self._lock:
             async with self.db.execute(sql,params) as cur:return await cur.fetchone()
@@ -58,32 +63,31 @@ class Database:
             async with self.db.execute(sql,params) as cur:return await cur.fetchall()
     async def upsert_member(self,user_id:int,group_id:int,username:str,name:str)->None:
         ts=now_ts();await self.execute("INSERT INTO members(user_id,group_id,username,preferred_name,last_seen,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,group_id) DO UPDATE SET username=excluded.username,last_seen=excluded.last_seen,preferred_name=CASE WHEN members.preferred_name='' THEN excluded.preferred_name ELSE members.preferred_name END",(user_id,group_id,username or '',name or '',ts,ts))
-    async def increment_interaction(self,user_id:int,group_id:int)->None:
-        await self.execute('UPDATE members SET interaction_count=interaction_count+1,last_seen=? WHERE user_id=? AND group_id=?',(now_ts(),user_id,group_id))
+    async def increment_interaction(self,user_id:int,group_id:int)->None:await self.execute('UPDATE members SET interaction_count=interaction_count+1,last_seen=? WHERE user_id=? AND group_id=?',(now_ts(),user_id,group_id))
     async def add_memory(self,user_id:int,group_id:int,memory_type:str,content:str)->None:
-        await self.execute('INSERT INTO member_memory(user_id,group_id,memory_type,content,created_at) VALUES(?,?,?,?,?)',(user_id,group_id,memory_type,content[:500],now_ts()));await self.execute('UPDATE member_memory SET is_active=0 WHERE id IN (SELECT id FROM member_memory WHERE user_id=? AND group_id=? AND memory_type=? AND is_active=1 ORDER BY created_at DESC LIMIT -1 OFFSET 10)',(user_id,group_id,memory_type))
+        value=content.strip()[:500]
+        if not value:return
+        await self.execute('INSERT INTO member_memory(user_id,group_id,memory_type,content,created_at) VALUES(?,?,?,?,?)',(user_id,group_id,memory_type,value,now_ts()));await self.execute('UPDATE member_memory SET is_active=0 WHERE id IN (SELECT id FROM member_memory WHERE user_id=? AND group_id=? AND memory_type=? AND is_active=1 ORDER BY created_at DESC LIMIT -1 OFFSET 10)',(user_id,group_id,memory_type))
     async def memories(self,user_id:int,group_id:int,memory_type:str|None=None,limit:int=10)->list[str]:
         q='SELECT content FROM member_memory WHERE user_id=? AND group_id=? AND is_active=1';p=[user_id,group_id]
         if memory_type:q+=' AND memory_type=?';p.append(memory_type)
         q+=' ORDER BY created_at DESC LIMIT ?';p.append(limit);rows=await self.fetchall(q,tuple(p));return [str(r[0]) for r in rows]
     async def delete_memories_matching(self,user_id:int,group_id:int,term:str)->int:
         async with self._lock:
-            cur=await self.db.execute('UPDATE member_memory SET is_active=0 WHERE user_id=? AND group_id=? AND is_active=1 AND content LIKE ?',(user_id,group_id,f'%{term}%'));await self.db.commit();return cur.rowcount
-    async def set_cooldown(self,scope:str,scope_id:str,kind:str,expires_at:float)->None:
-        await self.execute('INSERT INTO cooldowns(scope,scope_id,cooldown_type,expires_at) VALUES(?,?,?,?) ON CONFLICT(scope,scope_id,cooldown_type) DO UPDATE SET expires_at=excluded.expires_at',(scope,scope_id,kind,expires_at))
+            cur=await self.db.execute('UPDATE member_memory SET is_active=0 WHERE user_id=? AND group_id=? AND is_active=1 AND content LIKE ?',(user_id,group_id,f'%{term.strip()[:100]}%'));await self.db.commit();return cur.rowcount
+    async def set_cooldown(self,scope:str,scope_id:str,kind:str,expires_at:float)->None:await self.execute('INSERT INTO cooldowns(scope,scope_id,cooldown_type,expires_at) VALUES(?,?,?,?) ON CONFLICT(scope,scope_id,cooldown_type) DO UPDATE SET expires_at=excluded.expires_at',(scope,scope_id,kind,expires_at))
     async def cooldown_active(self,scope:str,scope_id:str,kind:str,at:float|None=None)->bool:
         r=await self.fetchone('SELECT expires_at FROM cooldowns WHERE scope=? AND scope_id=? AND cooldown_type=?',(scope,scope_id,kind));return bool(r and float(r[0])>(at or now_ts()))
-    async def prune_cooldowns(self)->None:
-        await self.execute('DELETE FROM cooldowns WHERE expires_at<=?',(now_ts(),))
-    async def get_active_wyr_session(self,group_id:int)->aiosqlite.Row|None:
-        return await self.fetchone("SELECT * FROM game_sessions WHERE group_id=? AND game_type='would_you_rather' AND is_active=1 ORDER BY id DESC LIMIT 1",(group_id,))
+    async def prune_cooldowns(self)->None:await self.execute('DELETE FROM cooldowns WHERE expires_at<=?',(now_ts(),))
+    async def get_active_wyr_session(self,group_id:int)->aiosqlite.Row|None:return await self.fetchone("SELECT * FROM game_sessions WHERE group_id=? AND game_type='would_you_rather' AND is_active=1 ORDER BY id DESC LIMIT 1",(group_id,))
     async def update_wyr_votes(self,poll_id:str,user_id:int,option:int)->bool:
         if option not in (0,1):return False
         async with self._lock:
             await self.db.execute('BEGIN IMMEDIATE')
             try:
+                import json
                 async with self.db.execute("SELECT id,state FROM game_sessions WHERE game_type='would_you_rather' AND is_active=1") as cur:rows=await cur.fetchall()
-                import json;found=None
+                found=None
                 for r in rows:
                     try:s=json.loads(r[1])
                     except (TypeError,ValueError):continue
@@ -110,8 +114,7 @@ class Database:
                 if cur.rowcount!=1:await self.db.rollback();return False
                 await self.db.execute('INSERT INTO game_history(group_id,game_type,winner_user_id,summary,played_at) VALUES(?,?,?,?,?)',(gid,'would_you_rather',None,json.dumps(result),now_ts()));await self.db.commit();return True
             except Exception:await self.db.rollback();raise
-    async def get_secret_event(self,event_id:int)->aiosqlite.Row|None:
-        return await self.fetchone('SELECT * FROM secret_events_log WHERE id=?',(event_id,))
+    async def get_secret_event(self,event_id:int)->aiosqlite.Row|None:return await self.fetchone('SELECT * FROM secret_events_log WHERE id=?',(event_id,))
     async def is_revealed(self,event_id:int)->bool:
         r=await self.fetchone('SELECT revealed_at FROM secret_events_log WHERE id=?',(event_id,));return bool(r and r[0])
     async def mark_revealed(self,event_id:int,revealed_by:int|None,message_id:int|None)->bool:
