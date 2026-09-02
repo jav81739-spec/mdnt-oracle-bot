@@ -17,6 +17,7 @@ from .handlers.world_handler import start_game, end_game, game_callback, handle_
 from .handlers.prediction_handler import predict, predictions
 from .handlers.webapp_handler import handle_webapp_data
 from .handlers.surprise_handler import mysterybox, nightgift, muse, glitch
+from .handlers.voice_handler import voice
 from .scheduler import OracleScheduler
 from .utils.logger import configure_logging, get_logger
 
@@ -35,20 +36,8 @@ def _add_handler_once(app: Application, handler, *, group: int = 0) -> None:
     app.add_handler(handler, group=group)
 
 
-async def _post_init(application: Application) -> None:
-    """Initialize persistence, canonical engines, complete command surfaces and recovery."""
-    db = Database(DATABASE_PATH)
-    await db.connect()
-    mood = MoodEngine()
-    mem = MemoryEngine(db)
-    engine = FriendEngine(db, mood)
-    router = MessageRouter(engine, mem, mood)
-    application.bot_data.update(oracle_db=db, oracle_router=router)
-
-    scheduler = OracleScheduler(application, db)
-    scheduler.start()
-    application.bot_data["oracle_scheduler"] = scheduler
-
+def _register_preserved_surfaces(application: Application) -> None:
+    """Register the complete preserved feature surface before runtime startup."""
     try:
         from handlers.legacy_surface import register_legacy_surface
         result = register_legacy_surface(application)
@@ -56,42 +45,35 @@ async def _post_init(application: Application) -> None:
     except Exception:
         log.exception("LEGACY_SURFACE_WIRING_FAILED")
         raise
+    for label, importer in (
+        ("FRIEND_SURFACE", "handlers.friend_engine"),
+        ("V2_UNIQUE_SURFACE", "core.v2_unique"),
+        ("ORACLE_INSTINCT_SURFACE", "core.oracle_instinct_commands"),
+        ("OWNER_CONSOLE_SURFACE", "handlers.owner_console_v2"),
+        ("MEMORIAL_SURFACE", "handlers.memorial"),
+    ):
+        try:
+            module = __import__(importer, fromlist=["register"])
+            register = getattr(module, "register")
+            register(application)
+        except Exception:
+            log.exception("%s_WIRING_FAILED", label)
+            raise
+    log.info("PRESERVED_SURFACE_READY | legacy=on | friend=on | v2_unique=on | instinct=on | owner=on | memorial=on")
 
-    try:
-        from handlers.friend_engine import register as register_friend_surface
-        register_friend_surface(application)
-    except Exception:
-        log.exception("FRIEND_SURFACE_WIRING_FAILED")
-        raise
 
-    try:
-        from core.v2_unique import register as register_v2_unique
-        register_v2_unique(application)
-    except Exception:
-        log.exception("V2_UNIQUE_SURFACE_WIRING_FAILED")
-        raise
-
-    try:
-        from core.oracle_instinct_commands import register as register_instinct
-        register_instinct(application)
-    except Exception:
-        log.exception("ORACLE_INSTINCT_SURFACE_WIRING_FAILED")
-        raise
-
-    try:
-        from handlers.owner_console_v2 import register as register_owner
-        register_owner(application)
-    except Exception:
-        log.exception("OWNER_CONSOLE_SURFACE_WIRING_FAILED")
-        raise
-
-    try:
-        from handlers.memorial import register as register_memorial
-        register_memorial(application)
-    except Exception:
-        log.exception("MEMORIAL_SURFACE_WIRING_FAILED")
-        raise
-
+async def _post_init(application: Application) -> None:
+    """Initialize persistence, canonical engines, scheduler and runtime bridges."""
+    db = Database(DATABASE_PATH)
+    await db.connect()
+    mood = MoodEngine()
+    mem = MemoryEngine(db)
+    engine = FriendEngine(db, mood)
+    router = MessageRouter(engine, mem, mood)
+    application.bot_data.update(oracle_db=db, oracle_router=router)
+    scheduler = OracleScheduler(application, db)
+    scheduler.start()
+    application.bot_data["oracle_scheduler"] = scheduler
     log.info("AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on | surprise=on | voice=on | legacy_surface=on | v2_unique=on")
 
 
@@ -138,8 +120,7 @@ def build_application() -> Application:
     commands = {
         "start": start, "help": help_command, "oracle": oracle, "truth": truth,
         "memory": memory, "mymemory": mymemory, "forget": forget, "quiet": quiet,
-        "wake": wake, "house": house,
-        "voice": __import__("midnight_oracle.handlers.voice_handler", fromlist=["voice"]).voice,
+        "wake": wake, "house": house, "voice": voice,
         "tod": start_game, "wyr": start_game, "nhie": start_game, "scramble": start_game,
         "predict": predict, "predictions": predictions, "endgame": end_game,
         "mysterybox": mysterybox, "nightgift": nightgift, "muse": muse, "glitch": glitch,
@@ -147,6 +128,7 @@ def build_application() -> Application:
     for name, callback in commands.items():
         _add_handler_once(app, CommandHandler(name, callback), group=-30)
     _install_world_lifecycle(app)
+    _register_preserved_surfaces(app)
     return app
 
 
