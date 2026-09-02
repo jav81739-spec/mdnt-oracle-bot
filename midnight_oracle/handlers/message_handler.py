@@ -88,9 +88,11 @@ class MessageRouter:
             if self.stickers:
                 media=await self.stickers.evaluate(message,signal,ctx)
                 if media.should_send:
-                    if media.sticker_id: await message.reply_sticker(media.sticker_id)
-                    elif media.reaction_emoji: await context.bot.set_message_reaction(group_id,message.message_id,reaction=[ReactionTypeEmoji(media.reaction_emoji)])
-                    await self.stickers.record(group_id,'contextual',media.sticker_id); await self.memory.observe(user.id,group_id,ctx.sender_name,text,True); recent.append(text); await save_recent(storage_client,str(group_id),recent); return
+                    try:
+                        if media.sticker_id: await message.reply_sticker(media.sticker_id)
+                        elif media.reaction_emoji: await context.bot.set_message_reaction(group_id,message.message_id,reaction=[ReactionTypeEmoji(media.reaction_emoji)])
+                        await self.stickers.record(group_id,'contextual',media.sticker_id)
+                    except Exception as exc: await soft_alert(None,'sticker_delivery',exc)
             decision=await self.engine.process_message(message,ctx); await self.memory.observe(user.id,group_id,ctx.sender_name,text,decision.should_reply or signal.social>=0.5); recent.append(text); await save_recent(storage_client,str(group_id),recent)
             if decision.should_reply:
                 reply=await self._generate(group_name,ctx,text,signal,recent); await self._send_reply(update,message,context,reply,chat_id=group_id,user_id=user.id,text=text,direct=False,private=False); await self._announce_achievements(message,user,group_id,'oracle_reply')
