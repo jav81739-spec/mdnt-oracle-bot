@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from .ai import service
-from .oracle_mind import _language_hint
+from .oracle_mind import _language_hint, _story_quality_ok
 
 TABLE = """
 CREATE TABLE IF NOT EXISTS oracle_narratives (
@@ -35,17 +35,17 @@ MAX_PUBLIC_CHARS = 1200
 
 
 def _fallback(kind: str, title: str, part: int, max_parts: int, canon: str) -> str:
-    seeds = (
-        "The room had forgotten the first clue, which was probably why it mattered.",
-        "Someone noticed a detail that had been sitting in plain sight the entire time.",
-        "The obvious explanation lasted exactly until somebody asked one better question.",
-        "The answer arrived quietly, almost embarrassed by how simple it was.",
+    scenes = (
+        "At 12:17, the tea stall owner found a house key inside a lemon. Nobody at the stall recognised it. He put it beside the cash box and carried on serving chai. An hour later, a woman walked in, saw the key, and laughed before she started crying.",
+        "The old lift stopped between floors with three strangers inside. One complained about the heat; another checked the buttons twice. Then the youngest passenger quietly asked why the lift music was playing a song from her grandmother's funeral. Nobody touched the speaker.",
+        "A blue envelope appeared beneath the library door every Thursday. There was never a name on it. This week the librarian opened it and found a photograph of the room taken from inside the locked cupboard behind her desk.",
+        "The shopkeeper kept a broken watch in the window because he liked its face. One rainy afternoon it started ticking again. He turned it over and found a tiny note taped underneath: 'You finally came back.' He had no memory of leaving it there.",
     )
-    line = seeds[min(part - 1, len(seeds) - 1)]
-    ending = "One more part remains." if part < max_parts else "That closes the file."
+    scene = scenes[(part - 1) % len(scenes)]
+    ending = "There was still one thing nobody had explained." if part < max_parts else "By closing time, the mystery had become an ordinary memory."
     if kind == "gossip":
-        return f"☾ *{title}*\n*Part {part}*\n\n{line}\n\n_{ending}_"
-    return f"☾ *{title}*\n*Part {part}*\n\n{line}\n\n_{'The story continues.' if part < max_parts else 'The End.'}_"
+        return f"☾ *{title}*\n*Part {part}*\n\n{scene}\n\n_{ending}_"
+    return f"☾ *{title}*\n*Part {part}*\n\n{scene}\n\n_{ending}_"
 
 
 def _clean_public_text(text: str) -> str:
@@ -53,8 +53,7 @@ def _clean_public_text(text: str) -> str:
     text = re.sub(r"(?im)^.*(?:continuity bible|keep continuity|reveal one meaningful new detail).*$(?:\n|$)", "", text)
     text = re.sub(r"(?im)^.*(?:parts already delivered|return json only|one message, not the whole story|internal continuity).*$(?:\n|$)", "", text)
     text = re.sub(r"(?im)^.*(?:planning instructions|field names|part-generation rules|internal notes).*$(?:\n|$)", "", text)
-    text = re.sub(r"\s{3,}", "\n\n", text).strip()
-    return text[:MAX_PUBLIC_CHARS]
+    return re.sub(r"\s{3,}", "\n\n", text).strip()[:MAX_PUBLIC_CHARS]
 
 
 async def ensure(db) -> None:
@@ -63,10 +62,7 @@ async def ensure(db) -> None:
 
 
 async def active(db, group_id: int):
-    return await db.fetchone(
-        "SELECT * FROM oracle_narratives WHERE group_id=? AND status='active' ORDER BY id DESC LIMIT 1",
-        (group_id,),
-    )
+    return await db.fetchone("SELECT * FROM oracle_narratives WHERE group_id=? AND status='active' ORDER BY id DESC LIMIT 1", (group_id,))
 
 
 async def recent_titles(db, group_id: int, limit: int = 24) -> list[str]:
@@ -97,29 +93,28 @@ async def _new_series(db, group_id: int, kind: str, context: list[dict[str, Any]
     old = await recent_titles(db, group_id)
     recent = ", ".join(old[:12]) or "none"
     public = "\n".join(f"- {str(x.get('text',''))[:240]}" for x in context[-8:])
-    prompt = f"""You are Midnight Oracle writing a serialized Telegram group narrative.
-Create a NEW {kind} series. It must be original and unlike these recently used titles: {recent}.
-The series must feel written by a clever, emotionally perceptive human: specific, warm, occasionally funny, never robotic.
-Language: {language}.
-For story: original fiction only. For gossip: playful world/culture/idea gossip only; never invent allegations about real people or group members and never present fiction as real news.
-Keep the series tight and engaging: usually {TARGET_PARTS} parts, never fewer than {MIN_PARTS} and never more than {MAX_PARTS}. Each part should move the arc forward with a fresh beat, reveal, turn, or consequence. Do not stretch a small idea into extra parts and do not pad with atmosphere or repetition.
-Plan a compact arc: setup, escalation/turn, consequence, ending. Do not cram the whole arc into Part 1, but do not delay the payoff unnecessarily.
-Return JSON only with: title, premise, canon, max_parts. Canon is a concise internal continuity bible, not text to send to users.
-Never copy planning instructions, field names, internal notes, or the continuity bible into the public narrative.
-Recent public room atmosphere:
-{public or '- no usable context'}"""
+    prompt = f"""You are Midnight Oracle. Start a genuinely original serialized {kind} for a Telegram group.
+Do not write an 'AI story'. Write like a person who happened to notice something worth telling.
+Begin with a concrete human moment: somebody doing something, somewhere, with a particular object, sound, mistake, habit, or exchange. Let the meaning emerge from what happens; do not announce a theme.
+The story should have its own odd little logic, believable human behaviour, and one turn that feels discovered rather than manufactured. It may be funny, tender, eerie, mundane, or surprising. Vary the emotional temperature.
+Never use generic midnight/cosmic language, fake profundity, stock suspense, a moral, a lesson, or a philosophical sign-off. Never force the room context into the plot.
+Language: {language}. Recent titles to avoid: {recent}.
+Usually make {TARGET_PARTS} parts, never fewer than {MIN_PARTS} or more than {MAX_PARTS}; only use multiple parts when the idea genuinely earns them.
+Return JSON only: title, premise, canon, max_parts. Canon is private continuity data and must never be written to users.
+Recent room atmosphere, usable only when naturally relevant:
+{public or '- none'}"""
     try:
         obj = _parse_json((await service.generate(prompt, timeout=25.0) or ""))
     except Exception:
         obj = None
     if not obj:
-        title = "The Thing Nobody Noticed" if kind == "story" else "The Rumour With No Address"
-        premise = "A small detail becomes impossible to ignore."
-        canon = "Keep continuity coherent; reveal one meaningful new detail per part."
+        title = "The Key in the Lemon" if kind == "story" else "The Rumour With No Address"
+        premise = "A tiny object turns up where it should not be."
+        canon = "Keep the story grounded in specific human behaviour; do not explain the mystery too early."
         max_parts = TARGET_PARTS
     else:
-        title = str(obj.get("title") or "Midnight File")[:120]
-        premise = str(obj.get("premise") or "A small mystery grows.")[:700]
+        title = str(obj.get("title") or "A Small Strange Thing")[:120]
+        premise = str(obj.get("premise") or "Something ordinary becomes unexpectedly significant.")[:700]
         canon = str(obj.get("canon") or premise)[:1800]
         try:
             max_parts = max(MIN_PARTS, min(MAX_PARTS, int(obj.get("max_parts", TARGET_PARTS))))
@@ -127,64 +122,60 @@ Recent public room atmosphere:
             max_parts = TARGET_PARTS
     if title.casefold() in {x.casefold() for x in old}:
         title = f"{title} · {str(int(now * 1000))[-5:]}"
-    await db.execute(
-        "INSERT INTO oracle_narratives(group_id,kind,title,premise,canon,part_no,max_parts,status,created_at,updated_at,next_at) VALUES(?,?,?,?,?,?,?,'active',?,?,?)",
-        (group_id, kind, title, premise, canon, 0, max_parts, now, now, now),
-    )
+    await db.execute("INSERT INTO oracle_narratives(group_id,kind,title,premise,canon,part_no,max_parts,status,created_at,updated_at,next_at) VALUES(?,?,?,?,?,?,?,'active',?,?,?)", (group_id, kind, title, premise, canon, 0, max_parts, now, now, now))
     return await active(db, group_id)
 
 
-async def _render_part(db, row, context: list[dict[str, Any]], language: str, now: float) -> tuple[str, bool, str, int]:
-    previous_part = int(row[6])
-    part = previous_part + 1
-    max_parts = int(row[7])
-    title = str(row[3]); premise = str(row[4]); canon = str(row[5]); kind = str(row[2])
-    prompt = f"""You are Midnight Oracle. Write Part {part} of a serialized {kind} called {title!r} for a Telegram group.
-This is ONE concise message, not the whole story. Continue the exact continuity and advance the narrative meaningfully.
-Voice: emotionally intelligent, conversational, vivid, restrained, occasionally witty; never robotic or purple-prose heavy.
+async def _generate_part(title: str, premise: str, canon: str, kind: str, part: int, previous_part: int, max_parts: int, context: list[dict[str, Any]], language: str, attempt: int) -> dict[str, Any] | None:
+    prompt = f"""You are Midnight Oracle writing Part {part} of {title!r}.
+Write only the story itself. No preamble, no explanation, no writing commentary.
+Make this feel observed and human, not generated: concrete action, natural dialogue or behaviour where useful, specific sensory detail only when it earns its place, and a turn that follows from the characters rather than from a formula.
+Do not start with 'The night...', 'Someone noticed...', 'The obvious explanation...', 'The answer arrived...', 'It was a strange...', or any generic mystery opener. Do not end with a moral, lesson, 'the story continues', 'the end', or a philosophical summary.
+Do not mention Midnight Oracle inside the narrative. Do not use the words prompt, JSON, continuity, canon, instructions, theme, generation, part-generation, or internal notes.
+Continuity: {premise}
+Private canon: {canon}
+This is part {part} of at most {max_parts}; parts already delivered: {previous_part}.
+Before the final part, leave a real unresolved consequence rather than an artificial cliffhanger. On the final part, resolve what actually matters and stop naturally.
+Aim for 180-650 characters of narrative.
 Language: {language}.
-Premise: {premise}
-Continuity bible (internal only; NEVER repeat or describe it): {canon}
-Parts already delivered: {previous_part} of {max_parts}.
-Keep this part engaging and compact: aim for roughly 120-700 characters of actual narrative text. Prefer one strong scene, reveal, exchange, or turn over several paragraphs of setup. Every sentence should earn its place. No filler, repetition, generic suspense, or dragged-out cliffhanger.
-If this is before Part {MIN_PARTS}, it MUST NOT conclude the series, but it should still provide a satisfying new beat and a clear reason to continue.
-If the narrative has reached its natural ending, finish it rather than inventing another part. Never extend a story just to use the maximum part count.
-The final part must resolve the thread cleanly without a rushed summary.
-Return JSON only: {{"text":"...", "finished": true|false}}.
-The public text must contain only the narrative. Never mention prompts, instructions, continuity, planning, JSON, part-generation rules, internal notes, or the continuity bible. Do not explain what you are doing.
-Recent public atmosphere (use only if naturally relevant):
-{chr(10).join('- '+str(x.get('text',''))[:220] for x in context[-5:])}"""
+Attempt {attempt}: change the scene, opening rhythm, central detail, and ending from any previous attempt.
+Return JSON only: {{"text":"...", "finished": true|false}}."""
     try:
         obj = _parse_json((await service.generate(prompt, timeout=25.0) or ""))
     except Exception:
-        obj = None
-    if obj and str(obj.get("text", "")).strip():
-        text = _clean_public_text(str(obj["text"]).strip())
-        requested_finished = bool(obj.get("finished", False))
-        finished = part >= MIN_PARTS and (requested_finished or part >= max_parts)
-        if not text:
-            text = _fallback(kind, title, part, max_parts, canon)
+        return None
+    if not obj or not str(obj.get("text", "")).strip():
+        return None
+    text = _clean_public_text(str(obj["text"]).strip())
+    if not text or not _story_quality_ok(text):
+        return None
+    return {"text": text, "finished": bool(obj.get("finished", False))}
+
+
+async def _render_part(db, row, context: list[dict[str, Any]], language: str, now: float) -> tuple[str, bool, str, int]:
+    previous_part = int(row[6]); part = previous_part + 1; max_parts = int(row[7])
+    title = str(row[3]); premise = str(row[4]); canon = str(row[5]); kind = str(row[2])
+    generated = None
+    for attempt in range(3):
+        generated = await _generate_part(title, premise, canon, kind, part, previous_part, max_parts, context, language, attempt)
+        if generated:
+            break
+    if generated:
+        text = generated["text"]
+        finished = part >= MIN_PARTS and (generated["finished"] or part >= max_parts)
     else:
         text = _fallback(kind, title, part, max_parts, canon)
         finished = part >= max_parts
     next_at = now + MIN_GAP
-    await db.execute(
-        "UPDATE oracle_narratives SET part_no=?,updated_at=?,next_at=?,status=?,completed_at=? WHERE id=? AND status='active'",
-        (part, now, next_at, "completed" if finished else "active", now if finished else None, int(row[0])),
-    )
+    await db.execute("UPDATE oracle_narratives SET part_no=?,updated_at=?,next_at=?,status=?,completed_at=? WHERE id=? AND status='active'", (part, now, next_at, "completed" if finished else "active", now if finished else None, int(row[0])))
     return text, finished, kind, previous_part
 
 
 async def rollback(db, narrative_id: int, previous_part: int, now: float) -> None:
-    """Undo an un-delivered/rejected part so a transient failure never loses canon."""
-    await db.execute(
-        "UPDATE oracle_narratives SET part_no=?,updated_at=?,next_at=?,status='active',completed_at=NULL WHERE id=?",
-        (previous_part, now, now, int(narrative_id)),
-    )
+    await db.execute("UPDATE oracle_narratives SET part_no=?,updated_at=?,next_at=?,status='active',completed_at=NULL WHERE id=?", (previous_part, now, now, int(narrative_id)))
 
 
 async def maybe_deliver(db, application, group_id: int, kind: str, context: list[dict[str, Any]], now: float) -> tuple[str | None, str, str | None, int | None, int | None]:
-    """Return one due narrative part; a group has only one active narrative at once."""
     await ensure(db)
     row = await active(db, group_id)
     if row:
