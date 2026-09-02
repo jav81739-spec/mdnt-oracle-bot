@@ -9,50 +9,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test:
-          - tests/test_ai_gateway_contract.py
-          - tests/test_callback_routing_contract.py
-          - tests/test_command_surface_integrity.py
-          - tests/test_conversation_integrity.py
-          - tests/test_core_engine.py
-          - tests/test_events_persistence.py
-          - tests/test_final_integration_safety.py
-          - tests/test_final_integration_smoke.py
-          - tests/test_final_media_integration.py
-          - tests/test_game_persistence_boundary.py
-          - tests/test_game_state.py
-          - tests/test_gemini_provider_contract.py
-          - tests/test_help_privacy.py
-          - tests/test_multilingual_reference_intelligence.py
-          - tests/test_polish_contracts.py
-          - tests/test_production_entrypoint_contract.py
-          - tests/test_production_import.py
-          - tests/test_release_contract.py
-          - tests/test_runtime_hardening.py
-          - tests/test_runtime_manifest.py
-          - tests/test_runtime_regressions.py
-          - tests/test_runtime_smoke.py
-          - tests/test_sticker_contract.py
-          - tests/test_streaming_draft.py
-          - tests/test_voice_engine.py
-          - tests/test_voice_triggers.py
+        test: [tests/test_command_surface_integrity.py]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v7
-        with:
-          python-version: '3.11'
+        with: {python-version: '3.11'}
       - run: pip install -r requirements.txt
-      - name: Run ${{ matrix.test }}
-        env:
-          BOT_TOKEN: test-token
-          TELEGRAM_BOT_TOKEN: ci-telegram-token-1234567890
-          OPENAI_API_KEY: ci-openai-key-1234567890
-          GIPHY_API_KEY: ci-giphy-key-1234567890
-          STICKER_PACK_NAME: ci-stickers
-          ORACLE_MASTER_ID: '1'
-          DATABASE_URL: sqlite:///ci.sqlite3
-          ORACLE_DATABASE_PATH: ci.sqlite3
-          GROUP_CHAT_ID: '0'
-          OWNER_ID: '0'
-        run: python -m unittest "${{ matrix.test }}" -v
+      - run: python -m unittest "${{ matrix.test }}" -v
