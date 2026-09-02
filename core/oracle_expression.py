@@ -30,8 +30,6 @@ _BANNED = (
     "debug message", "debug output", "placeholder message", "placeholder output",
 )
 
-# These commands are factual/stateful. Their mechanics and exact results should
-# reach Telegram untouched; cosmetic AI rewriting is deliberately not allowed.
 MECHANICAL_COMMANDS = {
     "id", "info", "remind", "groupinfo", "afk", "report", "stats", "topactive",
     "msgcount", "balance", "daily", "richest", "coinboard", "rob", "withdraw",
@@ -206,10 +204,11 @@ class ContextProxy:
 
     def __init__(self, context, command: str, expression_context: str):
         self._context = context
-        self._bot_proxy = BotProxy(context.bot, command, expression_context)
+        bot = getattr(context, "bot", None)
+        self._bot_proxy = BotProxy(bot, command, expression_context) if bot else None
 
     def __getattr__(self, name):
-        if name == "bot":
+        if name == "bot" and self._bot_proxy is not None:
             return self._bot_proxy
         return getattr(self._context, name)
 
