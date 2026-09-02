@@ -9,30 +9,18 @@ from core.chat import generate_reply as core_generate_reply
 from core.oracle_mind import local_reply, recall_memories, save_explicit_memory
 from core.oracle_media import CHAT_MEDIA_COOLDOWN, choose_media
 from handlers import storage
-
 log=logging.getLogger("midnight.chat")
 chat_enabled:dict[str,bool]={}; chat_persona:dict[str,str]={}; chat_history:dict[str,list[dict[str,str]]]={}; _last_reply_time:dict[str,float]={}; _last_media_time:dict[str,float]={}
 DEFAULT_PERSONA="friendly, casual, playful, dryly funny, observant, naturally adaptive"
 MAX_HISTORY=12; COOLDOWN_SECONDS=8; _AI_CONCURRENCY=2; _ai_slots=asyncio.Semaphore(_AI_CONCURRENCY); STORAGE_KEY="chat_settings"
 _CANNED_REPLIES={"i'm listening. no rush.","i’m listening. no rush.","i'm listening.","i’m listening.","i'm here. no rush.","i’m here. no rush.","how can i help you today?","let's unpack that.","i understand.","certainly.","absolutely"}
-_TRIGGER_REPLIES=(
- (re.compile(r"^(?:gm|good\s+morning|suprabhat)\s*[!.😂😭🥲❤️]*$",re.I),("Morning. ☕","Good morning 😌","Morning, finally.")),
- (re.compile(r"^(?:gn|good\s+night|shubh\s*ratri)\s*[!.🌙😭]*$",re.I),("Goodnight. Don't start a new crisis before sleeping. 😭","Night 🌙","Go sleep, menace.")),
- (re.compile(r"^(?:lol|lmao|lmfao|haha+|hehe+)\s*[!.😂🤣😭]*$",re.I),("😭 what is so funny?","Okay, that got you bad 😂","Lmao 😭")),
- (re.compile(r"^(?:bruh|bro|bhai|oye)\s*[!.?😂😭]*$",re.I),("Kyaaa. 😭","Haan bhai?","Bolo, kya hua?")),
- (re.compile(r"^(?:wtf|what\s+the\s+hell|what\s+is\s+this)\s*[!?😂😭]*$",re.I),("Exactly my question. 😭","Yeah… that's questionable.","I have several concerns. 😂")),
- (re.compile(r"^(?:thanks|thank\s+you|thx|ty)\s*[!.❤️😭]*$",re.I),("Haan haan. 😌","Anytime.","You're good.")),
- (re.compile(r"^(?:sorry|my\s+bad|meri\s+galti)\s*[!.🥲😭]*$",re.I),("Theek hai. 😌","Chal, forgiven.","Haan, noted.")),
- (re.compile(r"^(?:chup|shut\s+up|bas\s+kar)\s*[!.😂😭]*$",re.I),("Tu pehle chup ho. 😭","Nahi.","Absolutely not. 😂")),
- (re.compile(r"^(?:acha|achha|accha|ohh?|hmm+|haan|han)\s*[!.?😭😂]*$",re.I),("Haan?","Hmm?","Bolo.")),)
-
+_TRIGGER_REPLIES=((re.compile(r"^(?:gm|good\s+morning|suprabhat)\s*[!.😂😭🥲❤️]*$",re.I),("Morning. ☕","Good morning 😌","Morning, finally.")),(re.compile(r"^(?:gn|good\s+night|shubh\s*ratri)\s*[!.🌙😭]*$",re.I),("Goodnight. Don't start a new crisis before sleeping. 😭","Night 🌙","Go sleep, menace.")),(re.compile(r"^(?:lol|lmao|lmfao|haha+|hehe+)\s*[!.😂🤣😭]*$",re.I),("😭 what is so funny?","Okay, that got you bad 😂","Lmao 😭")),(re.compile(r"^(?:bruh|bro|bhai|oye)\s*[!.?😂😭]*$",re.I),("Kyaaa. 😭","Haan bhai?","Bolo, kya hua?")),(re.compile(r"^(?:wtf|what\s+the\s+hell|what\s+is\s+this)\s*[!?😂😭]*$",re.I),("Exactly my question. 😭","Yeah… that's questionable.","I have several concerns. 😂")),(re.compile(r"^(?:thanks|thank\s+you|thx|ty)\s*[!.❤️😭]*$",re.I),("Haan haan. 😌","Anytime.","You're good.")),(re.compile(r"^(?:sorry|my\s+bad|meri\s+galti)\s*[!.🥲😭]*$",re.I),("Theek hai. 😌","Chal, forgiven.","Haan, noted.")),(re.compile(r"^(?:chup|shut\s+up|bas\s+kar)\s*[!.😂😭]*$",re.I),("Tu pehle chup ho. 😭","Nahi.","Absolutely not. 😂")),(re.compile(r"^(?:acha|achha|accha|ohh?|hmm+|haan|han)\s*[!.?😭😂]*$",re.I),("Haan?","Hmm?","Bolo.")))
 def _trigger_reply(text:str)->str|None:
  value=(text or "").strip()
  if len(value)>42:return None
  for pattern,replies in _TRIGGER_REPLIES:
   if pattern.fullmatch(value):return _random.choice(replies)
  return None
-
 def _response_shape(text:str,history:list[dict[str,str]])->str:
  value=(text or "").strip();low=value.casefold();words=len(value.split())
  if _trigger_reply(value):return "Micro-turn: 1 short fragment or sentence. Do not explain the trigger."
@@ -41,7 +29,6 @@ def _response_shape(text:str,history:list[dict[str,str]])->str:
  if any(x in low for x in ("sad","upset","hurt","cry","crying","miss","worried","scared","love","hate","breakup","😭","🥲")):return "Emotional-turn: can be a little fuller if the moment needs it, but stay grounded; do not become a therapy monologue."
  if words>=35:return "Deep-turn: a few connected sentences or a compact paragraph is allowed if the message genuinely contains multiple points. Address the important points, not every word."
  return "Normal-turn: vary naturally between a short reaction and 2-3 sentences. Never pad just to look intelligent."
-
 def _natural_fallback(text:str,history:list[dict[str,str]],memories:list[str]|None=None)->str:
  value=(text or "").strip();low=value.casefold();trigger=_trigger_reply(value)
  if trigger:return trigger
@@ -54,14 +41,12 @@ def _natural_fallback(text:str,history:list[dict[str,str]],memories:list[str]|No
  if "?" in value:return _random.choice(("Hmm — interesting.","Haan, good question.","Wait, isme actually ek angle hai…"))
  if memories:return _random.choice(("Haan, samajh gaya.","Yeah, got you.","Hmm, I'm with you."))
  return _random.choice(("Hmm.","Haan, bol.","Go on.","Okay.","Interesting."))
-
 def _sentence_keys(text:str)->list[str]:
  chunks=re.split(r"(?<=[.!?।])\s+|\n+",(text or "").strip());keys=[]
  for chunk in chunks:
   cleaned=re.sub(r"[^\w\u0980-\u09ff]+"," ",chunk.casefold()).strip()
   if len(cleaned.split())>=3:keys.append(cleaned)
  return keys
-
 def _has_repetition(reply:str,history:list[dict[str,str]]|None=None)->bool:
  keys=_sentence_keys(reply)
  if len(keys)!=len(set(keys)):return True
@@ -76,13 +61,11 @@ def _has_repetition(reply:str,history:list[dict[str,str]]|None=None)->bool:
  previous=[_sentence_keys(str(t.get("text",""))) for t in (history or [])[-4:] if t.get("role")=="assistant"]
  current=set(keys)
  return bool(current and any(current.intersection(set(old)) for old in previous))
-
 def _usable_reply(reply:str|None,user_text:str,history:list[dict[str,str]]|None=None)->str|None:
  value=(reply or "").strip()
  if not value or value.casefold() in _CANNED_REPLIES:return None
  if _has_repetition(value,history):return None
  return value
-
 async def load_from_storage():
  global chat_enabled,chat_persona
  saved=await storage.load(STORAGE_KEY,{"enabled":{},"persona":{}})
@@ -97,7 +80,6 @@ async def toggle_chat(update,context):
  await update.message.reply_text("Chat mode is now ON ✅" if enabled[cid] else "Chat mode is now OFF ❌",reply_to_message_id=update.message.message_id)
 async def set_persona(update,context):
  cid=str(update.effective_chat.id);style=(" ".join(context.args).strip() if context.args else DEFAULT_PERSONA)[:300];chat_persona[cid]=style;await _persist();await update.message.reply_text("Persona updated. 🌙",reply_to_message_id=update.message.message_id)
-
 async def _maybe_send_context_media(update,context,text,reply,cid)->bool:
  now=time.monotonic()
  if now-_last_media_time.get(cid,0.0)<CHAT_MEDIA_COOLDOWN:return False
@@ -110,12 +92,10 @@ async def _maybe_send_context_media(update,context,text,reply,cid)->bool:
   _last_media_time[cid]=now
   return True
  except Exception:log.exception("CHAT_CONTEXT_MEDIA_FAILED | chat=%s",cid);return False
-
 async def auto_reply(update,context):
  cid=str(update.effective_chat.id);msg=update.effective_message
  if not msg or not getattr(msg,"text",None):return
- text=msg.text.strip();username=getattr(context.bot,"username",None)
- mentioned=bool(username and f"@{username}".casefold() in text.casefold());replied=bool(msg.reply_to_message and msg.reply_to_message.from_user and msg.reply_to_message.from_user.id==context.bot.id);explicitly_summoned=mentioned or replied or "midnight" in text.casefold() or "oracle" in text.casefold()
+ text=msg.text.strip();username=getattr(context.bot,"username",None);mentioned=bool(username and f"@{username}".casefold() in text.casefold());replied=bool(msg.reply_to_message and msg.reply_to_message.from_user and msg.reply_to_message.from_user.id==context.bot.id);explicitly_summoned=mentioned or replied or "midnight" in text.casefold() or "oracle" in text.casefold()
  if not chat_enabled.get(cid,False) and not explicitly_summoned:return
  now=time.monotonic()
  if now-_last_reply_time.get(cid,0)<COOLDOWN_SECONDS:return
@@ -142,13 +122,11 @@ async def auto_reply(update,context):
  except Exception:log.exception("CHAT_SEND_FAILED | chat=%s",cid)
  media_sent=await _maybe_send_context_media(update,context,text,reply_text,cid)
  if not media_sent:await _maybe_send_context_sticker(update,context,text,reply_text,cid)
-
 def _local_chat(text,history):return _natural_fallback(text,history,None)
 async def generate_reply(user_text,persona,history):return await core_generate_reply(user_text,persona,history)
 def ai_service_configured():
  from core.ai import service
  return bool(service.api_key)
-
 def _sticker_ids()->list[str]:return [x.strip() for x in os.getenv("ORACLE_STICKER_FILE_IDS","").split(",") if x.strip()]
 _recent_stickers={};_STICKER_CUES=("😂","🤣","😭","🥲","lol","lmao","haha","congrats","congratulations","damn","wtf","bruh","bhai","oye","chup","bas kar","love you","goodnight","good morning")
 def _sticker_is_warranted(text:str,reply:str)->bool:
@@ -203,11 +181,21 @@ async def maybe_react_to_message(update,context):
  if not update.message or not chat_enabled.get(str(update.effective_chat.id),False) or _random.random()>0.08:return
  try:await context.bot.set_message_reaction(chat_id=update.effective_chat.id,message_id=update.message.message_id,reaction=_random.choice(REACTION_EMOJIS))
  except Exception:pass
-async def send_text_with_gif(update,context,text,term=None):
- if update.message:await update.message.reply_text(text,reply_to_message_id=update.message.message_id)
- if term:
-  url=await get_gif_url(term)
-  if url:await context.bot.send_animation(update.effective_chat.id,url,reply_to_message_id=update.message.message_id if update.message else None)
+async def send_text_with_gif(update,context,text=None,term=None):
+ # Supports both the normal Telegram handler signature and the established
+ # friendship compatibility call (bot, chat_id, text, term).
+ if hasattr(update,"message") or hasattr(update,"effective_message"):
+  message=update.effective_message
+  if message:await message.reply_text(text or "",reply_to_message_id=message.message_id)
+  if term:
+   url=await get_gif_url(term)
+   if url:await context.bot.send_animation(update.effective_chat.id,url,reply_to_message_id=message.message_id if message else None)
+  return
+ bot=update;chat_id=context;actual_text=text or "";actual_term=term
+ await bot.send_message(chat_id,actual_text)
+ if actual_term:
+  url=await get_gif_url(actual_term)
+  if url:await bot.send_animation(chat_id,url)
 async def send_mood_gif(update,context):return await send_random_gif(update,context)
 async def gif_reply(update,context):return await send_random_gif(update,context)
 async def sticker_reply(update,context):return await send_random_sticker(update,context)
