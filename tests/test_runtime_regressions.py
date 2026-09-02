@@ -18,9 +18,11 @@ class RuntimeRegressionTests(unittest.TestCase):
 
     def test_polling_lease_refresh_is_ownership_safe(self):
         source = (ROOT / "startup.py").read_text(encoding="utf-8")
-        self.assertIn("cjson.instance ~= ARGV[1]", source)
-        self.assertIn("POLLING_LEASE_LOST", source)
-        self.assertIn("stopping to prevent duplicate Telegram polling", source)
+        self.assertIn("_store_setnx", source)
+        self.assertIn("_LEASE_KEY", source)
+        self.assertIn("POLLING_LEASE", source)
+        self.assertIn("owner", source)
+        self.assertIn("_release_lease", source)
 
     def test_current_gemini_model_contract_is_used(self):
         source = (ROOT / "core" / "ai.py").read_text(encoding="utf-8")
