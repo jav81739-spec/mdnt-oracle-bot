@@ -31,11 +31,9 @@ class RuntimeSmokeTests(unittest.TestCase):
     def test_production_entrypoint_activates_v2_engine(self):
         import bot
         import handlers.deathgames_v2 as v2
-        import midnight_oracle.main as canonical_main
         # The V2 binding is part of production application construction, not
-        # import-time side effects. Supply a CI-only token to the canonical
-        # configuration binding so construction can be tested without secrets.
-        canonical_main.BOT_TOKEN = "123456789:ci-test-token"
+        # import-time side effects. Build the application before asserting the
+        # live compatibility surface.
         app = bot.build_application()
         self.assertIs(bot.legacy_bot.deathgames, v2)
         for name in ("survive", "revive", "deathstatus", "roulette", "deathgame", "joingame", "startround", "kill", "vote", "endgame"):

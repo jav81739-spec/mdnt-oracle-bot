@@ -1,6 +1,6 @@
 """Bounded, consent-oriented member memory."""
 from __future__ import annotations
-
+import re
 from dataclasses import dataclass
 from .config import MEMORY_INTEREST_LIMIT, MEMORY_THEME_LIMIT, MEMORY_WORRY_LIMIT, MEMORY_WIN_LIMIT, MEMORY_JOKE_LIMIT
 from .database import Database
@@ -21,12 +21,14 @@ class MemberMemory:
 class MemoryEngine:
     """Manage bounded member memories without storing full chat transcripts."""
 
+    _SENSITIVE = re.compile(r"\b(password|otp|one[- ]time password|token|api key|secret|seed phrase|private key|upi|account number|card number|cvv|pin)\b", re.I)
+    _NOISY = re.compile(r"^(lol+|haha+|hahaha+|ok+|okay+|hmm+|yes+|no+|bro+|bhai+|guys+|wtf+|lmao+)[!? .]*$", re.I)
+
     def __init__(self, db: Database) -> None:
-        """Bind memory operations to a database."""
         self.db = db
 
     async def observe(self, user_id: int, group_id: int, name: str, text: str, meaningful: bool) -> None:
-        """Record a member interaction, refresh relationship tier, and extract conservative memory signals."""
+        """Record bounded relationship state and only durable, non-sensitive memory signals."""
         await self.db.upsert_member(user_id, group_id, "", name)
         await self.db.increment_interaction(user_id, group_id)
         row = await self.db.fetchone("SELECT interaction_count FROM members WHERE user_id=? AND group_id=?", (user_id, group_id))
@@ -34,16 +36,22 @@ class MemoryEngine:
         await self.db.execute("UPDATE members SET relationship_tier=? WHERE user_id=? AND group_id=?", (self.relationship_tier(count), user_id, group_id))
         if not meaningful:
             return
-        low = text.casefold()
-        if any(x in low for x in ("i like ", "i love ", "mera favourite", "my favorite")):
-            await self.db.add_memory(user_id, group_id, "interest", text)
-        if any(x in low for x in ("worried", "tension", "stress", "darr", "scared", "nervous")):
-            await self.db.add_memory(user_id, group_id, "worry", text)
-        if any(x in low for x in ("ho gaya", "finally", "cleared", "done", "got it", "mil gaya")):
-            await self.db.add_memory(user_id, group_id, "win", text)
-        if any(x in low for x in ("haha", "lol", "😂", "🤣", "💀")):
-            await self.db.add_memory(user_id, group_id, "joke", text)
-        await self.db.add_memory(user_id, group_id, "theme", text)
+        value = " ".join((text or "").split()).strip()
+        if len(value) < 12 or len(value) > 240 or self._SENSITIVE.search(value) or self._NOISY.fullmatch(value):
+            return
+        low = value.casefold()
+        if any(x in low for x in ("i like ", "i love ", "mera favourite", "my favorite", "my favourite", "i enjoy ")):
+            await self.db.add_memory(user_id, group_id, "interest", value)
+        if any(x in low for x in ("worried", "tension", "stress", "darr", "scared", "nervous", "anxious")):
+            await self.db.add_memory(user_id, group_id, "worry", value)
+        if any(x in low for x in ("ho gaya", "finally", "cleared", "done", "got it", "mil gaya", "passed")):
+            await self.db.add_memory(user_id, group_id, "win", value)
+        if any(x in low for x in ("haha", "lol", "😂", "🤣", "💀")) and len(value) <= 120:
+            await self.db.add_memory(user_id, group_id, "joke", value)
+        # Themes are durable topics, not a transcript. Only keep messages that look like
+        # an actual topic or preference and never store arbitrary conversational chatter.
+        if any(marker in low for marker in ("i'm into ", "i am into ", "these days", "lately", "working on ", "learning ", "watching ", "playing ", "trying to ")):
+            await self.db.add_memory(user_id, group_id, "theme", value)
 
     async def get(self, user_id: int, group_id: int) -> MemberMemory:
         """Load a bounded memory profile for a member."""
@@ -58,7 +66,7 @@ class MemoryEngine:
 
     @staticmethod
     def relationship_tier(interactions: int) -> str:
-        """Map interaction count to the bounded relationship tiers."""
+        """Map interaction count to bounded relationship tiers."""
         if interactions <= 3: return "new"
         if interactions <= 10: return "familiar"
         if interactions <= 30: return "regular"

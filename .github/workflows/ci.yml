@@ -1,17 +1,15 @@
 name: Midnight Oracle CI
 
 on:
-  workflow_dispatch:
-  workflow_call:
   push:
     branches:
       - main
       - 'rebuild/**'
-      - 'integration/**'
   pull_request:
     branches:
       - main
       - 'rebuild/**'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,10 +20,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: pip
@@ -34,7 +32,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          python -m pip install pytest
 
       - name: Compile all Python
         run: python -m compileall -q .
@@ -45,20 +42,24 @@ jobs:
       - name: Import smoke test
         env:
           BOT_TOKEN: test-token
+          TELEGRAM_BOT_TOKEN: ci-telegram-token-1234567890
+          OPENAI_API_KEY: ci-openai-key-1234567890
+          GIPHY_API_KEY: ci-giphy-key-1234567890
+          STICKER_PACK_NAME: ci-stickers
+          ORACLE_MASTER_ID: '1'
+          DATABASE_URL: sqlite:///ci.sqlite3
           GROUP_CHAT_ID: '0'
           OWNER_ID: '0'
         run: |
           python - <<'PY'
           import importlib
           modules = [
-              'midnight_oracle.main',
               'midnight_oracle.friend_engine',
               'midnight_oracle.handlers.message_handler',
-              'midnight_oracle.handlers.help_command',
               'midnight_oracle.database',
               'midnight_oracle.generators.reply_generator',
-              'handlers.runtime_registry',
-              'handlers.legacy_surface',
+              'midnight_oracle.generators.social_voice',
+              'handlers.organic_relationships',
           ]
           for name in modules:
               importlib.import_module(name)
@@ -68,6 +69,12 @@ jobs:
       - name: Run tests
         env:
           BOT_TOKEN: test-token
+          TELEGRAM_BOT_TOKEN: ci-telegram-token-1234567890
+          OPENAI_API_KEY: ci-openai-key-1234567890
+          GIPHY_API_KEY: ci-giphy-key-1234567890
+          STICKER_PACK_NAME: ci-stickers
+          ORACLE_MASTER_ID: '1'
+          DATABASE_URL: sqlite:///ci.sqlite3
           GROUP_CHAT_ID: '0'
           OWNER_ID: '0'
-        run: python -m pytest -q
+        run: python -m unittest discover -s tests -v

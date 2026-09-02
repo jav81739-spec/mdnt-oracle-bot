@@ -6,21 +6,15 @@ from telegram.ext import ContextTypes
 from ..generators.truth_generator import question
 from ..memory_engine import MemoryEngine
 
-def _house_url() -> str:
-    return (os.getenv("ORACLE_WEBAPP_URL") or os.getenv("ORACLE_MINI_APP_URL") or os.getenv("MINI_APP_URL") or "").strip()
+def _house_url() -> str:return (os.getenv("ORACLE_WEBAPP_URL") or os.getenv("ORACLE_MINI_APP_URL") or os.getenv("MINI_APP_URL") or "").strip()
 
 async def start(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    """Welcome naturally without narrating surveillance or internal machinery."""
-    user=update.effective_user
-    name=f"@{user.username}" if user and user.username else (user.first_name if user else "you")
-    if update.effective_chat and update.effective_chat.type=="private":
-        text=f"🌙 *Midnight Oracle*\n\nHey, {name}.\n\nI'm around for conversation, games, strange little moments and whatever the room turns into.\n\nTry /help when you want the map."
-    else:
-        text=f"🌙 *Midnight Oracle*\n\nHey, {name}. I'm in.\n\nI'll join the room when there's actually something worth adding."
+    user=update.effective_user; name=f"@{user.username}" if user and user.username else (user.first_name if user else "you")
+    if update.effective_chat and update.effective_chat.type=="private":text=f"🌙 *Midnight Oracle*\n\nHey, {name}.\n\nI'm around for conversation, games, strange little moments and whatever the room turns into.\n\nTry /help when you want the map."
+    else:text=f"🌙 *Midnight Oracle*\n\nHey, {name}. I'm in.\n\nI'll join the room when there's actually something worth adding."
     await update.effective_message.reply_text(text,parse_mode="Markdown")
 
 async def help_command(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    """Show the public command map without theatrical implementation claims."""
     text="""🌙 *MIDNIGHT ORACLE*
 ━━━━━━━━━━━━━━━━━━
 _conversation, games, readings, chaos and the occasional unexpected moment._
@@ -40,7 +34,7 @@ _conversation, games, readings, chaos and the occasional unexpected moment._
 `/trivia` `/wordle` `/wordleguess` `/ratethis` `/impostor` `/revealimpostor`
 
 ━━━━ *👥 PEOPLE* ━━━━
-`/bestie` `/duo` `/friendship` `/ship` `/tagbestie` `/squad` `/loyalty` `/friendshiptest`
+`/bestie` `/duo` `/friendship` `/ship` `/tagbestie` `/squad` `/loyalty`
 `/hug` `/pat` `/highfive` `/slap` `/kiss` `/poke` `/cuddle` `/wave` `/bite` `/tickle`
 
 ━━━━ *💘 MATCHMAKING* ━━━━
@@ -76,47 +70,35 @@ _conversation, games, readings, chaos and the occasional unexpected moment._
 _private and owner controls stay private._"""
     await update.effective_message.reply_text(text,parse_mode="Markdown")
 
-async def oracle(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    await update.effective_message.reply_text("☾ I'm here. What's on your mind?")
-
+async def oracle(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:await update.effective_message.reply_text("☾ I'm here. What's on your mind?")
 async def truth(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    text=question(context.args[0] if context.args else 'light'); await update.effective_message.reply_text(f"☾ {text}",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('Answer',callback_data='truth:answer'),InlineKeyboardButton('Pass',callback_data='truth:pass')]]))
-
+    text=question(context.args[0] if context.args else 'light');await update.effective_message.reply_text(f"☾ {text}",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('Answer',callback_data='truth:answer'),InlineKeyboardButton('Pass',callback_data='truth:pass')]]))
 async def memory(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    db=context.application.bot_data.get('oracle_db')
-    if not db:return
-    rows=await db.fetchall("SELECT memory_type,COUNT(*) FROM member_memory WHERE group_id=? AND is_active=1 GROUP BY memory_type",(update.effective_chat.id,)); await update.effective_message.reply_text('☾ Group memory: '+(', '.join(f'{r[0]} {r[1]}' for r in rows) or 'quiet for now')+'.')
-
+    await update.effective_message.reply_text("☾ I keep the room's moments quietly — not a public ledger. Ask /mymemory for what belongs to you.")
 async def mymemory(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    db=context.application.bot_data.get('oracle_db'); u=update.effective_user
+    db=context.application.bot_data.get('oracle_db');u=update.effective_user
     if not db or not u:return
     gid=update.effective_chat.id if update.effective_chat.type!='private' else 0
     if not gid:
-        row=await db.fetchone("SELECT group_id FROM members WHERE user_id=? ORDER BY last_seen DESC LIMIT 1",(u.id,)); gid=int(row[0]) if row else 0
-    if not gid:await update.effective_message.reply_text("☾ We haven't built a memory together yet.");return
-    profile=await MemoryEngine(db).get(u.id,gid); items=list(profile.interests[:2])+list(profile.wins[:2])+list(profile.themes[:2]); await update.effective_message.reply_text('☾ What I remember\n'+('\n'.join('• '+x for x in items) if items else 'Nothing heavy stored. Just the moments that mattered.'))
-
+        row=await db.fetchone("SELECT group_id FROM members WHERE user_id=? ORDER BY last_seen DESC LIMIT 1",(u.id,));gid=int(row[0]) if row else 0
+    if not gid:return await update.effective_message.reply_text("☾ We haven't built a memory together yet.")
+    profile=await MemoryEngine(db).get(u.id,gid);items=list(profile.interests[:2])+list(profile.wins[:2])+list(profile.themes[:2]);await update.effective_message.reply_text('☾ What I remember\n'+('\n'.join('• '+x for x in items) if items else 'Nothing heavy stored. Just the moments that mattered.'))
 async def forget(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    db=context.application.bot_data.get('oracle_db'); u=update.effective_user
-    if not db or not u or not context.args:await update.effective_message.reply_text('Tell me what to forget: /forget <topic>');return
+    db=context.application.bot_data.get('oracle_db');u=update.effective_user
+    if not db or not u or not context.args:return await update.effective_message.reply_text('Tell me what to forget: /forget <topic>')
     gid=update.effective_chat.id if update.effective_chat.type!='private' else 0
     if not gid:
         row=await db.fetchone("SELECT group_id FROM members WHERE user_id=? ORDER BY last_seen DESC LIMIT 1",(u.id,));gid=int(row[0]) if row else 0
     n=await db.delete_memories_matching(u.id,gid,' '.join(context.args)) if gid else 0;await update.effective_message.reply_text('☾ Forgotten.' if n else "☾ I couldn't find that memory.")
-
 async def quiet(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
     if update.effective_chat and update.effective_user:
         m=await context.bot.get_chat_member(update.effective_chat.id,update.effective_user.id)
-        if m.status in {'administrator','creator'}: await context.application.bot_data['oracle_db'].set_cooldown('group',str(update.effective_chat.id),'ambient',__import__('time').time()+7200); await update.effective_message.reply_text('☾ Quiet mode. I will stay out for two hours.')
-
+        if m.status in {'administrator','creator'}:await context.application.bot_data['oracle_db'].set_cooldown('group',str(update.effective_chat.id),'ambient',__import__('time').time()+7200);await update.effective_message.reply_text('☾ Quiet mode. I will stay out for two hours.')
 async def wake(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
     if update.effective_chat and update.effective_user:
         m=await context.bot.get_chat_member(update.effective_chat.id,update.effective_user.id)
-        if m.status in {'administrator','creator'}: await context.application.bot_data['oracle_db'].execute("DELETE FROM cooldowns WHERE scope='group' AND scope_id=? AND cooldown_type='ambient'",(str(update.effective_chat.id),)); await update.effective_message.reply_text("☾ I'm awake.")
-
+        if m.status in {'administrator','creator'}:await context.application.bot_data['oracle_db'].execute("DELETE FROM cooldowns WHERE scope='group' AND scope_id=? AND cooldown_type='ambient'",(str(update.effective_chat.id),));await update.effective_message.reply_text("☾ I'm awake.")
 async def house(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
     url=_house_url()
-    if not url:
-        await update.effective_message.reply_text('☾ Oracle House is quiet for now.')
-        return
+    if not url:return await update.effective_message.reply_text('☾ Oracle House is quiet for now.')
     await update.effective_message.reply_text('☾ *Oracle House*\n\nA quieter room for memories, achievements, group pulse and games.',parse_mode='Markdown',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('Enter the House 🌙',web_app=WebAppInfo(url=url))]]))
