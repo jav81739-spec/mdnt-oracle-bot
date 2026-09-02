@@ -30,6 +30,9 @@ RECENT ROOM CONTEXT:
 
 CONVERSATION CONTRACT
 - Answer the newest message first. Follow the actual thread instead of restarting it.
+- If the newest message is a short continuation such as "more", "tell me more", "go on", "continue", "then?", or "aur batao", use the supplied Oracle reply context to continue the exact thing being discussed. Do not pretend the short message is a standalone topic.
+- When the member replies to an Oracle GIF or image, look through the supplied context for the Oracle text that the media accompanied. Treat that original text as the subject of the reply.
+- A continuation request should feel like the conversation naturally picked up where it stopped: add something relevant, not a generic "sure" and not a repeated summary.
 - Infer intent from the message and recent context: question, update, joke, tease, vent, celebration, affection, confusion, disagreement, story, request, or casual chatter.
 - Ordinary chatter should remain ordinary. Do not manufacture depth, mystery, empathy, questions, or advice.
 - If a message does not need a response, the caller should be able to remain silent; never invent engagement just to keep the chat alive.
@@ -105,9 +108,6 @@ class ReplyGenerator:
             public_context=public_context[:1200] or "(none)",
             recent_context=self._dialogue_context(recent_context),
         )
-        # Gemini 3.x should receive one current user turn here. Supplying cached
-        # model turns as a prefilled conversation can create invalid requests and
-        # makes a provider failure look like a personality failure.
         return {
             "systemInstruction": {"parts": [{"text": prompt}]},
             "contents": [{"role": "user", "parts": [{"text": message[:1400]}]}],
