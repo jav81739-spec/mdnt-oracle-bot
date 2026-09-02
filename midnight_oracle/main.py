@@ -24,7 +24,7 @@ log = get_logger("midnight.main")
 
 
 def _add_handler_once(app: Application, handler, *, group: int = 0) -> None:
-    """Add a handler only when an equivalent callback/command surface is absent."""
+    """Add a handler only when an equivalent command/callback surface is absent."""
     commands = {str(c).lower().lstrip("/") for hs in getattr(app, "handlers", {}).values() for h in hs for c in (getattr(h, "commands", None) or ())}
     wanted = {str(c).lower().lstrip("/") for c in (getattr(handler, "commands", None) or ())}
     if wanted and wanted & commands:
@@ -49,9 +49,6 @@ async def _post_init(application: Application) -> None:
     scheduler.start()
     application.bot_data["oracle_scheduler"] = scheduler
 
-    # Preserve the mature command surface without making the obsolete monolith
-    # the production entry point. Each registration layer is idempotent or
-    # guarded here so features are additive rather than competing runtimes.
     try:
         from handlers.legacy_surface import register_legacy_surface
         result = register_legacy_surface(application)
@@ -130,7 +127,7 @@ def _install_world_lifecycle(app: Application) -> None:
     _add_handler_once(app, CallbackQueryHandler(handle_callback, pattern=r"^(?:reveal_|secret:).+"), group=-29)
     _add_handler_once(app, InlineQueryHandler(handle_inline), group=-30)
     _add_handler_once(app, MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data), group=-30)
-    _add_handler_once(app, MessageHandler(filters.TEXT & ~filters.COMMAND, _route_message), group=-29)
+    _add_handler_once(app, MessageHandler(filters.TEXT & ~filters.COMMAND,_route_message), group=-29)
 
 
 def build_application() -> Application:
@@ -139,28 +136,13 @@ def build_application() -> Application:
         raise RuntimeError("BOT_TOKEN is required")
     app = Application.builder().token(BOT_TOKEN).post_init(_post_init).post_shutdown(_post_shutdown).build()
     commands = {
-        "start": start,
-        "help": help_command,
-        "oracle": oracle,
-        "truth": truth,
-        "memory": memory,
-        "mymemory": mymemory,
-        "forget": forget,
-        "quiet": quiet,
-        "wake": wake,
-        "house": house,
+        "start": start, "help": help_command, "oracle": oracle, "truth": truth,
+        "memory": memory, "mymemory": mymemory, "forget": forget, "quiet": quiet,
+        "wake": wake, "house": house,
         "voice": __import__("midnight_oracle.handlers.voice_handler", fromlist=["voice"]).voice,
-        "tod": start_game,
-        "wyr": start_game,
-        "nhie": start_game,
-        "scramble": start_game,
-        "predict": predict,
-        "predictions": predictions,
-        "endgame": end_game,
-        "mysterybox": mysterybox,
-        "nightgift": nightgift,
-        "muse": muse,
-        "glitch": glitch,
+        "tod": start_game, "wyr": start_game, "nhie": start_game, "scramble": start_game,
+        "predict": predict, "predictions": predictions, "endgame": end_game,
+        "mysterybox": mysterybox, "nightgift": nightgift, "muse": muse, "glitch": glitch,
     }
     for name, callback in commands.items():
         _add_handler_once(app, CommandHandler(name, callback), group=-30)
