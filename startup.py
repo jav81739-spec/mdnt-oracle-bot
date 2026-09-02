@@ -163,6 +163,15 @@ def _install_live_runtime_bridges(application)->None:
             application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,handle_live_chat),group=-40);application.bot_data[marker]=True;log.info("HUMAN_CHAT_BRIDGE_READY | dm=on | groups=on | fallback=off")
         from handlers import social_engine
         social_engine.init_storage(_storage)
+        try:
+            from core.public_output_guard import guard_post
+            guard_marker="_midnight_public_output_guard_installed"
+            if not application.bot_data.get(guard_marker):
+                social_engine._post=guard_post(social_engine._post)
+                application.bot_data[guard_marker]=True
+                log.info("PUBLIC_OUTPUT_GUARD_READY | expressive=on")
+        except Exception:
+            log.exception("PUBLIC_OUTPUT_GUARD_INSTALL_FAILED")
         track_marker="_midnight_social_member_tracker_registered"
         if not application.bot_data.get(track_marker):
             application.add_handler(MessageHandler(filters.ChatType.GROUPS,social_engine.track_member),group=-39);application.bot_data[track_marker]=True;log.info("SOCIAL_MEMBER_REGISTRY_READY")
