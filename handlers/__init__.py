@@ -5,21 +5,37 @@ from telegram.ext import Application, CommandHandler
 
 
 def _install_oracle_expression_bridge() -> None:
-    """Wrap future command callbacks without touching their business logic."""
+    """Wrap command callbacks without touching their business logic."""
     try:
-        from core.oracle_expression import wrap_callback
+        from core.oracle_expression import wrap_callback, MECHANICAL_COMMANDS
     except Exception:
         return
     original = getattr(Application, "add_handler", None)
     if not original or getattr(original, "_oracle_expression_bridge", False):
         return
 
+    def wrap_existing(application):
+        for handlers in getattr(application, "handlers", {}).values():
+            for handler in handlers:
+                commands = getattr(handler, "commands", None) or ()
+                callback = getattr(handler, "callback", None)
+                if not commands or not callback or getattr(callback, "_oracle_expression_wrapped", False):
+                    continue
+                command = str(next(iter(commands))).lower().lstrip("/")
+                if command in MECHANICAL_COMMANDS:
+                    continue
+                wrapped = wrap_callback(callback, command)
+                if wrapped is not callback:
+                    setattr(wrapped, "_oracle_expression_wrapped", True)
+                    handler.callback = wrapped
+
     def add_handler(self, handler, *args, **kwargs):
+        wrap_existing(self)
         commands = getattr(handler, "commands", None) or ()
         if commands and hasattr(handler, "callback"):
             command = str(next(iter(commands))).lower().lstrip("/")
             callback = getattr(handler, "callback", None)
-            if callback and not getattr(callback, "_oracle_expression_wrapped", False):
+            if callback and command not in MECHANICAL_COMMANDS and not getattr(callback, "_oracle_expression_wrapped", False):
                 wrapped = wrap_callback(callback, command)
                 if wrapped is not callback:
                     setattr(wrapped, "_oracle_expression_wrapped", True)
