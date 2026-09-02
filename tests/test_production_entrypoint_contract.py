@@ -11,7 +11,7 @@ class ProductionEntrypointContractTests(unittest.TestCase):
             and any(a.name == 'legacy_bot' for a in node.names)
             for node in tree.body
         )
-        self.assertTrue(imports_legacy)
+        self.assertFalse(imports_legacy)
         imported_from_telegram = {
             alias.name
             for node in ast.walk(tree)
@@ -23,6 +23,7 @@ class ProductionEntrypointContractTests(unittest.TestCase):
         source = pathlib.Path('bot.py').read_text(encoding='utf-8')
         self.assertIn('build_application as _canonical_build_application', source)
         self.assertIn('asyncio.run(startup.run(build_application(), redis_client))', source)
+        self.assertNotIn('import legacy_bot', source)
         names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
         self.assertNotIn('ChatMemberHandler', names)
 
