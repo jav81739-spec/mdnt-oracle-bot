@@ -1,13 +1,20 @@
+import importlib
 import os
 import unittest
 
 
+def _build_application_for_test():
+    os.environ["BOT_TOKEN"] = "ci-test-token-1234567890"
+    config = importlib.import_module("midnight_oracle.config")
+    config.BOT_TOKEN = os.environ["BOT_TOKEN"]
+    main = importlib.import_module("midnight_oracle.main")
+    main.BOT_TOKEN = config.BOT_TOKEN
+    return main.build_application()
+
+
 class CanonicalSurfaceCompletenessTests(unittest.TestCase):
     def test_canonical_runtime_keeps_core_and_preserved_surfaces(self):
-        os.environ.setdefault("BOT_TOKEN", "test-token")
-        from midnight_oracle.main import build_application
-
-        app = build_application()
+        app = _build_application_for_test()
         commands = {
             str(command).lower().lstrip("/")
             for handlers in app.handlers.values()
@@ -26,10 +33,7 @@ class CanonicalSurfaceCompletenessTests(unittest.TestCase):
         self.assertFalse(missing, f"canonical runtime dropped required commands: {missing}")
 
     def test_canonical_runtime_has_one_primary_message_router(self):
-        os.environ.setdefault("BOT_TOKEN", "test-token")
-        from midnight_oracle.main import build_application
-
-        app = build_application()
+        app = _build_application_for_test()
         callbacks = [
             getattr(handler, "callback", None)
             for handlers in app.handlers.values()
