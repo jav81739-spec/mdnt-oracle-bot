@@ -7,14 +7,9 @@ blue and tappable; tapping one sends the command into the current chat.
 """
 from __future__ import annotations
 
-import hashlib
-import random
-from datetime import date
-
 from telegram import MessageEntity, Update
 from telegram.ext import ContextTypes, CommandHandler
 
-SEP = "─" * 24
 ADMIN_ONLY = {
     "broadcast", "announce", "midnightmap", "ownerstatus", "ownerstats",
     "setcommands", "reload", "shutdown", "restart", "admin", "moderation",
@@ -26,7 +21,7 @@ SECTIONS = [
     ("🔮 READINGS", ["oracle", "aura", "vibecheck", "identity", "shadow", "element", "corecode", "universe", "ritual", "duality", "nightreport", "sigil", "glitch"]),
     ("🌙 DAILY & MEMORY", ["checkin", "streakcheck", "memory", "mymemory", "forget", "tod", "house", "quiet", "wake"]),
     ("🫂 BONDS & SOCIAL", ["hug", "kiss", "pat", "kick", "slap", "punch", "highfive", "cuddle", "poke", "bonk", "bite", "wave", "wink", "dance", "roast", "cheer", "comfort", "tickle", "salute", "stare", "handshake", "fistbump", "shoulderpat", "cheers", "compliment"]),
-    ("💞 RELATIONSHIPS", ["bond", "bondstatus", "oraclepair", "vow", "bestie", "duo", "friendship", "ship", "tagbestie", "squad", "loyalty", "matchmaker", "friendshiptest", "randomship", "secretadmirer", "crush", "couples"]),
+    ("💞 RELATIONSHIPS", ["bond", "bondstatus", "oraclepair", "vow", "bestie", "duo", "friendship", "ship", "tagbestie", "squad", "loyalty", "matchmaker", "randomship", "secretadmirer", "crush", "couples"]),
     ("🪞 ORACLE SIGNALS", ["weave", "orbit", "echo", "anchor", "fracture", "ember", "mirror", "crossing", "undertow", "gaze", "release", "veil", "signal", "verdict", "muse"]),
     ("🎮 GAMES", ["quiz", "truth", "dare", "wyr", "nhie", "rps", "riddle", "riddleanswer", "scramble", "unscramble", "guess", "leaderboard", "dice", "darts", "basketball", "bowling", "football", "slot", "hangman", "hangmanguess", "tictactoe", "ttt", "wordchain", "chainword", "trivia", "wordle", "wordleguess", "ratethis", "impostor", "revealimpostor", "fastmath", "wordbomb", "mysterybox", "duel", "hotseat"]),
     ("🏏 MIDNIGHT CRICKET", ["cricket", "call", "cpredict", "cbet", "cwin", "ctournament", "cpick", "cplay", "cricketduel"]),
@@ -49,16 +44,16 @@ HINTS = {
     "cuddle": "send comfort", "wave": "wave at someone", "wink": "send a wink", "roast": "lightly roast someone",
     "cheer": "cheer someone on", "comfort": "comfort a member", "compliment": "give someone a compliment",
     "bond": "read a bond", "bondstatus": "check a bond", "bestie": "find a bestie", "duo": "find a duo",
-    "friendship": "test a friendship", "ship": "ship two people", "tagbestie": "call your bestie", "squad": "find your squad",
-    "loyalty": "test loyalty", "matchmaker": "let Oracle match souls", "friendshiptest": "run a friendship test",
-    "randomship": "leave the pairing to fate", "secretadmirer": "peek at a secret admirer", "crush": "set a crush",
-    "couples": "see the couples", "signal": "read a social signal", "verdict": "ask for Oracle's verdict", "muse": "receive a spark",
+    "friendship": "read a friendship", "ship": "ship two people", "tagbestie": "call your bestie", "squad": "find your squad",
+    "loyalty": "read loyalty", "matchmaker": "let Oracle match souls", "randomship": "leave the pairing to fate",
+    "secretadmirer": "peek at a secret admirer", "crush": "set a crush", "couples": "see the couples",
+    "signal": "read a social signal", "verdict": "ask for Oracle's verdict", "muse": "receive a spark",
     "quiz": "challenge the room", "truth": "ask for truth", "dare": "take a dare", "wyr": "choose between two paths",
     "nhie": "play never have I ever", "rps": "play rock paper scissors", "riddle": "solve a riddle", "riddleanswer": "answer the riddle",
     "scramble": "unscramble the word", "unscramble": "solve the scramble", "guess": "make a guess", "leaderboard": "see the winners",
     "dice": "roll the dice", "darts": "throw darts", "basketball": "shoot a basket", "bowling": "roll a frame", "football": "take the field",
     "slot": "try the slots", "hangman": "start hangman", "hangmanguess": "guess a letter", "tictactoe": "start tic-tac-toe", "ttt": "make your move",
-    "wordchain": "start a word chain", "chainword": "continue the chain", "trivia": "test your knowledge", "wordle": "start wordle", "wordleguess": "make a wordle guess",
+    "wordchain": "start a word chain", "chainword": "continue the chain", "trivia": "challenge your knowledge", "wordle": "start wordle", "wordleguess": "make a wordle guess",
     "ratethis": "rate the room's choice", "impostor": "find the impostor", "revealimpostor": "reveal the impostor", "fastmath": "race the clock",
     "wordbomb": "pass the word bomb", "mysterybox": "open a mystery", "duel": "challenge someone", "hotseat": "put someone on the hot seat",
     "cricket": "play solo cricket", "cricketduel": "challenge a batter", "call": "make a cricket call", "cpredict": "predict the ball",
@@ -82,7 +77,7 @@ def _live_member_commands(application) -> set[str]:
             if isinstance(handler, CommandHandler):
                 for command in getattr(handler, "commands", ()):
                     name = str(command).lower().lstrip("/")
-                    if name and name not in ADMIN_ONLY and len(name) <= 32:
+                    if name and name not in ADMIN_ONLY and name != "friendshiptest" and len(name) <= 32:
                         live.add(name)
     return live
 
@@ -128,7 +123,7 @@ def _build_archive(live: set[str]) -> tuple[str, list[MessageEntity]]:
         push("└──────────────────────────┘")
         push("")
 
-    extras = sorted(c for c in live - known if c not in {"start", "help"})
+    extras = sorted(c for c in live - known if c not in {"start", "help", "friendshiptest"})
     if extras:
         push("┌─ ✦ MORE MEMBER COMMANDS ─┐")
         for command in extras:
@@ -148,7 +143,6 @@ def _build_archive(live: set[str]) -> tuple[str, list[MessageEntity]]:
         MessageEntity(type=MessageEntity.BOT_COMMAND, offset=_utf16_len(text[:start]), length=_utf16_len(text[start:start + length]))
         for start, length in spans
     ]
-    # /help and /start in the footer are also real, tappable commands.
     for command in ("/help", "/start"):
         start = text.rfind(command)
         if start >= 0:
@@ -157,7 +151,6 @@ def _build_archive(live: set[str]) -> tuple[str, list[MessageEntity]]:
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
     live = _live_member_commands(context.application)
     text, entities = _build_archive(live)
     try:
