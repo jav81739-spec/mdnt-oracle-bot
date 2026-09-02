@@ -1,199 +1,208 @@
-"""Social relationship commands with Oracle-selected members."""
-from __future__ import annotations
 import random
-from typing import Any
 from telegram import Update
 from telegram.ext import ContextTypes
 from handlers.mentions import mention
-from core.oracle_instinct import choose_one, choose_pair, explain_lens
-from core.oracle_freshness import FreshnessGovernor
-from handlers import social_engine
 
-bestie_pairs: dict[int, Any] = {}
-declared_besties: dict[int, dict[int, Any]] = {}
-message_counts: dict[int, dict[int, dict[str, Any]]] = {}
-DUO_PREFIXES = ["Chaos", "Dream", "Menace", "Golden", "Rogue", "Midnight", "Orbit"]
-DUO_SUFFIXES = ["Duo", "Squad", "Twins", "Crew", "Pair", "Circuit"]
+bestie_pairs = {}
+declared_besties = {}
+message_counts = {}
+
+DUO_PREFIXES = ["Chaos", "Dream", "Menace", "Golden", "Rogue"]
+DUO_SUFFIXES = ["Duo", "Squad", "Twins", "Crew"]
+
+COMPAT_DESCRIPTIONS = [
+    "unstoppable chaos energy together",
+    "the kind of duo that finishes each other's sentences",
+    "opposites who somehow just work",
+    "a slow-burn friendship that's actually stronger than it looks",
+    "constant bickering, zero actual beef",
+]
+
+LOYALTY_DESCRIPTIONS = [
+    "shows up for the conversations that matter",
+    "quiet presence, steady energy",
+    "the definition of ride-or-die in this chat",
+    "here for the vibes, not the drama",
+]
+
 SHIP_VERDICTS = {
-    "low": ["chaotic and doomed 💀", "friends at best, enemies at worst 😭", "the Oracle is unconvinced 🌘"],
-    "mid": ["could work with effort 🤞", "50/50, coin-flip energy", "there is something here, maybe"],
-    "high": ["written in the stars ✨", "unreasonably perfect together", "the room may have noticed first 🌙"],
+    "low": ["chaotic and doomed 💀", "friends at best, enemies at worst 😭", "please never test this in real life"],
+    "mid": ["could work with effort 🤞", "a slow burn romance novel", "50/50, coin flip energy"],
+    "high": ["written in the stars ✨", "unreasonably perfect together", "get married already 💍"],
 }
-ACTION_TEXT = {
-    "hug": ["wraps {target} in a warm hug", "pulls {target} into a quiet hug", "sends {target} an unexpected hug"],
-    "pat": ["gives {target} a gentle head pat", "pats {target} like they survived the day", "offers {target} a tiny reassuring pat"],
-    "highfive": ["high-fives {target}", "meets {target} with a perfectly timed high-five", "raises a hand for {target} — your move"],
-    "slap": ["gives {target} a theatrical slap", "delivers {target} one dramatically harmless slap", "bonks the timeline with a slap aimed at {target}"],
-    "punch": ["throws a playful punch at {target}", "challenges {target} to one cartoon punch", "lands a completely unserious punch near {target}"],
-    "kick": ["gives {target} a playful kick", "launches a cartoon kick toward {target}", "adds {target} to tonight's kick agenda"],
-    "kiss": ["gives {target} a tiny dramatic kiss", "drops a playful kiss toward {target}", "sends {target} one suspiciously theatrical kiss"],
-    "poke": ["pokes {target}", "tests whether {target} is still awake with a poke", "gives {target} exactly one annoying poke"],
-    "cuddle": ["cuddles up with {target}", "pulls {target} into the comfort zone", "declares {target} temporarily cuddle-protected"],
-    "bonk": ["bonks {target}", "bonks {target} with ceremonial precision", "issues {target} one gentle bonk"],
-    "bite": ["playfully bites {target}", "gives {target} one ridiculous little bite", "marks {target} for tonight's chaos with a playful bite"],
-    "wave": ["waves at {target}", "spots {target} and waves across the room", "quietly waves hello to {target}"],
-    "wink": ["winks at {target}", "gives {target} one suspicious wink", "leaves {target} with a knowing wink"],
-    "dance": ["dances with {target}", "pulls {target} into the night's tiny dance floor", "starts an impromptu dance beside {target}"],
-    "cheer": ["cheers for {target}", "starts a tiny cheering section for {target}", "quietly puts {target} on tonight's victory board"],
-    "comfort": ["comforts {target}", "sits beside {target} for a quiet moment", "reminds {target} that tonight can be softer"],
-    "tickle": ["tickles {target}", "declares {target} dangerously ticklish", "launches one completely unserious tickle attack at {target}"],
-    "salute": ["salutes {target}", "gives {target} a midnight salute", "formally acknowledges {target} with a salute"],
-    "stare": ["stares dramatically at {target}", "locks eyes with {target} for no explained reason", "lets the silence stare back at {target}"],
-    "handshake": ["shakes hands with {target}", "offers {target} the official Oracle handshake", "seals the moment with {target} in a handshake"],
-    "fistbump": ["fist-bumps {target}", "meets {target} with a quiet fist bump", "locks in a fist bump with {target}"],
-    "shoulderpat": ["pats {target}'s shoulder", "gives {target} a reassuring shoulder pat", "rests a brief supportive pat on {target}'s shoulder"],
-    "cheers": ["cheers with {target}", "raises an imaginary glass with {target}", "toasts {target} from the midnight corner"],
-}
-ACTION_MEDIA = {k: "anime " + k for k in ACTION_TEXT}
 
-async def _members(chat_id: int) -> list[dict[str, Any]]:
-    """Use the canonical persistent social registry, not a disconnected local counter."""
-    members = await social_engine._members(chat_id)
-    normalized = []
-    for m in members:
-        if not isinstance(m, dict):
-            continue
-        try:
-            uid = int(m.get("id", 0))
-        except (TypeError, ValueError):
-            continue
-        if uid <= 0 or m.get("is_bot", False):
-            continue
-        msgs = max(0, int(m.get("msgs", 0) or 0))
-        normalized.append({
-            "id": uid,
-            "name": str(m.get("name") or "someone"),
-            "username": str(m.get("username") or ""),
-            "activity_score": min(1.0, msgs / 20.0),
-            "is_bot": False,
-        })
-    return normalized
 
-def _member_from_user(user) -> dict[str, Any]:
-    return {"id": int(user.id), "name": user.first_name or "someone", "activity_score": 0.5, "is_bot": bool(user.is_bot), "username": user.username or ""}
+def _ship_name(name1: str, name2: str) -> str:
+    half1 = name1[: max(1, len(name1) // 2)]
+    half2 = name2[len(name2) // 2 :]
+    return (half1 + half2).title()
 
-async def _pair(update, context, kind):
-    message, chat = update.effective_message, update.effective_chat
-    if not message or not chat:
-        return None
-    if message.reply_to_message and message.reply_to_message.from_user:
-        actor, target = update.effective_user, message.reply_to_message.from_user
-        if actor and actor.id != target.id:
-            return _member_from_user(actor), _member_from_user(target)
-    members = await _members(chat.id)
-    return choose_pair(context.application, chat.id, members, kind=kind)
 
-async def _single_target(update, context, kind, allow_self=False):
-    message, chat, actor = update.effective_message, update.effective_chat, update.effective_user
-    if not message or not chat:
-        return None
-    if message.reply_to_message and message.reply_to_message.from_user:
-        target = message.reply_to_message.from_user
-        if allow_self or not actor or target.id != actor.id:
-            return _member_from_user(target)
-    members = await _members(chat.id)
-    if not allow_self and actor:
-        members = [m for m in members if m["id"] != actor.id]
-    return choose_one(context.application, chat.id, members, kind=kind)
+async def ship(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.reply_to_message:
+        user1 = update.effective_user
+        user2 = update.message.reply_to_message.from_user
+        name1_display, name2_display = user1.first_name, user2.first_name
+        mention1, mention2 = mention(user1.id, user1.first_name), mention(user2.id, user2.first_name)
+    elif len(context.args) >= 2:
+        name1_display, name2_display = context.args[0], context.args[1]
+        mention1, mention2 = name1_display, name2_display
+    else:
+        await update.message.reply_text("Usage: reply to someone with /ship, or /ship [name1] [name2]")
+        return
+    score = random.randint(0, 100)
+    bar_filled = "❤️" * (score // 10)
+    bar_empty = "🖤" * (10 - score // 10)
+    tier = "low" if score < 40 else "mid" if score < 75 else "high"
+    verdict = random.choice(SHIP_VERDICTS[tier])
+    ship_name = _ship_name(name1_display, name2_display)
+    await update.message.reply_text(f"🚢 Shipping {mention1} + {mention2}\n\nShip name: *{ship_name}*\n{bar_filled}{bar_empty} {score}%\n_{verdict}_", parse_mode="Markdown")
 
-def _fresh(application, chat_id, kind, text, *, theme="social", pair="", media="", strategy="") -> str:
-    governor = FreshnessGovernor(application)
-    if governor.accept(chat_id, kind, text, theme=theme, media=media, pair=pair, strategy=strategy):
-        return text
-    # A second composition is deliberately different in structure, not merely punctuation.
-    return text + "\n\n☾ The Oracle noticed this moment differently this time."
 
-async def ship(update, context):
-    pair = await _pair(update, context, "ship")
-    if not pair:
-        return await update.effective_message.reply_text("☾ I need at least two known members before Oracle can choose the pair.")
-    a, b = pair; score = random.SystemRandom().randint(0, 100); tier = "low" if score < 40 else "mid" if score < 75 else "high"
-    text = f"🚢 {mention(a['id'], a['name'])} + {mention(b['id'], b['name'])}\n\nShip name: *{_ship_name(a['name'], b['name'])}*\n{'❤️' * (score // 10)}{'🖤' * (10 - score // 10)} {score}%\n_{random.choice(SHIP_VERDICTS[tier])}_"
-    await update.effective_message.reply_text(_fresh(context.application, update.effective_chat.id, "ship", text, pair=f"{a['id']}:{b['id']}", strategy=explain_lens("ship", context.application, update.effective_chat.id)), parse_mode="Markdown")
+async def random_ship(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    pool = list(message_counts.get(chat_id, {}).items())
+    if len(pool) < 2:
+        await update.message.reply_text("Not enough active members tracked yet — need at least 2 people who have sent a message since I joined. Chat a bit more first!")
+        return
+    (id1, data1), (id2, data2) = random.sample(pool, 2)
+    name1, name2 = data1["name"], data2["name"]
+    mention1, mention2 = mention(id1, name1), mention(id2, name2)
+    score = random.randint(0, 100)
+    bar_filled = "❤️" * (score // 10)
+    bar_empty = "🖤" * (10 - score // 10)
+    tier = "low" if score < 40 else "mid" if score < 75 else "high"
+    verdict = random.choice(SHIP_VERDICTS[tier])
+    ship_name = _ship_name(name1, name2)
+    await update.message.reply_text(f"🎲 Random ship of the moment...\n\n🚢 {mention1} + {mention2}\nShip name: *{ship_name}*\n{bar_filled}{bar_empty} {score}%\n_{verdict}_", parse_mode="Markdown")
 
-async def random_ship(update, context):
-    pair = await _pair(update, context, "randomship")
-    if not pair:
-        return await update.effective_message.reply_text("☾ Not enough known members yet — let the room breathe a little first.")
-    a, b = pair
-    text = f"🎲 {mention(a['id'], a['name'])} + {mention(b['id'], b['name'])}\n\n*{random.SystemRandom().randint(0, 100)}%* match\n\n_The pairing was chosen by Oracle Instinct._"
-    await update.effective_message.reply_text(_fresh(context.application, update.effective_chat.id, "randomship", text, pair=f"{a['id']}:{b['id']}", strategy=explain_lens("randomship", context.application, update.effective_chat.id)), parse_mode="Markdown")
 
-async def track_message(update, context):
+async def track_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_chat or not update.effective_user:
         return
-    chat_id = update.effective_chat.id; user = update.effective_user
-    entry = message_counts.setdefault(chat_id, {}).setdefault(user.id, {"name": user.first_name or "someone", "count": 0, "is_bot": bool(user.is_bot)})
-    entry["name"] = user.first_name or entry.get("name") or "someone"; entry["count"] = int(entry.get("count", 0)) + 1
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    message_counts.setdefault(chat_id, {})
+    if user.id not in message_counts[chat_id]:
+        message_counts[chat_id][user.id] = {"name": user.first_name, "count": 0}
+    message_counts[chat_id][user.id]["count"] += 1
 
-async def bestie(update, context):
-    pair = await _pair(update, context, "bestie")
-    if not pair: return await update.effective_message.reply_text("☾ I need two known members before Oracle can choose the bestie bond.")
-    u1, u2 = pair; chat_id = update.effective_chat.id
-    class Person:
-        def __init__(self, d): self.id = d["id"]; self.first_name = d["name"]
-    p1, p2 = Person(u1), Person(u2); declared_besties.setdefault(chat_id, {})[p1.id] = p2; declared_besties[chat_id][p2.id] = p1
-    await update.effective_message.reply_text(_fresh(context.application, chat_id, "bestie", f"💛 {mention(p1.id, p1.first_name)} & {mention(p2.id, p2.first_name)}\n\n*BESTIE BOND SELECTED*\n\nThe Oracle put these two on the same side of the midnight table.", pair=f"{u1['id']}:{u2['id']}"), parse_mode="Markdown")
 
-async def duo(update, context):
-    pair = await _pair(update, context, "duo")
-    if not pair: return await update.effective_message.reply_text("☾ I need two known members before I can forge a duo.")
-    a, b = pair; label = f"{random.SystemRandom().choice(DUO_PREFIXES)} {random.SystemRandom().choice(DUO_SUFFIXES)}"
-    await update.effective_message.reply_text(_fresh(context.application, update.effective_chat.id, "duo", f"🔗 {mention(a['id'], a['name'])} + {mention(b['id'], b['name'])}\n\n*{label}*\n\nTwo names. One completely unplanned team.", pair=f"{a['id']}:{b['id']}"), parse_mode="Markdown")
+async def bestie(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.reply_to_message:
+        await update.message.reply_text("Reply to your bestie's message with /bestie")
+        return
+    user1 = update.effective_user
+    user2 = update.message.reply_to_message.from_user
+    chat_id = update.effective_chat.id
+    bestie_pairs.setdefault(chat_id, []).append((user1.id, user2.id))
+    declared_besties.setdefault(chat_id, {})[user1.id] = user2
+    declared_besties[chat_id][user2.id] = user1
+    await update.message.reply_text(f"💛 {mention(user1.id, user1.first_name)} & {mention(user2.id, user2.first_name)} are now official besties!", parse_mode="Markdown")
 
-async def friendship_score(update, context):
-    pair = await _pair(update, context, "friendship")
-    if not pair: return await update.effective_message.reply_text("☾ I need two known members before Oracle can read the friendship.")
-    a, b = pair; score = random.SystemRandom().randint(40, 100)
-    await update.effective_message.reply_text(_fresh(context.application, update.effective_chat.id, "friendship", f"💫 *FRIENDSHIP SIGNAL*\n\n{mention(a['id'], a['name'])} × {mention(b['id'], b['name'])}\n\nSignal: *{score}%*\n\n_The number is playful. The choice is Oracle's._", pair=f"{a['id']}:{b['id']}"), parse_mode="Markdown")
 
-async def tag_bestie(update, context):
-    actor = update.effective_user; b = declared_besties.get(update.effective_chat.id, {}).get(actor.id if actor else 0)
-    if not b: return await update.effective_message.reply_text("☾ No declared bestie yet — /bestie lets Oracle choose one.")
-    await update.effective_message.reply_text(f"📣 {mention(actor.id, actor.first_name)} is calling {mention(b.id, b.first_name)}", parse_mode="Markdown")
+async def duo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.reply_to_message:
+        await update.message.reply_text("Reply to someone's message with /duo to generate a duo name")
+        return
+    user1 = update.effective_user
+    user2 = update.message.reply_to_message.from_user
+    name = f"{random.choice(DUO_PREFIXES)} {random.choice(DUO_SUFFIXES)}"
+    await update.message.reply_text(f"🔗 {mention(user1.id, user1.first_name)} + {mention(user2.id, user2.first_name)} = *{name}*", parse_mode="Markdown")
 
-async def squad(update, context):
-    members = await _members(update.effective_chat.id)
-    if not members: return await update.effective_message.reply_text("☾ Not enough activity data yet.")
-    # Squad is intentionally not a top-message leaderboard: choose a varied group.
-    chosen = []
-    pool = members[:]
-    rng = random.SystemRandom()
-    while pool and len(chosen) < min(4, len(pool)):
-        weights = [1.0 / (1.0 + len(chosen) * 0.25) for _ in pool]
-        pick = rng.choices(pool, weights=weights, k=1)[0]; chosen.append(pick); pool.remove(pick)
-    await update.effective_message.reply_text("👥 *ORACLE SQUAD*\n\n" + ", ".join(mention(m["id"], m["name"]) for m in chosen), parse_mode="Markdown")
 
-async def loyalty(update, context):
-    target = await _single_target(update, context, "loyalty", allow_self=True)
-    if not target: return await update.effective_message.reply_text("☾ I need a known member before I can read loyalty.")
-    await update.effective_message.reply_text(f"🛡️ {mention(target['id'], target['name'])}'s loyalty signal: *{random.SystemRandom().randint(60, 100)}/100*", parse_mode="Markdown")
+async def friendship_score(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.reply_to_message:
+        await update.message.reply_text("Reply to someone's message with /friendship to check compatibility")
+        return
+    user1 = update.effective_user
+    user2 = update.message.reply_to_message.from_user
+    score = random.randint(40, 100)
+    desc = random.choice(COMPAT_DESCRIPTIONS)
+    await update.message.reply_text(f"💫 {mention(user1.id, user1.first_name)} + {mention(user2.id, user2.first_name)}: *{score}%* compatible\n_{desc}_", parse_mode="Markdown")
 
-async def matchmaker(update, context): await random_ship(update, context)
-async def friendship_test(update, context): await friendship_score(update, context)
 
-async def _action(update, context, key):
-    target = await _single_target(update, context, key)
-    if not target: return await update.effective_message.reply_text(f"☾ I need another known member before Oracle can choose someone for /{key}.")
+async def tag_bestie(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    bestie_user = declared_besties.get(chat_id, {}).get(user_id)
+    if not bestie_user:
+        await update.message.reply_text("You haven't declared a bestie yet — use /bestie (reply to their message) first")
+        return
+    await update.message.reply_text(f"📣 {mention(update.effective_user.id, update.effective_user.first_name)} is calling for their bestie: {mention(bestie_user.id, bestie_user.first_name)}", parse_mode="Markdown")
+
+
+async def squad(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    counts = message_counts.get(chat_id, {})
+    if not counts:
+        await update.message.reply_text("Not enough activity data yet — chat more first!")
+        return
+    top = sorted(counts.items(), key=lambda x: x[1]["count"], reverse=True)[:4]
+    mentions = [mention(uid, data["name"]) for uid, data in top]
+    await update.message.reply_text("👥 The most active squad right now:\n" + ", ".join(mentions), parse_mode="Markdown")
+
+
+async def loyalty(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    target = update.message.reply_to_message.from_user if update.message.reply_to_message else update.effective_user
+    score = random.randint(60, 100)
+    desc = random.choice(LOYALTY_DESCRIPTIONS)
+    await update.message.reply_text(f"🛡️ {mention(target.id, target.first_name)}'s loyalty score: *{score}/100*\n_{desc}_", parse_mode="Markdown")
+
+
+MATCHMAKER_REASONS = [
+    "you both reply to messages at 2 AM like it's normal",
+    "matching chaotic energy levels detected",
+    "you both have unread messages from everyone except each other",
+    "something about this pairing just makes sense",
+]
+
+ACTIONS = {
+    "hug": ("🤗 wraps {target} in a warm hug", "anime hug"),
+    "pat": ("🖐️ gives {target} a gentle head pat", "head pat anime"),
+    "highfive": ("🙌 high-fives {target}", "high five"),
+    "slap": ("👋 slaps {target}", "anime slap"),
+    "kiss": ("😘 kisses {target}", "anime kiss"),
+    "poke": ("👉 pokes {target}", "anime poke"),
+    "cuddle": ("🥺 cuddles up with {target}", "anime cuddle"),
+    "wave": ("👋 waves at {target}", "anime wave hello"),
+    "bite": ("😬 playfully bites {target}", "anime bite"),
+    "tickle": ("🤣 tickles {target}", "anime tickle"),
+}
+
+
+async def matchmaker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    pool = list(message_counts.get(chat_id, {}).items())
+    if len(pool) < 2:
+        await update.message.reply_text("Not enough active members tracked yet — chat more first!")
+        return
+    (id1, data1), (id2, data2) = random.sample(pool, 2)
+    score = random.randint(50, 100)
+    reason = random.choice(MATCHMAKER_REASONS)
+    await update.message.reply_text(f"💘 A little matchmaker moment:\n\n{mention(id1, data1['name'])} + {mention(id2, data2['name'])} — *{score}%* match\n_{reason}_", parse_mode="Markdown")
+
+
+async def _action(update: Update, context: ContextTypes.DEFAULT_TYPE, action_key: str):
+    if not update.message.reply_to_message:
+        await update.message.reply_text(f"Reply to someone's message with /{action_key}")
+        return
     actor = update.effective_user
-    actor_name = mention(actor.id, actor.first_name) if actor else "☾ Oracle"
-    phrase = random.SystemRandom().choice(ACTION_TEXT[key]).format(target=mention(target['id'], target['name']))
-    text = f"{actor_name} {phrase}."
-    try:
-        from handlers.chat import send_text_with_gif
-        await send_text_with_gif(context.bot, update.effective_chat.id, text, ACTION_MEDIA[key])
-    except Exception:
-        await update.effective_message.reply_text(text, parse_mode="Markdown")
+    target = update.message.reply_to_message.from_user
+    text_template, gif_term = ACTIONS[action_key]
+    text = text_template.format(target=mention(target.id, target.first_name))
+    full_text = f"{mention(actor.id, actor.first_name)} {text}"
+    from handlers.chat import send_text_with_gif
+    await send_text_with_gif(context.bot, update.effective_chat.id, full_text, gif_term)
 
-def _make_action(key):
-    async def handler(update, context): await _action(update, context, key)
-    handler.__name__ = key
-    return handler
 
-for _key in ACTION_TEXT:
-    if _key not in globals(): globals()[_key] = _make_action(_key)
-
-from handlers.fun import roast
-
-def _ship_name(a: str, b: str) -> str:
-    return (a[:max(1, len(a) // 2)] + b[len(b) // 2:]).title()
+async def hug(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "hug")
+async def pat(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "pat")
+async def highfive(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "highfive")
+async def slap(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "slap")
+async def kiss(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "kiss")
+async def poke(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "poke")
+async def cuddle(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "cuddle")
+async def wave(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "wave")
+async def bite(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "bite")
+async def tickle(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "tickle")

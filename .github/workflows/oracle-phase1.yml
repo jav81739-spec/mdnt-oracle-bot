@@ -4,11 +4,22 @@ on:
   push:
     branches: [main, 'rebuild/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'rebuild/**']
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      BOT_TOKEN: test-token
+      TELEGRAM_BOT_TOKEN: ci-telegram-token-1234567890
+      OPENAI_API_KEY: ci-openai-key-1234567890
+      GIPHY_API_KEY: ci-giphy-key-1234567890
+      STICKER_PACK_NAME: ci-stickers
+      ORACLE_MASTER_ID: '1'
+      DATABASE_URL: sqlite:///ci.sqlite3
+      ORACLE_DATABASE_PATH: ci.sqlite3
+      GROUP_CHAT_ID: '0'
+      OWNER_ID: '0'
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v7
@@ -21,4 +32,4 @@ jobs:
       - name: Run FriendEngine tests
         run: python -m unittest midnight_oracle.friend_engine_test
       - name: Runtime surface regression tests
-        run: python -m unittest tests.test_production_entrypoint_contract tests.test_production_import tests.test_runtime_hardening tests.test_runtime_manifest tests.test_runtime_regressions -v
+        run: python -m unittest tests.test_production_entrypoint_contract tests.test_production_import tests.test_runtime_manifest tests.test_runtime_regressions tests.test_runtime_smoke -v
