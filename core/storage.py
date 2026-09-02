@@ -1,9 +1,4 @@
-"""Durable async storage for Midnight Oracle.
-
-Upstash Redis REST is the production backend; a deterministic in-memory backend
-keeps unit tests and local development dependency-free. All Redis writes use
-command bodies rather than ambiguous REST path/value combinations.
-"""
+"""Durable async storage for Midnight Oracle."""
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +7,6 @@ import json
 import logging
 import os
 import time
-import uuid
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 from urllib.parse import quote
@@ -43,27 +37,20 @@ class Storage:
 
     @property
     def configured(self) -> bool:
-        """Return whether persistent Upstash credentials are configured."""
         return bool(self.url and self.token)
 
     async def start(self) -> None:
-        """Initialize the reusable HTTP client when persistent storage is configured."""
         if self._client is None and self.configured:
-            self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(self.timeout, connect=min(4.0, self.timeout)),
-                headers={"Authorization": f"Bearer {self.token}"},
-            )
+            self._client = httpx.AsyncClient(timeout=httpx.Timeout(self.timeout, connect=min(4.0, self.timeout)), headers={"Authorization": f"Bearer {self.token}"})
         self._closed = False
 
     async def close(self) -> None:
-        """Close the reusable HTTP client."""
         self._closed = True
         client, self._client = self._client, None
         if client is not None:
             await client.aclose()
 
     async def _request(self, method: str, path: str = "/", **kwargs: Any) -> Any:
-        """Execute a storage HTTP request with bounded retries."""
         if not self.configured:
             raise StorageError("persistent storage is not configured")
         await self.start()
@@ -85,11 +72,9 @@ class Storage:
         raise StorageError(f"storage request failed after {self.retries + 1} attempts") from last
 
     async def _command(self, *parts: Any) -> Any:
-        """Execute a Redis command through the Upstash REST command endpoint."""
         return await self._request("POST", "/", json=[str(p) for p in parts])
 
     async def get(self, key: str, default: Any = None) -> Any:
-        """Return a value for a key or the supplied default."""
         if not self.configured:
             async with self._local_lock:
                 self._expire_local_locked()
@@ -102,7 +87,6 @@ class Storage:
             return default
 
     async def load(self, key: str, default: Any = None) -> Any:
-        """Return a stored JSON-compatible value, decoding legacy strings."""
         value = await self.get(key, None)
         if value is None:
             return default
@@ -116,7 +100,6 @@ class Storage:
         return default
 
     async def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
-        """Store a value, optionally with an expiry in seconds."""
         try:
             encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")) if not isinstance(value, str) else value
         except (TypeError, ValueError):
@@ -131,25 +114,19 @@ class Storage:
                     self._local_expiry[key] = time.time() + max(1, int(ttl))
             return True
         try:
-            if ttl is None:
-                result = await self._command("SET", key, encoded)
-            else:
-                result = await self._command("SET", key, encoded, "EX", max(1, int(ttl)))
+            result = await self._command("SET", key, encoded) if ttl is None else await self._command("SET", key, encoded, "EX", max(1, int(ttl)))
             return str(result).upper() in {"OK", "TRUE", "1"}
         except StorageError:
             log.exception("SET failed for key=%s", key)
             return False
 
     async def setex(self, key: str, ttl: int, value: Any) -> bool:
-        """Provide Redis-compatible SETEX semantics for legacy lifecycle code."""
         return await self.set(key, value, ttl=max(1, int(ttl)))
 
     async def save(self, key: str, value: Any, ttl: int | None = None) -> bool:
-        """Persist a value through the same canonical set operation."""
         return await self.set(key, value, ttl=ttl)
 
     async def setnx(self, key: str, value: str, ttl: int = 15) -> bool:
-        """Set a key only when absent, with a safety expiry."""
         ttl = max(1, int(ttl))
         if not self.configured:
             async with self._local_lock:
@@ -166,8 +143,26 @@ class Storage:
             log.exception("SETNX failed for key=%s", key)
             return False
 
+    async def compare_set(self, key: str, expected: str, value: str, ttl: int) -> bool:
+        """Replace a value only while it is still exactly the expected value."""
+        ttl = max(1, int(ttl))
+        if not self.configured:
+            async with self._local_lock:
+                self._expire_local_locked()
+                if self._local.get(key) != expected:
+                    return False
+                self._local[key] = value
+                self._local_expiry[key] = time.time() + ttl
+                return True
+        script = "if redis.call('GET',KEYS[1])==ARGV[1] then redis.call('SET',KEYS[1],ARGV[2],'EX',ARGV[3]); return 1 end; return 0"
+        try:
+            result = await self._command("EVAL", script, 1, key, expected, value, str(ttl))
+            return bool(int(result or 0))
+        except StorageError:
+            log.exception("COMPARE_SET failed for key=%s", key)
+            return False
+
     async def delete(self, *keys: str) -> int:
-        """Delete one or more keys and return the number removed."""
         if not keys:
             return 0
         if not self.configured:
@@ -188,7 +183,6 @@ class Storage:
             return 0
 
     async def incrby(self, key: str, amount: int) -> int:
-        """Atomically increment a numeric key where the backend supports it."""
         if not self.configured:
             async with self._local_lock:
                 self._expire_local_locked()
@@ -198,13 +192,11 @@ class Storage:
         return int(await self._command("INCRBY", key, int(amount)))
 
     async def eval(self, script: str, keys: list[str] | tuple[str, ...] = (), args: list[str] | tuple[str, ...] = ()) -> Any:
-        """Execute a Lua script against configured persistent storage."""
         if not self.configured:
             raise StorageError("EVAL requires configured persistent storage")
         return await self._command("EVAL", script, len(keys), *keys, *args)
 
     async def atomic_transfer(self, sender_key: str, receiver_key: str, amount: int) -> tuple[int, int]:
-        """Atomically transfer a positive amount between two balances."""
         amount = int(amount)
         if amount <= 0:
             raise StorageError("transfer amount must be positive")
@@ -226,7 +218,6 @@ class Storage:
         return int(result[1]), int(result[2])
 
     async def atomic_claim(self, balance_key: str, marker_key: str, amount: int, ttl: int) -> tuple[bool, int]:
-        """Atomically claim a one-time balance increment."""
         amount, ttl = int(amount), max(1, int(ttl))
         if amount < 0:
             raise StorageError("claim amount must not be negative")
@@ -247,7 +238,6 @@ class Storage:
         return bool(int(result[0])), int(result[1])
 
     async def scan(self, pattern: str = "*", count: int = 100) -> list[str]:
-        """Return keys matching a pattern."""
         count = max(1, min(int(count), 500))
         if not self.configured:
             async with self._local_lock:
@@ -270,7 +260,6 @@ class Storage:
             return []
 
     async def lpush(self, key: str, *values: Any) -> int:
-        """Push values onto a list."""
         if not values:
             return 0
         if not self.configured:
@@ -282,7 +271,6 @@ class Storage:
         return int(await self._command("LPUSH", key, *values) or 0)
 
     async def lrange(self, key: str, start: int, end: int) -> list[str]:
-        """Return a list slice."""
         if not self.configured:
             async with self._local_lock:
                 items = self._local_lists.get(key, [])
@@ -290,7 +278,6 @@ class Storage:
         return list(await self._command("LRANGE", key, int(start), int(end)) or [])
 
     async def exists(self, key: str) -> bool:
-        """Return whether a key exists."""
         if not self.configured:
             async with self._local_lock:
                 self._expire_local_locked()
@@ -298,63 +285,73 @@ class Storage:
         try:
             return bool(int(await self._command("EXISTS", key) or 0))
         except StorageError:
+            log.exception("EXISTS failed for key=%s", key)
             return False
 
     async def ttl(self, key: str) -> int:
-        """Return remaining TTL seconds, following Redis conventions."""
         if not self.configured:
             async with self._local_lock:
+                self._expire_local_locked()
                 expiry = self._local_expiry.get(key)
-                if not expiry:
-                    return -1
-                remaining = int(expiry - time.time())
-                if remaining < 0:
-                    self._local.pop(key, None)
-                    self._local_expiry.pop(key, None)
+                if key not in self._local and key not in self._local_lists:
                     return -2
-                return remaining
+                if expiry is None:
+                    return -1
+                return max(0, int(expiry - time.time()))
         try:
             return int(await self._command("TTL", key))
         except StorageError:
-            return -1
+            log.exception("TTL failed for key=%s", key)
+            return -2
+
+    async def context(self, prefix: str) -> "StorageContext":
+        return StorageContext(self, prefix)
 
     def _expire_local_locked(self) -> None:
-        """Remove expired local fallback keys while holding the local lock."""
         now = time.time()
-        for key, expiry in list(self._local_expiry.items()):
-            if expiry <= now:
-                self._local.pop(key, None)
-                self._local_expiry.pop(key, None)
+        expired = [key for key, expiry in self._local_expiry.items() if expiry <= now]
+        for key in expired:
+            self._local_expiry.pop(key, None)
+            self._local.pop(key, None)
 
-    async def _release_lock(self, key: str, token: str) -> None:
-        """Release a distributed lock only when its ownership token matches."""
-        if not self.configured:
-            async with self._local_lock:
-                if self._local.get(key) == token:
-                    self._local.pop(key, None)
-                    self._local_expiry.pop(key, None)
-            return
-        try:
-            await self.eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end", [key], [token])
-        except StorageError:
-            log.warning("Could not release lock %s cleanly; TTL remains the safety net", key)
 
-    @asynccontextmanager
-    async def lock(self, name: str, ttl: int = 15, wait: float = 3.0) -> AsyncIterator[bool]:
-        """Acquire and automatically release a short-lived distributed lock."""
-        key, token = f"lock:{name}", uuid.uuid4().hex
-        deadline = time.monotonic() + max(0.0, float(wait))
-        acquired = False
-        while time.monotonic() <= deadline:
-            if await self.setnx(key, token, ttl):
-                acquired = True
-                break
-            await asyncio.sleep(0.05)
-        try:
-            yield acquired
-        finally:
-            if acquired:
-                await self._release_lock(key, token)
+class StorageContext:
+    def __init__(self, store: Storage, prefix: str) -> None:
+        self.store = store
+        self.prefix = prefix.rstrip(":")
+
+    def _key(self, key: str) -> str:
+        return f"{self.prefix}:{key}"
+
+    async def get(self, key: str, default: Any = None) -> Any:
+        return await self.store.get(self._key(key), default)
+
+    async def load(self, key: str, default: Any = None) -> Any:
+        return await self.store.load(self._key(key), default)
+
+    async def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
+        return await self.store.set(self._key(key), value, ttl)
+
+    async def save(self, key: str, value: Any, ttl: int | None = None) -> bool:
+        return await self.store.save(self._key(key), value, ttl)
+
+    async def delete(self, *keys: str) -> int:
+        return await self.store.delete(*(self._key(key) for key in keys))
+
+    async def incrby(self, key: str, amount: int) -> int:
+        return await self.store.incrby(self._key(key), amount)
+
+    async def scan(self, pattern: str = "*") -> list[str]:
+        return await self.store.scan(self._key(pattern))
 
 
 storage = Storage()
+
+
+@asynccontextmanager
+async def storage_lifecycle() -> AsyncIterator[Storage]:
+    await storage.start()
+    try:
+        yield storage
+    finally:
+        await storage.close()

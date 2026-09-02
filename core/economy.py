@@ -1,7 +1,12 @@
 """Concurrency-safe economy primitives for Midnight Oracle."""
 from __future__ import annotations
 
+import asyncio
+import time
+import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from urllib.parse import quote
 
 from .storage import Storage, StorageError, storage
 
@@ -18,6 +23,60 @@ class Transaction:
     reason: str
 
 
+_LOCAL_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+@asynccontextmanager
+async def _storage_lock(store: Storage, key: str, ttl: int = 15, wait: float = 5):
+    """Acquire a scoped distributed lock without ever deleting another owner's lock."""
+    ttl = max(1, int(ttl))
+    wait = max(0.0, float(wait))
+    if not getattr(store, "configured", False):
+        lock = _LOCAL_LOCKS.setdefault(key, asyncio.Lock())
+        try:
+            await asyncio.wait_for(lock.acquire(), timeout=wait)
+        except asyncio.TimeoutError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            if lock.locked():
+                lock.release()
+        return
+
+    token = uuid.uuid4().hex
+    deadline = time.monotonic() + wait
+    acquired = False
+    while True:
+        try:
+            acquired = await store.setnx(f"lock:{key}", token, ttl=ttl)
+        except StorageError:
+            acquired = False
+        if acquired:
+            break
+        if time.monotonic() >= deadline:
+            yield False
+            return
+        await asyncio.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+
+    try:
+        yield True
+    finally:
+        release_script = "if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end"
+        try:
+            await store.eval(release_script, [f"lock:{key}"], [token])
+        except StorageError:
+            # Never fall back to unconditional delete: ownership safety is more important than cleanup.
+            pass
+
+
+# The public Storage.lock surface is installed here so all callers share the same
+# ownership-safe implementation without duplicating lock semantics in the storage facade.
+if not hasattr(Storage, "lock"):
+    Storage.lock = _storage_lock
+
+
 class EconomyService:
     """Single source of truth for scoped balances and atomic transfers."""
     def __init__(self, store: Storage = storage) -> None:
@@ -28,9 +87,19 @@ class EconomyService:
         return f"economy:balance:{scope}:{int(user_id)}" if scope is not None else f"economy:balance:{int(user_id)}"
 
     async def balance(self, user_id: int, scope: int | str | None = None) -> int:
-        value = await self.store.get(self.key(user_id, scope), "0")
-        try: return max(0, int(value or 0))
-        except (TypeError, ValueError): return 0
+        key = self.key(user_id, scope)
+        try:
+            if getattr(self.store, "configured", False):
+                # Economy must never interpret a persistent-store outage as a zero balance.
+                value = await self.store._request("GET", f"/get/{quote(key, safe='')}")
+            else:
+                value = await self.store.get(key, "0")
+        except StorageError as exc:
+            raise EconomyError("persistent economy is temporarily unavailable") from exc
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError) as exc:
+            raise EconomyError("economy balance data is invalid") from exc
 
     async def add(self, user_id: int, amount: int, reason: str = "adjustment", scope: int | str | None = None) -> Transaction:
         amount = int(amount)

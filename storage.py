@@ -20,6 +20,9 @@ class RedisCompat:
     async def setnx(self, key, value, ttl=15):
         return await storage.setnx(key, value, ttl=ttl)
 
+    async def compare_set(self, key, expected, value, ttl=0):
+        return await storage.compare_set(key, expected, value, ttl=ttl)
+
     async def exists(self, key):
         return int(await storage.exists(key))
 
