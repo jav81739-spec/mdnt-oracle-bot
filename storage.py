@@ -17,6 +17,9 @@ class RedisCompat:
     async def setex(self, key, ttl, value):
         return await storage.set(key, value, ttl=ttl)
 
+    async def setnx(self, key, value, ttl=15):
+        return await storage.setnx(key, value, ttl=ttl)
+
     async def exists(self, key):
         return int(await storage.exists(key))
 
@@ -27,7 +30,7 @@ class RedisCompat:
         return await storage.ttl(key)
 
     async def expire(self, key, ttl):
-        current = await storage.get(key, None)
+        current=await storage.get(key, None)
         if current is None:
             return False
         return await storage.set(key, current, ttl=ttl)
