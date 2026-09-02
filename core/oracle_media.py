@@ -1,7 +1,8 @@
-"""Context-aware media companion for autonomous Oracle narratives.
+"""Context-aware media companion for Midnight Oracle.
 
-Media is deliberately sparse: one optional companion at most, with a durable
-per-group cooldown supplied by the caller. Text remains the primary experience.
+Media is deliberately sparse: it appears only when the moment gives it a
+reason. Text stays primary, direct media commands stay explicit, and optional
+lookups never become a delivery requirement.
 """
 from __future__ import annotations
 
@@ -18,21 +19,36 @@ from midnight_oracle.utils.logger import get_logger
 log = get_logger("midnight.oracle_media")
 
 MEDIA_COOLDOWN = 12 * 3600
+CHAT_MEDIA_COOLDOWN = 6 * 3600
+COMMAND_MEDIA_COOLDOWN = 0
+
+_VISUAL_CUES = {
+    "moon", "night", "rain", "storm", "ocean", "sea", "mountain", "forest",
+    "city", "street", "train", "station", "library", "book", "star", "stars",
+    "sky", "sunset", "sunrise", "flower", "flowers", "coffee", "tea", "cricket",
+    "football", "stadium", "match", "movie", "film", "concert", "travel", "beach",
+}
+_REACTION_CUES = {
+    "😂", "🤣", "😭", "🥲", "lol", "lmao", "haha", "funny", "ridiculous", "absurd",
+    "wild", "wtf", "bruh", "oops", "congrats", "congratulations", "damn",
+}
 
 
 def _term(text: str, kind: str) -> str:
     value = re.sub(r"[^\w\s'-]", " ", text or "", flags=re.UNICODE)
     words = [w for w in value.split() if len(w) > 2]
     stop = {
-        "part", "the", "and", "with", "that", "this", "from", "then",
-        "when", "there", "someone", "nobody", "oracle", "room", "had",
-        "forgotten", "first", "clue",
+        "part", "the", "and", "with", "that", "this", "from", "then", "when",
+        "there", "someone", "nobody", "oracle", "room", "had", "forgotten",
+        "first", "clue", "really", "just", "like", "what", "about", "because",
     }
     meaningful = [w for w in words if w.casefold() not in stop]
     base_words = meaningful[:4] or words[:4]
     base = " ".join(base_words)[:48].strip()
     if kind == "story":
         return f"cinematic {base} night"[:72].strip()
+    if kind == "chat":
+        return f"{base} natural reaction"[:72].strip()
     return f"curious {base}"[:72].strip()
 
 
@@ -43,18 +59,34 @@ def _stable_rng(*values: str | int | None) -> random.Random:
 
 
 def _media_kind(text: str, narrative_kind: str, part_index: int | None) -> str | None:
-    """Choose a restrained medium; never force media into every narrative."""
+    """Choose one restrained medium from the actual conversational beat."""
     low = (text or "").casefold()
-    rng = _stable_rng(narrative_kind, part_index or 0, low[:160])
+    words = set(re.findall(r"[\w]+", low, flags=re.UNICODE))
+    has_visual = bool(words & _VISUAL_CUES)
+    has_reaction = any(cue in low for cue in _REACTION_CUES)
+    rng = _stable_rng(narrative_kind, part_index or 0, low[:240])
     roll = rng.random()
+
     if narrative_kind == "story":
-        if roll < 0.18 and part_index == 1:
+        if part_index == 1 and has_visual and roll < 0.55:
             return "image"
-        if roll < 0.30 and any(x in low for x in ("train", "city", "library", "star", "ocean", "map", "street", "rain", "moon")):
+        if has_visual and roll < 0.24:
             return "image"
     elif narrative_kind == "gossip":
-        if roll < 0.12 and any(x in low for x in ("funny", "ridiculous", "rumour", "rumor", "weird", "wild", "absurd")):
+        if has_reaction and roll < 0.22:
             return "gif"
+    elif narrative_kind == "chat":
+        # Ordinary chat gets media only when the content itself supplies a visual
+        # or reaction beat. A long-running chat cannot accumulate media spam.
+        if has_reaction and roll < 0.16:
+            return "gif"
+        if has_visual and roll < 0.12:
+            return "image"
+    elif narrative_kind == "command":
+        if has_reaction and roll < 0.75:
+            return "gif"
+        if has_visual and roll < 0.55:
+            return "image"
     return None
 
 
@@ -64,14 +96,14 @@ def sticker_ids() -> list[str]:
 
 
 def choose_sticker(text: str, narrative_kind: str, part_index: int | None = None) -> str | None:
-    """Use an explicitly configured sticker pack only when a reaction beat fits."""
+    """Use the curated sticker pack only when the beat genuinely calls for it."""
     ids = sticker_ids()
     if not ids:
         return None
     low = (text or "").casefold()
-    if not any(x in low for x in ("😂", "🤣", "funny", "ridiculous", "absurd", "wild", "oh", "wait")):
+    if not any(cue in low for cue in _REACTION_CUES):
         return None
-    return _stable_rng("sticker", narrative_kind, part_index or 0, low[:120]).choice(ids)
+    return _stable_rng("sticker", narrative_kind, part_index or 0, low[:180]).choice(ids)
 
 
 async def _giphy(term: str) -> str | None:
@@ -106,15 +138,9 @@ async def _wikimedia(term: str) -> str | None:
             response = await client.get(
                 "https://commons.wikimedia.org/w/api.php",
                 params={
-                    "action": "query",
-                    "format": "json",
-                    "generator": "search",
-                    "gsrsearch": term,
-                    "gsrnamespace": 6,
-                    "gsrlimit": 10,
-                    "prop": "imageinfo",
-                    "iiprop": "url|mime",
-                    "iiurlwidth": 1200,
+                    "action": "query", "format": "json", "generator": "search",
+                    "gsrsearch": term, "gsrnamespace": 6, "gsrlimit": 10,
+                    "prop": "imageinfo", "iiprop": "url|mime", "iiurlwidth": 1200,
                 },
             )
             response.raise_for_status()
