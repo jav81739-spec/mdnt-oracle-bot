@@ -5,7 +5,16 @@ import asyncio
 import unittest
 
 from core.economy import EconomyError, EconomyService
-from core.storage import Storage
+from core.storage import Storage, StorageError
+
+
+class FailingPersistentStorage(Storage):
+    @property
+    def configured(self):
+        return True
+
+    async def _request(self, *args, **kwargs):
+        raise StorageError("backend unavailable")
 
 
 class CoreEngineTests(unittest.TestCase):
@@ -51,6 +60,13 @@ class CoreEngineTests(unittest.TestCase):
             results = await asyncio.gather(*(service.claim_once(7, 100, "daily:test", 60, "daily", scope="group") for _ in range(20)))
             self.assertEqual(sum(tx.amount for tx in results), 100)
             self.assertEqual(await service.balance(7, "group"), 100)
+        self.run_async(scenario())
+
+    def test_persistent_economy_outage_never_looks_like_zero_balance(self):
+        async def scenario():
+            service = EconomyService(FailingPersistentStorage())
+            with self.assertRaises(EconomyError):
+                await service.balance(7, "group")
         self.run_async(scenario())
 
     def test_storage_ttl_fallback(self):
