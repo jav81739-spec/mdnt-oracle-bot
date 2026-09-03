@@ -43,6 +43,18 @@ async def _store_compare_set(key:str,expected:str,value:str,ttl:int)->bool:
         if asyncio.iscoroutine(result):result=await result
         return bool(result)
     except Exception as exc:log.debug("storage.compare_set(%s) failed: %s",key,exc);return False
+async def _store_compare_delete(key:str,expected:str)->bool:
+    try:
+        if _storage is None:return False
+        evaluator=getattr(_storage,"eval",None)
+        if callable(evaluator):
+            script="if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end"
+            result=evaluator(script,[key],[expected])
+            if asyncio.iscoroutine(result):result=await result
+            return bool(int(result or 0))
+        log.error("storage.compare_delete is unavailable; refusing unsafe lease deletion")
+        return False
+    except Exception as exc:log.debug("storage.compare_delete(%s) failed: %s",key,exc);return False
 async def _store_delete(key:str)->bool:
     try:
         if _storage is None:return False
@@ -76,7 +88,10 @@ async def _release_lease():
     raw=await _store_get(_LEASE_KEY)
     if raw:
         try:
-            if json.loads(raw).get("instance")==_INSTANCE_ID:await _store_delete(_LEASE_KEY);log.info("Polling lease released by %s",_INSTANCE_ID);return
+            if json.loads(raw).get("instance")==_INSTANCE_ID:
+                if await _store_compare_delete(_LEASE_KEY,raw):log.info("Polling lease released by %s",_INSTANCE_ID)
+                else:log.warning("Polling lease release skipped because ownership could not be verified atomically")
+                return
         except Exception:pass
     log.debug("Lease not owned by us — skipping release")
 async def _lease_heartbeat_loop():
@@ -85,7 +100,8 @@ async def _lease_heartbeat_loop():
         if _shutting_down:break
         try:
             if not await _refresh_lease():
-                log.error("Polling lease ownership lost — stopping heartbeat")
+                log.error("Polling lease ownership lost — stopping Telegram runtime")
+                await _graceful_shutdown()
                 break
         except Exception as exc:log.warning("Lease refresh failed: %s",exc)
 async def _wait_for_lease()->bool:
@@ -209,7 +225,7 @@ async def run(application,storage_client=None):
         if application.post_init is not None:await application.post_init(application)
         _install_live_runtime_bridges(application)
         await application.start();await application.bot.get_me();await _verify_command_menu(application)
-        await application.updater.start_polling(drop_pending_updates=True,allowed_updates=["message","edited_message","callback_query","chat_member","my_chat_member","poll_answer","poll","inline_query"]);await asyncio.Event().wait()
+        await application.updater.start_polling(drop_pending_updates=False,allowed_updates=["message","edited_message","callback_query","chat_member","my_chat_member","poll_answer","poll","inline_query"]);await asyncio.Event().wait()
     except asyncio.CancelledError:pass
     except Exception as exc:log.exception("Fatal error in polling loop: %s",exc)
     finally:await _graceful_shutdown()
