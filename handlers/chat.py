@@ -19,17 +19,30 @@ async def load_from_storage():
     if not isinstance(saved,dict): saved={}
     chat_enabled=dict(saved.get("enabled",{})); chat_persona=dict(saved.get("persona",{}))
 
-async def _persist(): await storage.save(STORAGE_KEY,{"enabled":chat_enabled,"persona":chat_persona})
+async def _persist():
+    saved=await storage.save(STORAGE_KEY,{"enabled":chat_enabled,"persona":chat_persona})
+    if saved is False:
+        raise RuntimeError("chat settings could not be persisted")
 
 async def toggle_chat(update,context):
     cid=str(update.effective_chat.id)
     async with storage.lock(f"chat-settings:{cid}") as acquired:
         if not acquired:return await update.message.reply_text("⏳ Give me a second — I'm sorting the room out.")
-        saved=await storage.load(STORAGE_KEY,{"enabled":{},"persona":{}}); enabled=dict(saved.get("enabled",{})); personas=dict(saved.get("persona",{})); enabled[cid]=not bool(enabled.get(cid)); chat_enabled.update(enabled); chat_persona.update(personas); await storage.save(STORAGE_KEY,{"enabled":enabled,"persona":personas})
+        saved=await storage.load(STORAGE_KEY,{"enabled":{},"persona":{}}); enabled=dict(saved.get("enabled",{})); personas=dict(saved.get("persona",{})); enabled[cid]=not bool(enabled.get(cid)); chat_enabled.update(enabled); chat_persona.update(personas)
+        if not await storage.save(STORAGE_KEY,{"enabled":enabled,"persona":personas}):
+            chat_enabled[cid]=not enabled[cid]
+            raise RuntimeError("chat mode could not be persisted")
     await update.message.reply_text("Chat mode is now ON 🌙" if enabled[cid] else "Chat mode is now OFF")
 
 async def set_persona(update,context):
-    cid=str(update.effective_chat.id); style=(" ".join(context.args).strip() if context.args else DEFAULT_PERSONA)[:300]; chat_persona[cid]=style; await _persist(); await update.message.reply_text("Tone changed. 🌙")
+    cid=str(update.effective_chat.id); style=(" ".join(context.args).strip() if context.args else DEFAULT_PERSONA)[:300]; previous=chat_persona.get(cid); chat_persona[cid]=style
+    try: await _persist()
+    except Exception:
+        if previous is None: chat_persona.pop(cid,None)
+        else: chat_persona[cid]=previous
+        await update.message.reply_text("⏳ I couldn't save that tone change safely. Try again.")
+        log.exception("CHAT_PERSONA_PERSIST_FAILED | chat=%s",cid); return
+    await update.message.reply_text("Tone changed. 🌙")
 
 async def auto_reply(update,context):
     cid=str(update.effective_chat.id)
@@ -81,13 +94,14 @@ async def get_gif_url(term):
     try:
         async with httpx.AsyncClient(timeout=10) as client:r=await client.get("https://api.giphy.com/v1/gifs/search",params={"q":term,"api_key":key,"limit":15,"rating":"pg-13"}); r.raise_for_status(); data=r.json().get("data",[])
         urls=[item.get("images",{}).get("original",{}).get("url") for item in data]; urls=[u for u in urls if u]; return _random.choice(urls) if urls else None
-    except Exception as exc:log.debug("GIF_SEARCH_FAILED | %s",exc); return None
+    except Exception as exc:log.warning("GIF_SEARCH_FAILED | term=%s | %s",term,exc); return None
 
 async def send_random_gif(update,context):
     url=await get_gif_url(" ".join(context.args) if context.args else _random.choice(GIF_SEARCH_TERMS))
     if url:
         try:await context.bot.send_animation(update.effective_chat.id,url)
         except Exception:log.exception("GIF_SEND_FAILED")
+    else: log.info("GIF_NOT_SENT | reason=no_result_or_provider_unavailable")
 
 async def send_text_with_gif(update,context,*args,**kwargs):
     """Compatibility helper supporting both handler and legacy bot call styles."""
@@ -105,4 +119,4 @@ async def sticker_reply(update,context):return await send_random_sticker(update,
 async def maybe_react_to_message(update,context):
     if not update.message or not chat_enabled.get(str(update.effective_chat.id),False) or _random.random()>0.08:return
     try:await context.bot.set_message_reaction(chat_id=update.effective_chat.id,message_id=update.message.message_id,reaction=_random.choice(REACTION_EMOJIS))
-    except Exception:pass
+    except Exception:log.exception("MESSAGE_REACTION_FAILED | chat=%s | message=%s",update.effective_chat.id,update.message.message_id)
