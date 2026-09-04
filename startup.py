@@ -10,7 +10,7 @@ import asyncio,json,logging,os,signal,socket,threading,time
 from typing import Optional
 from http.server import BaseHTTPRequestHandler,HTTPServer
 log=logging.getLogger("midnight.startup")
-_LEASE_KEY="midnight:polling_lease";_LEASE_TTL=60;_LEASE_REFRESH=20;_LEASE_WAIT_MAX=90;_INSTANCE_ID=f"{socket.gethostname()}:{os.getpid()}";_storage=None;_app=None;_lease_task:Optional[asyncio.Task]=None;_health_server:Optional[HTTPServer]=None;_shutting_down=False
+_LEASE_KEY="midnight:polling_lease";_LEASE_TTL=60;_LEASE_REFRESH=20;_LEASE_WAIT_MAX=90;_INSTANCE_ID=f"{socket.gethostname()}:{os.getpid()}";_storage=None;_app=None;_lease_task:Optional[asyncio.Task]=None;_health_server:Optional[HTTPServer]=None;_shutting_down=False;_polling_started=False
 async def _store_get(key:str)->Optional[str]:
     try:
         if _storage is None:return None
@@ -137,7 +137,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
         if self.path in ("/","/health","/healthz"):
             status="shutting_down" if _shutting_down else "ok";code=503 if _shutting_down else 200;self._respond(code,json.dumps({"status":status,"instance":_INSTANCE_ID}).encode(),"application/json")
         elif self.path=="/ready":
-            ready=(_app is not None) and (not _shutting_down);self._respond(200 if ready else 503,json.dumps({"ready":ready}).encode(),"application/json")
+            ready=(_app is not None) and _polling_started and (not _shutting_down);self._respond(200 if ready else 503,json.dumps({"ready":ready,"polling":_polling_started}).encode(),"application/json")
         else:self._respond(404,b'{"status":"not_found"}',"application/json")
     def do_HEAD(self):self.do_GET()
     def log_message(self,*_):return
@@ -150,9 +150,9 @@ def _install_signal_handlers(loop:asyncio.AbstractEventLoop):
         name=signal.Signals(signum).name;log.info("Received %s — initiating graceful shutdown",name);loop.call_soon_threadsafe(lambda:asyncio.ensure_future(_graceful_shutdown(),loop=loop))
     signal.signal(signal.SIGTERM,_handle_signal);signal.signal(signal.SIGINT,_handle_signal)
 async def _graceful_shutdown():
-    global _shutting_down
+    global _shutting_down,_polling_started
     if _shutting_down:return
-    _shutting_down=True;log.info("Graceful shutdown started")
+    _shutting_down=True;_polling_started=False;log.info("Graceful shutdown started")
     if _lease_task and not _lease_task.done():
         _lease_task.cancel()
         try:await _lease_task
@@ -214,18 +214,23 @@ def _install_live_runtime_bridges(application)->None:
         log.info("AUTONOMOUS_SOCIAL_ENGINE_READY | scheduled=19 | dynamic_group_targets=on")
     except Exception:
         log.exception("LIVE_RUNTIME_BRIDGE_INSTALL_FAILED")
+        raise
 async def run(application,storage_client=None):
-    global _storage,_app,_lease_task
+    global _storage,_app,_lease_task,_polling_started,_shutting_down
     if not logging.root.handlers:logging.basicConfig(format="%(asctime)s %(name)s %(levelname)s %(message)s",level=logging.INFO)
-    _storage=storage_client;_app=application;loop=asyncio.get_running_loop();_install_signal_handlers(loop);start_health_server()
+    _storage=storage_client;_app=application;_shutting_down=False;_polling_started=False;loop=asyncio.get_running_loop();_install_signal_handlers(loop);start_health_server()
     if not await _wait_for_lease():log.critical("Cannot start: polling lease unavailable. Exiting.");return
-    _lease_task=asyncio.ensure_future(_lease_heartbeat_loop());log.info("Starting Telegram polling — instance %s",_INSTANCE_ID)
+    _lease_task=asyncio.ensure_future(_lease_heartbeat_loop())
+    log.info("Polling lease owned; initializing Telegram runtime — instance %s",_INSTANCE_ID)
     try:
         await application.initialize();_install_jobqueue_compat()
         if application.post_init is not None:await application.post_init(application)
         _install_live_runtime_bridges(application)
         await application.start();await application.bot.get_me();await _verify_command_menu(application)
-        await application.updater.start_polling(drop_pending_updates=False,allowed_updates=["message","edited_message","callback_query","chat_member","my_chat_member","poll_answer","poll","inline_query"]);await asyncio.Event().wait()
+        await application.updater.start_polling(drop_pending_updates=False,allowed_updates=["message","edited_message","callback_query","chat_member","my_chat_member","poll_answer","poll","inline_query"])
+        _polling_started=True
+        log.info("TELEGRAM_POLLING_STARTED | instance=%s | pending_updates=preserved",_INSTANCE_ID)
+        await asyncio.Event().wait()
     except asyncio.CancelledError:pass
     except Exception as exc:log.exception("Fatal error in polling loop: %s",exc)
     finally:await _graceful_shutdown()
