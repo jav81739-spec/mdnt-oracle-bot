@@ -19,10 +19,10 @@ def register_phase_surfaces(app) -> None:
         log.exception("ORGANIC_RELATIONSHIP_SURFACE_FAILED")
     try:
         import legacy_bot as _legacy_bot
-        from handlers import deathgames_v2 as _deathgames_v2
-        _legacy_bot.deathgames = _deathgames_v2
+        from handlers import deathgames_v2 as _deathgames
+        _legacy_bot.deathgames = _deathgames
     except Exception:
-        log.exception("DEATHGAMES_V2_BIND_FAILED")
+        log.exception("DEATHGAMES_ENGINE_BIND_FAILED")
     try:
         from handlers.legacy_surface import register_legacy_surface
         result = register_legacy_surface(app)
