@@ -3,6 +3,33 @@ from . import games
 from . import deathgames_v2 as deathgames
 from core.game_runtime import persistent_game_state
 from telegram.ext import Application, CommandHandler
+import functools
+
+
+def _serialize_deathgame_mutations() -> None:
+    """Serialize mutations because the engine persists one shared state document."""
+    for name in ("survive", "revive", "roulette", "deathgame", "joingame", "startround", "vote", "endgame"):
+        callback = getattr(deathgames, name, None)
+        if not callable(callback) or getattr(callback, "_deathgame_serialized", False):
+            continue
+
+        @functools.wraps(callback)
+        async def serialized(update, context, _callback=callback):
+            chat = getattr(update, "effective_chat", None)
+            chat_id = getattr(chat, "id", None)
+            if chat_id is None:
+                return await _callback(update, context)
+            async with deathgames.storage.lock("deathgames-global") as acquired:
+                if not acquired:
+                    await update.effective_message.reply_text("⏳ The game engine is busy — try again.")
+                    return
+                return await _callback(update, context)
+
+        serialized._deathgame_serialized = True
+        setattr(deathgames, name, serialized)
+
+
+_serialize_deathgame_mutations()
 
 
 def _install_oracle_expression_bridge() -> None:
