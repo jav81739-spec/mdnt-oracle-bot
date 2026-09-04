@@ -23,6 +23,12 @@ def build_application(token,storage_client):
         init_engagement_storage(storage_client);register_engagement(app)
     except ModuleNotFoundError:log.info("Optional engagement_engine not present")
     except Exception:log.exception("Optional engagement registration failed")
+    # The legacy runner still owns some historical registration calls. Point
+    # every death-game callback it can register at the single canonical engine.
+    legacy_bot.deathgames = deathgames
+    legacy_bot.deathgame_start = deathgames.deathgame
+    legacy_bot.dgjoin_command = deathgames.joingame
+    legacy_bot.dgstatus_command = deathgames.deathstatus
     if hasattr(legacy_bot,"register_handlers"):legacy_bot.register_handlers(app)
     elif hasattr(legacy_bot,"_register_handlers"):legacy_bot._register_handlers(app)
     else:_shim_register(app)
