@@ -95,11 +95,6 @@ async def _post_shutdown(application: Application) -> None:
         await db.close()
 
 
-def _route_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Route active games first, then canonical human conversation."""
-    raise RuntimeError("_route_message must be async")
-
-
 async def _route_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Route active games first, then canonical human conversation."""
     if update.effective_chat and update.effective_chat.type in {"group", "supergroup"}:
