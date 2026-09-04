@@ -5,11 +5,7 @@ from datetime import datetime
 from telegram import BotCommand,BotCommandScopeAllGroupChats,BotCommandScopeAllPrivateChats
 from telegram.ext import Application,CommandHandler,MessageHandler,filters
 import legacy_bot
-from handlers import chat,games,moderation,utility,aesthetic,friendship,fun,matchmaking,stats,events,economy,timecapsule,marriage
-try:
-    from handlers import deathgames_v2 as deathgames
-except ImportError:
-    from handlers import deathgames
+from handlers import chat,games,moderation,utility,aesthetic,friendship,fun,matchmaking,stats,events,economy,timecapsule,marriage,deathgames_v2 as deathgames
 log=logging.getLogger("midnight.registry")
 
 def build_application(token,storage_client):
