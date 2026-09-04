@@ -9,7 +9,6 @@ class RuntimeSmokeTests(unittest.TestCase):
     def test_all_handler_modules_import(self):
         import handlers.aesthetic
         import handlers.chat
-        import handlers.deathgames
         import handlers.deathgames_v2
         import handlers.economy
         import handlers.events
@@ -29,16 +28,16 @@ class RuntimeSmokeTests(unittest.TestCase):
         for name in ("generate_reply", "send_text_with_gif", "send_mood_gif", "get_gif_url", "send_random_gif", "send_random_sticker", "gif_reply", "sticker_reply", "maybe_react_to_message"):
             self.assertTrue(callable(getattr(chat, name)))
 
-    def test_production_entrypoint_activates_v2_engine(self):
+    def test_production_entrypoint_activates_death_game_engine(self):
         import bot
-        import handlers.deathgames_v2 as v2
+        import handlers.deathgames_v2 as deathgames
         # Application construction is intentionally exercised with a dummy
         # token so CI can validate the production wiring without a secret.
         with patch("midnight_oracle.main.BOT_TOKEN", "ci-test-token"):
             app = bot.build_application()
-        self.assertIs(bot.legacy_bot.deathgames, v2)
+        self.assertIs(bot.legacy_bot.deathgames, deathgames)
         for name in ("survive", "revive", "deathstatus", "roulette", "deathgame", "joingame", "startround", "kill", "vote", "endgame"):
-            self.assertTrue(callable(getattr(v2, name)))
+            self.assertTrue(callable(getattr(deathgames, name)))
         app.handlers.clear()
 
     def test_no_gemini_sdk_dependency_is_required(self):
