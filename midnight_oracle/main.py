@@ -71,17 +71,18 @@ def _register_preserved_surfaces(application: Application) -> None:
 
 async def _post_init(application: Application) -> None:
     """Initialize persistence, canonical engines, scheduler and runtime bridges."""
+    from core.storage import storage
     db = Database(DATABASE_PATH)
     await db.connect()
     mood = MoodEngine()
     mem = MemoryEngine(db)
     engine = FriendEngine(db, mood)
     router = MessageRouter(engine, mem, mood)
-    application.bot_data.update(oracle_db=db, oracle_router=router)
+    application.bot_data.update(oracle_db=db, oracle_router=router, storage_client=storage)
     scheduler = OracleScheduler(application, db)
     scheduler.start()
     application.bot_data["oracle_scheduler"] = scheduler
-    log.info("AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on | surprise=on | voice=on | legacy_surface=on | v2_unique=on")
+    log.info("AUTONOMOUS_CANONICAL_READY | friend_engine=on | memory=on | scheduler=on | social=on | world=on | surprise=on | voice=on | legacy_surface=on | v2_unique=on | storage=on")
 
 
 async def _post_shutdown(application: Application) -> None:
@@ -92,6 +93,11 @@ async def _post_shutdown(application: Application) -> None:
     db = application.bot_data.get("oracle_db")
     if db:
         await db.close()
+
+
+def _route_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Route active games first, then canonical human conversation."""
+    raise RuntimeError("_route_message must be async")
 
 
 async def _route_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
