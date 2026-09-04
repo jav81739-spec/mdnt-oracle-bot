@@ -1,9 +1,12 @@
 """OpenAI-backed reply generation with a graceful local Oracle fallback."""
 from __future__ import annotations
+
 import asyncio
 import random
+
 from openai import AsyncOpenAI
-from ..config import OPENAI_API_KEY, OPENAI_MODEL, OPENAI_TIMEOUT, OPENAI_RETRIES
+
+from ..config import OPENAI_API_KEY, OPENAI_MODEL, OPENAI_TIMEOUT_SECONDS, MAX_OPENAI_RETRIES
 
 _openai_sem = asyncio.Semaphore(5)
 
@@ -51,15 +54,19 @@ class ReplyGenerator:
     """Generate fresh Oracle replies while preserving conversational continuity."""
 
     def __init__(self, client: AsyncOpenAI | None = None) -> None:
-        self.client = client or (AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=OPENAI_TIMEOUT, max_retries=OPENAI_RETRIES) if OPENAI_API_KEY else None)
+        self.client = client or (
+            AsyncOpenAI(
+                api_key=OPENAI_API_KEY,
+                timeout=OPENAI_TIMEOUT_SECONDS,
+                max_retries=MAX_OPENAI_RETRIES,
+            )
+            if OPENAI_API_KEY
+            else None
+        )
 
     @staticmethod
     def _local_reply(message: str, recent_context: list[str] | tuple[str, ...] | str | None = None) -> str:
-        """Keep ordinary chat alive when no external model credential is available.
-
-        This is deliberately small and context-sensitive: it is a continuity bridge,
-        not a pretend replacement for the model. It never exposes the reason it ran.
-        """
+        """Keep ordinary chat alive when the external model is unavailable."""
         text = " ".join(str(message or "").strip().split())
         lowered = text.casefold()
         recent = recent_context if isinstance(recent_context, str) else " ".join(str(x) for x in (recent_context or []))
@@ -67,8 +74,7 @@ class ReplyGenerator:
 
         if not text:
             return "hmm… 😶"
-
-        if any(token in lowered for token in ("😂", "🤣", "lol", "lmao", "😭😂", "haha", "hehe")):
+        if any(token in lowered for token in ("😂", "🤣", "lol", "lmao", "haha", "hehe")):
             choices = ["😭😂 okay, that one actually got me.", "nahhh 😭😂", "😂😂 bas karo yaar, ab hasna aa gaya.", "okay this is getting out of hand 😭"]
         elif any(token in lowered for token in ("sad", "dukhi", "hurt", "upset", "cry", "rona", "ro raha", "ro rahi", "😭", "💔")):
             choices = ["hmm… aaj thoda heavy lag raha hai. 🫂", "haan… samajh aa raha hai. take it easy tonight. 🫂", "kuch cheezein bas thoda waqt maangti hain. 🤍", "idhar hoon. bolna ho toh bol dena."]
@@ -86,7 +92,6 @@ class ReplyGenerator:
             choices = ["haan, woh point already feel ho raha hai 😭", "exactly… wahi.", "hmm, fair."]
         else:
             choices = ["hmm… 👀", "haan, samajh raha hoon.", "fair enough 😌", "achha… ab yeh interesting hai.", "haan, that makes sense.", "okay, I get the vibe."]
-
         return random.choice(choices)
 
     async def generate(self, group_name, name, relationship_tier, message, mood_summary, time_text, late, memory, recent_context=None):
