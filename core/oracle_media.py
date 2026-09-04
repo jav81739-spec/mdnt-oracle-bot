@@ -5,11 +5,13 @@ pools, and graceful provider failure. It must never replace a conversation or
 become a spam loop.
 """
 from __future__ import annotations
+import logging
 import random
 import time
 from collections import defaultdict, deque
 from typing import Any
 
+log = logging.getLogger("midnight.media")
 MEDIA_COOLDOWN = 18.0
 _last_sent: dict[str, float] = defaultdict(float)
 _recent_terms: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=5))
@@ -50,7 +52,11 @@ async def choose_media(subject: str, kind: str | None = None, part_index: int | 
     """Choose one additive GIF for both chat and autonomous pulse callers."""
     term = choose_term(str(subject), intent or kind)
     if not term: return None
-    url = await _gif_lookup()(term)
+    try:
+        url = await _gif_lookup()(term)
+    except Exception:
+        log.exception("GIF_LOOKUP_FAILED | term=%s", term)
+        return None
     return {"kind": "gif", "term": term, "url": url} if url else None
 
 async def send_additive_gif(bot, chat_id: int | str, url: str, *, reply_to_message_id: int | None = None) -> bool:
@@ -60,11 +66,17 @@ async def send_additive_gif(bot, chat_id: int | str, url: str, *, reply_to_messa
     try:
         await bot.send_animation(chat_id=chat_id, animation=url, reply_to_message_id=reply_to_message_id)
         _last_sent[cid] = time.monotonic(); return True
-    except Exception: return False
+    except Exception:
+        log.exception("GIF_SEND_FAILED | chat=%s", chat_id)
+        return False
 
 async def send_text_with_optional_gif(bot, chat_id: int | str, text: str, *, term: str | None = None, reply_to_message_id: int | None = None) -> None:
     """Send text first, then optionally one additive GIF."""
     await bot.send_message(chat_id=chat_id, text=text or "☾ Midnight Oracle is here.", reply_to_message_id=reply_to_message_id)
     if term:
-        url = await _gif_lookup()(term)
+        try:
+            url = await _gif_lookup()(term)
+        except Exception:
+            log.exception("GIF_LOOKUP_FAILED | term=%s", term)
+            return
         if url: await send_additive_gif(bot, chat_id, url, reply_to_message_id=reply_to_message_id)
