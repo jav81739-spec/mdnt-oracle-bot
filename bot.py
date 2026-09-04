@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import startup
 from telegram.ext import Application, ContextTypes
 
-from handlers import deathgames_v2 as _deathgames_v2
+from handlers import deathgames_v2
 from midnight_oracle.main import (
     _post_init,
     _post_shutdown,
@@ -27,7 +27,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 log = logging.getLogger("midnight.entrypoint")
-legacy_bot = SimpleNamespace(deathgames=_deathgames_v2)
+legacy_bot = SimpleNamespace(deathgames=deathgames_v2)
 
 
 async def _error(update, context: ContextTypes.DEFAULT_TYPE) -> None:
