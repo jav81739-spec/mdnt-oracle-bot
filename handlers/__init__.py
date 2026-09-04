@@ -1,5 +1,6 @@
 """Handler package bootstrap with preserved legacy command registration."""
 from . import games
+from . import deathgames_v2 as deathgames
 from core.game_runtime import persistent_game_state
 from telegram.ext import Application, CommandHandler
 
@@ -96,18 +97,7 @@ async def _vent(update, context):
 
 def _register_legacy_surface(app) -> None:
     """Restore recoverable legacy commands without exposing private controls."""
-    from . import chat, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule, marriage, deathgames
-    try:
-        from . import social_engine
-        from midnight_oracle.generators.social_voice import voice
-        original_post=social_engine._post
-        async def human_post(bot,chat_id,text):
-            rendered=await voice.render(text,context=f"Telegram group {chat_id}; autonomous Midnight Oracle moment",event_key=f"social:{chat_id}")
-            await original_post(bot,chat_id,rendered or text)
-        social_engine._post=human_post
-    except Exception:
-        import logging
-        logging.getLogger("midnight.social").exception("SOCIAL_VOICE_INSTALL_FAILED")
+    from . import chat, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule, marriage
     modules = {
         "chat": {"chat": ("toggle_chat",), "persona": ("set_persona",)},
         "games": {"quiz": ("quiz",), "dare": ("dare",), "rps": ("rock_paper_scissors",), "riddle": ("riddle",), "riddleanswer": ("riddle_answer",), "guess": ("guess_number",), "leaderboard": ("leaderboard_cmd",), "dice": ("dice_game",), "darts": ("darts_game",), "basketball": ("basketball_game",), "bowling": ("bowling_game",), "football": ("football_game",), "slot": ("slot_game",), "hangman": ("hangman",), "hangmanguess": ("hangman_guess",), "tictactoe": ("tictactoe",), "ttt": ("ttt_move",), "wordchain": ("wordchain_start",), "chainword": ("chain_word",), "trivia": ("trivia",), "wordle": ("wordle",), "wordleguess": ("wordle_guess",)},
