@@ -23,6 +23,10 @@ class RedisCompat:
     async def compare_set(self, key, expected, value, ttl=0):
         return await storage.compare_set(key, expected, value, ttl=ttl)
 
+    async def eval(self, script, keys=(), args=()):
+        """Expose the canonical atomic script primitive to startup/legacy code."""
+        return await storage.eval(script, list(keys), list(args))
+
     async def exists(self, key):
         return int(await storage.exists(key))
 
