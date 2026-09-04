@@ -10,7 +10,7 @@ import logging
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 import legacy_bot
-from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule, marriage, deathgames
+from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule, marriage, deathgames_v2 as deathgames
 
 log = logging.getLogger("midnight.legacy_surface")
 
@@ -84,7 +84,7 @@ def register_legacy_surface(app) -> dict[str, object]:
         "economy": {"daily": "daily", "balance": "balance", "gamble": "gamble", "richest": "economy_leaderboard"},
         "timecapsule": {"timecapsule": "timecapsule", "capsules": "list_capsules"},
         "marriage": {"marry": "marry", "accept": "accept", "divorce": "divorce", "profile": "profile", "work": "work", "chests": "chests", "shop": "shop", "buy": "buy", "inventory": "inventory", "gift": "gift", "settings": "settings"},
-        "deathgames": {"survive": "survive", "revive": "revive", "deathstatus": "deathstatus", "roulette": "roulette", "joingame": "joingame", "startround": "startround", "kill": "kill", "vote": "vote", "endgame": "endgame"},
+        "deathgames": {"survive": "survive", "revive": "revive", "deathstatus": "deathstatus", "roulette": "roulette", "deathgame": "deathgame", "joingame": "joingame", "startround": "startround", "kill": "kill", "vote": "vote", "endgame": "endgame"},
     }
     added: list[str] = []
     skipped: list[str] = []
@@ -96,7 +96,7 @@ def register_legacy_surface(app) -> dict[str, object]:
             else: skipped.append(command)
 
     direct_commands = {
-        "gif": "giphy_command", "checkin": "checkin_command", "streakcheck": "streakcheck_command", "vent": "vent_command", "cgift": "cgift_command", "coinboard": "coinboard_command", "rob": "eng_rob_command", "oraclehour": "oraclehour_command", "enter": "enter_command", "eventcheck": "eventcheck_command", "mines": "mines_command", "bet": "bet_command", "betstats": "betstats_command", "topbet": "topbet_command", "wallet": "wallet_command", "deposit": "deposit_command", "withdraw": "withdraw_command", "setpass": "setpass_command", "changepass": "changepass_command", "recover": "recover_command", "hug": "hug_cmd", "pat": "pat_cmd", "highfive": "highfive_cmd", "slap": "slap_cmd", "kiss": "kiss_cmd", "poke": "poke_cmd", "cuddle": "cuddle_cmd", "wave": "wave_cmd", "bite": "bite_cmd", "tickle": "tickle_cmd", "fastmath": "fastmath_command", "wordbomb": "wordbomb_command", "mysterybox": "mysterybox_command", "duel": "duel_command", "confess": "confess_command", "rank": "rank_command", "muse": "muse_command", "bond": "bond_command", "signal": "signal_command", "couples": "couples_command", "bondstatus": "bondstatus_command", "verdict": "verdict_command", "hotseat": "hotseat_command", "silence": "silence_command", "cricket": "cricket_command", "call": "cricket_predict_command", "cpredict": "cricket_predict_command", "cbet": "cricket_bet_command", "cwin": "cricket_win_command", "ctournament": "cricket_tournament_command", "cpick": "cricket_pick_command", "cplay": "cricket_play_command", "broadcast": "broadcast_command", "announce": "announce_command", "deathgame": "deathgame_start", "dgjoin": "dgjoin_command", "dgstatus": "dgstatus_command", "startcouple": "startcouple_command", "joincouple": "joincouple_command", "couplestatus": "couplestatus_command",
+        "gif": "giphy_command", "checkin": "checkin_command", "streakcheck": "streakcheck_command", "vent": "vent_command", "cgift": "cgift_command", "coinboard": "coinboard_command", "rob": "eng_rob_command", "oraclehour": "oraclehour_command", "enter": "enter_command", "eventcheck": "eventcheck_command", "mines": "mines_command", "bet": "bet_command", "betstats": "betstats_command", "topbet": "topbet_command", "wallet": "wallet_command", "deposit": "deposit_command", "withdraw": "withdraw_command", "setpass": "setpass_command", "changepass": "changepass_command", "recover": "recover_command", "hug": "hug_cmd", "pat": "pat_cmd", "highfive": "highfive_cmd", "slap": "slap_cmd", "kiss": "kiss_cmd", "poke": "poke_cmd", "cuddle": "cuddle_cmd", "wave": "wave_cmd", "bite": "bite_cmd", "tickle": "tickle_cmd", "fastmath": "fastmath_command", "wordbomb": "wordbomb_command", "mysterybox": "mysterybox_command", "duel": "duel_command", "confess": "confess_command", "rank": "rank_command", "muse": "muse_command", "bond": "bond_command", "signal": "signal_command", "couples": "couples_command", "bondstatus": "bondstatus_command", "verdict": "verdict_command", "hotseat": "hotseat_command", "silence": "silence_command", "cricket": "cricket_command", "call": "cricket_predict_command", "cpredict": "cricket_predict_command", "cbet": "cricket_bet_command", "cwin": "cricket_win_command", "ctournament": "cricket_tournament_command", "cpick": "cricket_pick_command", "cplay": "cricket_play_command", "broadcast": "broadcast_command", "announce": "announce_command", "startcouple": "startcouple_command", "joincouple": "joincouple_command", "couplestatus": "couplestatus_command",
     }
     for command, callback_name in direct_commands.items():
         if command in reserved or command in existing: continue
