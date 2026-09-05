@@ -9,7 +9,8 @@ class RuntimeRegressionTests(unittest.TestCase):
         source = (ROOT / "bot.py").read_text(encoding="utf-8")
         self.assertIn("build_application", source)
         self.assertIn("_post_init", source)
-        self.assertIn("asyncio.run(startup.run", source)
+        self.assertIn("await startup.run(application, redis_client)", source)
+        self.assertIn("await _post_shutdown(application)", source)
 
     def test_runtime_identity_is_not_hardcoded_to_main(self):
         source = (ROOT / "bot.py").read_text(encoding="utf-8")
