@@ -5,6 +5,7 @@ from openai import AsyncOpenAI
 from telegram import Message
 from ..config import OPENAI_API_KEY, OPENAI_MODEL
 from ..database import Database, now_ts
+from core.storage import storage
 
 class WouldYouRatherGame:
     """Create, track, close, and recover 60-second WYR polls."""
@@ -28,54 +29,77 @@ class WouldYouRatherGame:
 
     async def start_poll(self, chat_id: int, bot, starter_id: int) -> Message:
         """Send and persist a native non-anonymous 60-second poll."""
-        if await self.db.get_active_wyr_session(chat_id):
-            raise RuntimeError('A WYR poll is already active')
-        a, b = await self._dilemma()
-        msg = await bot.send_poll(chat_id, f'☾ Would you rather…\nA: {a}\nB: {b}', [a, b], is_anonymous=False, allows_multiple_answers=False, open_period=60)
-        started = now_ts()
-        state = {'poll_id': msg.poll.id, 'message_id': msg.message_id, 'option_a': a, 'option_b': b, 'voters_a': [], 'voters_b': [], 'group_id': chat_id, 'started_at': started}
-        await self.db.execute("INSERT INTO game_sessions(group_id,game_type,state,current_turn_user_id,started_at,is_active) VALUES(?,?,?,?,?,1)", (chat_id, self.game_type, json.dumps(state), starter_id, started))
-        return msg
+        # The Telegram message ID does not exist until send_poll returns, so a
+        # DB transaction cannot reserve the poll before the network call. A
+        # distributed per-chat lease closes that otherwise real race: two
+        # instances can no longer both observe "no active poll" and both send.
+        async with storage.lock(f"wyr:start:{chat_id}") as acquired:
+            if not acquired:
+                raise RuntimeError('The WYR engine is busy — try again')
+            if await self.db.get_active_wyr_session(chat_id):
+                raise RuntimeError('A WYR poll is already active')
+            a, b = await self._dilemma()
+            msg = await bot.send_poll(chat_id, f'☾ Would you rather…\nA: {a}\nB: {b}', [a, b], is_anonymous=False, allows_multiple_answers=False, open_period=60)
+            started = now_ts()
+            state = {'poll_id': msg.poll.id, 'message_id': msg.message_id, 'option_a': a, 'option_b': b, 'voters_a': [], 'voters_b': [], 'group_id': chat_id, 'started_at': started}
+            try:
+                await self.db.execute("INSERT INTO game_sessions(group_id,game_type,state,current_turn_user_id,started_at,is_active) VALUES(?,?,?,?,?,1)", (chat_id, self.game_type, json.dumps(state), starter_id, started))
+            except Exception:
+                # Never leave an orphaned Telegram poll if persistence fails.
+                try:
+                    await bot.stop_poll(chat_id, msg.message_id)
+                except Exception:
+                    pass
+                raise
+            return msg
 
     async def handle_poll_answer(self, poll_id: str, user_id: int, option: int) -> bool:
         """Silently record or move a user's WYR vote atomically."""
-        return await self.db.update_wyr_votes(poll_id, user_id, option)
+        if option not in (0, 1):
+            return False
+        async with storage.lock(f"wyr:poll:{poll_id}") as acquired:
+            if not acquired:
+                return False
+            return await self.db.update_wyr_votes(poll_id, user_id, option)
 
     async def close_poll(self, poll_id: str, bot, chat_id: int) -> bool:
         """Finalize one active poll, comment in the group, and record history."""
-        rows = await self.db.fetchall("SELECT id,state FROM game_sessions WHERE game_type='would_you_rather' AND is_active=1")
-        target = None
-        for row in rows:
+        async with storage.lock(f"wyr:poll:{poll_id}") as acquired:
+            if not acquired:
+                return False
+            rows = await self.db.fetchall("SELECT id,state FROM game_sessions WHERE game_type='would_you_rather' AND is_active=1")
+            target = None
+            for row in rows:
+                try:
+                    state = json.loads(row['state'])
+                except (TypeError, ValueError):
+                    continue
+                if str(state.get('poll_id')) == str(poll_id):
+                    target = (int(row['id']), state)
+                    break
+            if not target:
+                return False
+            sid, state = target
+            a, b = state.get('voters_a', []), state.get('voters_b', [])
+            ca, cb = len(a), len(b)
+            if not ca and not cb:
+                comment = '☾ The group has chosen silence. Noted.'
+            elif ca == cb:
+                comment = f'☾ A perfect split — {ca} on each side. Oracle expected nothing less.'
+            else:
+                comment = await self._comment(state, a, b, chat_id, ca, cb)
+            result = {'poll_id': poll_id, 'option_a': state.get('option_a'), 'option_b': state.get('option_b'), 'count_a': ca, 'count_b': cb, 'winner_side': 'tie' if ca == cb else ('a' if ca > cb else 'b')}
+            if not await self._close_atomic(sid, result):
+                return False
             try:
-                state = json.loads(row['state'])
-            except (TypeError, ValueError):
-                continue
-            if str(state.get('poll_id')) == str(poll_id):
-                target = (int(row['id']), state)
-                break
-        if not target:
-            return False
-        sid, state = target
-        a, b = state.get('voters_a', []), state.get('voters_b', [])
-        ca, cb = len(a), len(b)
-        if not ca and not cb:
-            comment = '☾ The group has chosen silence. Noted.'
-        elif ca == cb:
-            comment = f'☾ A perfect split — {ca} on each side. Oracle expected nothing less.'
-        else:
-            comment = await self._comment(state, a, b, chat_id, ca, cb)
-        result = {'poll_id': poll_id, 'option_a': state.get('option_a'), 'option_b': state.get('option_b'), 'count_a': ca, 'count_b': cb, 'winner_side': 'tie' if ca == cb else ('a' if ca > cb else 'b')}
-        if not await self._close_atomic(sid, result):
-            return False
-        try:
-            await bot.stop_poll(chat_id, int(state['message_id']))
-        except Exception:
-            pass
-        try:
-            await bot.send_message(chat_id, comment)
-        except Exception:
-            pass
-        return True
+                await bot.stop_poll(chat_id, int(state['message_id']))
+            except Exception:
+                pass
+            try:
+                await bot.send_message(chat_id, comment)
+            except Exception:
+                pass
+            return True
 
     async def _comment(self, state: dict, a: list, b: list, chat_id: int, ca: int, cb: int) -> str:
         """Generate the short Oracle poll-result comment."""
