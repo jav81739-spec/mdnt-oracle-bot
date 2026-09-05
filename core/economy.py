@@ -67,12 +67,9 @@ async def _storage_lock(store: Storage, key: str, ttl: int = 15, wait: float = 5
         try:
             await store.eval(release_script, [f"lock:{key}"], [token])
         except StorageError:
-            # Never fall back to unconditional delete: ownership safety is more important than cleanup.
             pass
 
 
-# The public Storage.lock surface is installed here so all callers share the same
-# ownership-safe implementation without duplicating lock semantics in the storage facade.
 if not hasattr(Storage, "lock"):
     Storage.lock = _storage_lock
 
@@ -90,7 +87,6 @@ class EconomyService:
         key = self.key(user_id, scope)
         try:
             if getattr(self.store, "configured", False):
-                # Economy must never interpret a persistent-store outage as a zero balance.
                 value = await self.store._request("GET", f"/get/{quote(key, safe='')}")
             else:
                 value = await self.store.get(key, "0")
@@ -103,40 +99,96 @@ class EconomyService:
 
     async def add(self, user_id: int, amount: int, reason: str = "adjustment", scope: int | str | None = None) -> Transaction:
         amount = int(amount)
-        if amount < 0: return await self.remove(user_id, -amount, reason, scope)
+        if amount < 0:
+            return await self.remove(user_id, -amount, reason, scope)
         async with self.store.lock(f"economy:{scope}:{int(user_id)}") as acquired:
-            if not acquired: raise EconomyError("economy is busy; please retry")
-            if amount == 0: return Transaction(int(user_id), 0, await self.balance(user_id, scope), reason)
-            try: new_balance = await self.store.incrby(self.key(user_id, scope), amount)
-            except StorageError as exc: raise EconomyError("persistent economy is temporarily unavailable") from exc
+            if not acquired:
+                raise EconomyError("economy is busy; please retry")
+            if amount == 0:
+                return Transaction(int(user_id), 0, await self.balance(user_id, scope), reason)
+            try:
+                new_balance = await self.store.incrby(self.key(user_id, scope), amount)
+            except StorageError as exc:
+                raise EconomyError("persistent economy is temporarily unavailable") from exc
             return Transaction(int(user_id), amount, max(0, new_balance), reason)
 
     async def remove(self, user_id: int, amount: int, reason: str = "spend", scope: int | str | None = None) -> Transaction:
         amount = int(amount)
-        if amount < 0: return await self.add(user_id, -amount, reason, scope)
+        if amount < 0:
+            return await self.add(user_id, -amount, reason, scope)
         async with self.store.lock(f"economy:{scope}:{int(user_id)}") as acquired:
-            if not acquired: raise EconomyError("economy is busy; please retry")
+            if not acquired:
+                raise EconomyError("economy is busy; please retry")
             current = await self.balance(user_id, scope)
-            if current < amount: raise EconomyError("insufficient balance")
-            if amount == 0: return Transaction(int(user_id), 0, current, reason)
-            try: new_balance = await self.store.incrby(self.key(user_id, scope), -amount)
-            except StorageError as exc: raise EconomyError("persistent economy is temporarily unavailable") from exc
-            if new_balance < 0: raise EconomyError("economy consistency check failed")
+            if current < amount:
+                raise EconomyError("insufficient balance")
+            if amount == 0:
+                return Transaction(int(user_id), 0, current, reason)
+            try:
+                new_balance = await self.store.incrby(self.key(user_id, scope), -amount)
+            except StorageError as exc:
+                raise EconomyError("persistent economy is temporarily unavailable") from exc
+            if new_balance < 0:
+                raise EconomyError("economy consistency check failed")
             return Transaction(int(user_id), -amount, new_balance, reason)
+
+    async def _idempotent_mutation(self, user_id: int, amount: int, marker: str, ttl: int, reason: str, scope: int | str | None, *, debit: bool) -> Transaction:
+        """Apply a balance mutation exactly once for a durable operation marker."""
+        amount = int(amount)
+        if amount < 0:
+            return await self._idempotent_mutation(user_id, -amount, marker, ttl, reason, scope, debit=not debit)
+        if amount == 0:
+            return Transaction(int(user_id), 0, await self.balance(user_id, scope), reason)
+        balance_key = self.key(user_id, scope)
+        marker_key = f"economy:op:{scope}:{int(user_id)}:{marker}"
+        script = """
+local done = redis.call('GET', KEYS[2])
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+if done then return {0, current, 1} end
+local amount = tonumber(ARGV[1])
+if ARGV[3] == 'debit' and current < amount then return {-1, current, 0} end
+local next = current + amount
+if ARGV[3] == 'debit' then next = current - amount end
+redis.call('SET', KEYS[1], next)
+redis.call('SET', KEYS[2], '1', 'EX', ARGV[2])
+return {1, next, 0}
+"""
+        try:
+            result = await self.store.eval(script, [balance_key, marker_key], [str(amount), str(max(1, int(ttl))), "debit" if debit else "credit"])
+        except StorageError as exc:
+            raise EconomyError("persistent economy is temporarily unavailable") from exc
+        if not isinstance(result, (list, tuple)) or len(result) < 3:
+            raise EconomyError("economy consistency check failed")
+        status, balance, _ = (int(result[0]), int(result[1]), int(result[2]))
+        if status < 0:
+            raise EconomyError("insufficient balance")
+        delta = 0 if status == 0 else (-amount if debit else amount)
+        return Transaction(int(user_id), delta, max(0, balance), reason)
+
+    async def add_once(self, user_id: int, amount: int, marker: str, ttl: int = 604800, reason: str = "adjustment", scope: int | str | None = None) -> Transaction:
+        return await self._idempotent_mutation(user_id, amount, marker, ttl, reason, scope, debit=False)
+
+    async def remove_once(self, user_id: int, amount: int, marker: str, ttl: int = 604800, reason: str = "spend", scope: int | str | None = None) -> Transaction:
+        return await self._idempotent_mutation(user_id, amount, marker, ttl, reason, scope, debit=True)
 
     async def transfer(self, sender: int, receiver: int, amount: int, reason: str = "transfer", scope: int | str | None = None) -> tuple[Transaction, Transaction]:
         sender, receiver, amount = int(sender), int(receiver), int(amount)
-        if sender == receiver: raise EconomyError("cannot transfer to yourself")
-        if amount <= 0: raise EconomyError("amount must be positive")
+        if sender == receiver:
+            raise EconomyError("cannot transfer to yourself")
+        if amount <= 0:
+            raise EconomyError("amount must be positive")
         first, second = sorted((sender, receiver))
         async with self.store.lock(f"economy:{scope}:{first}") as first_lock:
-            if not first_lock: raise EconomyError("economy is busy; please retry")
+            if not first_lock:
+                raise EconomyError("economy is busy; please retry")
             async with self.store.lock(f"economy:{scope}:{second}") as second_lock:
-                if not second_lock: raise EconomyError("economy is busy; please retry")
+                if not second_lock:
+                    raise EconomyError("economy is busy; please retry")
                 try:
                     sender_balance, receiver_balance = await self.store.atomic_transfer(self.key(sender, scope), self.key(receiver, scope), amount)
                 except StorageError as exc:
-                    if "insufficient" in str(exc).lower(): raise EconomyError("insufficient balance") from exc
+                    if "insufficient" in str(exc).lower():
+                        raise EconomyError("insufficient balance") from exc
                     raise EconomyError("persistent economy is temporarily unavailable") from exc
                 return Transaction(sender, -amount, sender_balance, reason), Transaction(receiver, amount, receiver_balance, reason)
 
