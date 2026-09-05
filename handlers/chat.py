@@ -76,7 +76,18 @@ def ai_service_configured():
     from core.ai import service
     return bool(service.api_key)
 
-SAMPLE_STICKERS=["CAACAgUAAxkBAAEGBzJqdp9ai3sYNonxPitgXwW1HsGYLQACigEAAqMYnj7IByAbmW8_0z0E"]
+SAMPLE_STICKERS=[
+    "CAACAgUAAxkBAAEGBzJqdp9ai3sYNonxPitgXwW1HsGYLQACigEAAqMYnj7IByAbmW8_0z0E",
+    "CAACAgUAAxkBAAEGBzBqdp8mL5Juj0jyC3nh7q2mdBwJbAACyRMAAlJekFeBRat3I0udiz0E",
+    "CAACAgUAAxkBAAEGBy5qdp8Uv6Pi3-VK9BJ7nn8_08Ju5wACsQQAAqQhMVYQIkv-OAABHc49BA",
+    "CAACAgUAAxkBAAEGByxqdp7ystKCl2Rj7YKklllelMrR2gACqRUAAkggCFejMbHj9ySCNj0E",
+    "CAACAgUAAxkBAAEGByZqdp6sg55QIGUcBVbW5ZvbvR1B8QACFhEAAlYTiVduxmgSyR8nUT0E",
+    "CAACAgUAAxkBAAEGBxxqdp587c9-Vw1hftneSbQ9pWWtXQAC5BgAAremsVRaWlNEWRIuZz0E",
+    "CAACAgUAAxkBAAEGBxpqdp5twHyvyAABbNEdbXdkTXCb7eAAAukaAAK32rhVVsDSda6ab2w9BA",
+    "CAACAgUAAxkBAAEGBzRqdp_FeJQQ3EJfKq_Y7fZ-5l9lngAC5wEAAq4xRgWFtzPKdb1ZuD0E",
+    "CAACAgUAAxkBAAEGBzZqdp_rySrqxo6FHWJ7J7VCq9HesAAC_xAAAn9jEVbXO-B4ukFDLz0E",
+    "CAACAgUAAxkBAAEGBzhqdqAQk68E9J2t0sf1bwMizD3_ogACqgMAAnC-SFblo1QW5PoU0D0E",
+]
 _recent_stickers={}; GIF_SEARCH_TERMS=["funny reaction","excited","lol","confused","celebration","facepalm"]; REACTION_EMOJIS=["👍","🔥","🎉","👀","😁"]
 def _pick_sticker(cid):
     recent=_recent_stickers.get(cid,[]); available=[s for s in SAMPLE_STICKERS if s not in recent] or SAMPLE_STICKERS; choice=_random.choice(available); recent.append(choice); _recent_stickers[cid]=recent[-4:]; return choice
