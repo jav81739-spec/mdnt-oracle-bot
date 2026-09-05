@@ -10,6 +10,7 @@ from ..games.would_you_rather import WouldYouRatherGame
 from ..games.never_have_i_ever import NeverHaveIEverGame
 from ..games.word_scramble import WordScrambleGame
 from ..games.prediction import PredictionEngine
+from core.storage import storage
 
 def _member(update:Update)->object:
     """Build the member object consumed by game engines."""
@@ -28,19 +29,39 @@ async def start_game(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
         return
     cls={'tod':TruthDareGame,'nhie':NeverHaveIEverGame,'scramble':WordScrambleGame}.get(name)
     if not cls:return
-    text=await cls(db).start(update.effective_chat.id,member);await update.effective_message.reply_text(text,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('End game',callback_data='game:end')]]))
-    if name=='scramble':_schedule_scramble(context,update.effective_chat.id)
+    if name=='scramble':
+        async with storage.lock(f'scramble:{update.effective_chat.id}') as acquired:
+            if not acquired:
+                await update.effective_message.reply_text('⏳ The game engine is busy — try again.')
+                return
+            text=await cls(db).start(update.effective_chat.id,member)
+    else:
+        text=await cls(db).start(update.effective_chat.id,member)
+    await update.effective_message.reply_text(text,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('End game',callback_data='game:end')]]))
+    if name=='scramble' and text and 'already running' not in text:_schedule_scramble(context,update.effective_chat.id)
 
 def _schedule_scramble(context:ContextTypes.DEFAULT_TYPE,group_id:int)->None:
     """Schedule the active scramble's 30-second timeout."""
     sched=context.application.bot_data.get('oracle_scheduler');db=context.application.bot_data.get('oracle_db')
-    if sched and db:sched.scheduler.add_job(_scramble_timeout,'date',run_date=datetime.now(sched.timezone)+timedelta(seconds=30),args=[context.application,db,group_id],id=f'scramble_timeout_{group_id}',replace_existing=True)
+    if sched and db:
+        row_state=None
+        # Scheduling is best-effort; durable round_start_time is the source of truth.
+        # The timeout handler re-checks state before mutating anything.
+        sched.scheduler.add_job(_scramble_timeout,'date',run_date=datetime.now(sched.timezone)+timedelta(seconds=30),args=[context.application,db,group_id],id=f'scramble_timeout_{group_id}',replace_existing=True)
 
 async def _scramble_timeout(application,db,group_id:int)->None:
     """Resolve an unanswered scramble round and continue or finish."""
-    text=await WordScrambleGame(db).timeout(group_id)
-    if text:
-        await application.bot.send_message(group_id,text);row=await WordScrambleGame(db).get_active(group_id)
+    async with storage.lock(f'scramble:{group_id}') as acquired:
+        if not acquired:return
+        row=await WordScrambleGame(db).get_active(group_id)
+        if not row:return
+        state=json.loads(row['state'])
+        started=float(state.get('round_start_time',0) or 0)
+        if not state.get('awaiting_answer') or (started and datetime.now(timezone.utc).timestamp()-started<29):return
+        text=await WordScrambleGame(db).timeout(group_id)
+        if not text:return
+        await application.bot.send_message(group_id,text)
+        row=await WordScrambleGame(db).get_active(group_id)
         if row and json.loads(row['state']).get('awaiting_answer'):
             sched=application.bot_data.get('oracle_scheduler')
             if sched:sched.scheduler.add_job(_scramble_timeout,'date',run_date=datetime.now(sched.timezone)+timedelta(seconds=30),args=[application,db,group_id],id=f'scramble_timeout_{group_id}',replace_existing=True)
@@ -61,11 +82,16 @@ async def handle_game_message(update:Update,context:ContextTypes.DEFAULT_TYPE)->
         except Exception:pass
     await msg.reply_text(text or '☾ Counted.')
     if finished:
-        final=await game.finish(chat.id)
-        if final:await msg.reply_text(final)
+        async with storage.lock(f'scramble:{chat.id}') as acquired:
+            if acquired:
+                final=await game.finish(chat.id)
+                if final:await msg.reply_text(final)
     else:
-        await asyncio.sleep(3);next_text=await game.next_round(chat.id)
-        if next_text:await msg.reply_text(next_text);_schedule_scramble(context,chat.id)
+        await asyncio.sleep(3)
+        async with storage.lock(f'scramble:{chat.id}') as acquired:
+            if not acquired:return
+            next_text=await game.next_round(chat.id)
+            if next_text:await msg.reply_text(next_text);_schedule_scramble(context,chat.id)
 
 async def handle_poll_answer(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
     """Silently store a WYR poll answer."""
@@ -95,7 +121,9 @@ async def end_game(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
         except Exception:pass
     row=await db.fetchone("SELECT game_type FROM game_sessions WHERE group_id=? AND is_active=1 ORDER BY id DESC LIMIT 1",(gid,))
     if row and row['game_type']=='word_scramble':
-        await update.effective_message.reply_text(await WordScrambleGame(db).endgame(gid));return
+        async with storage.lock(f'scramble:{gid}') as acquired:
+            if not acquired:return
+            await update.effective_message.reply_text(await WordScrambleGame(db).endgame(gid));return
     await update.effective_message.reply_text(await GameEngine(db).endgame(gid))
 
 async def game_callback(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
