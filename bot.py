@@ -42,6 +42,15 @@ def build_application() -> Application:
     return application
 
 
+async def _run() -> None:
+    """Run startup and always execute the canonical resource shutdown hook."""
+    application = build_application()
+    try:
+        await startup.run(application, redis_client)
+    finally:
+        await _post_shutdown(application)
+
+
 def main() -> None:
     """Run the canonical startup manager exactly once."""
     log.info(
@@ -50,7 +59,7 @@ def main() -> None:
         os.getenv("RENDER_GIT_COMMIT", os.getenv("GIT_COMMIT", "unknown")),
         os.getpid(),
     )
-    asyncio.run(startup.run(build_application(), redis_client))
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":
