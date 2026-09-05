@@ -237,6 +237,26 @@ class Storage:
             raise StorageError("invalid atomic claim response")
         return bool(int(result[0])), int(result[1])
 
+    async def atomic_remove(self, key: str, amount: int) -> int:
+        """Atomically debit a non-negative balance without allowing an overdraft."""
+        amount = int(amount)
+        if amount < 0:
+            raise StorageError("remove amount must not be negative")
+        if not self.configured:
+            async with self._local_lock:
+                self._expire_local_locked()
+                current = max(0, int(self._local.get(key, 0) or 0))
+                if current < amount:
+                    raise StorageError("insufficient balance")
+                current -= amount
+                self._local[key] = str(current)
+                return current
+        script = "local a=tonumber(ARGV[1]); local c=tonumber(redis.call('GET',KEYS[1]) or '0'); if c<a then return {0,c} end; c=c-a; redis.call('SET',KEYS[1],c); return {1,c}"
+        result = await self.eval(script, [key], [str(amount)])
+        if not isinstance(result, list) or len(result) != 2 or int(result[0]) != 1:
+            raise StorageError("insufficient balance")
+        return int(result[1])
+
     async def scan(self, pattern: str = "*", count: int = 100) -> list[str]:
         count = max(1, min(int(count), 500))
         if not self.configured:
@@ -299,59 +319,56 @@ class Storage:
                     return -1
                 return max(0, int(expiry - time.time()))
         try:
-            return int(await self._command("TTL", key))
+            return int(await self._command("TTL", key) or -2)
         except StorageError:
             log.exception("TTL failed for key=%s", key)
             return -2
 
-    async def context(self, prefix: str) -> "StorageContext":
-        return StorageContext(self, prefix)
-
     def _expire_local_locked(self) -> None:
         now = time.time()
-        expired = [key for key, expiry in self._local_expiry.items() if expiry <= now]
-        for key in expired:
-            self._local_expiry.pop(key, None)
-            self._local.pop(key, None)
+        for key, expiry in list(self._local_expiry.items()):
+            if expiry <= now:
+                self._local_expiry.pop(key, None)
+                self._local.pop(key, None)
+                self._local_lists.pop(key, None)
+
+    @asynccontextmanager
+    async def lock(self, key: str, ttl: int = 60, wait: float = 5) -> AsyncIterator[bool]:
+        """Acquire a best-effort distributed lock with a sufficiently long default lease."""
+        token = f"lock-{id(self)}-{time.monotonic_ns()}"
+        deadline = time.monotonic() + max(0.0, float(wait))
+        lock_key = f"lock:{key}"
+        acquired = False
+        if not self.configured:
+            lock = _LOCAL_LOCKS.setdefault(key, asyncio.Lock())
+            try:
+                await asyncio.wait_for(lock.acquire(), timeout=max(0.0, float(wait)))
+                acquired = True
+            except asyncio.TimeoutError:
+                acquired = False
+            try:
+                yield acquired
+            finally:
+                if acquired and lock.locked():
+                    lock.release()
+            return
+        while time.monotonic() <= deadline:
+            try:
+                if await self.setnx(lock_key, token, ttl=max(1, int(ttl))):
+                    acquired = True
+                    break
+            except StorageError:
+                pass
+            await asyncio.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                script = "if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end"
+                try:
+                    await self.eval(script, [lock_key], [token])
+                except StorageError:
+                    log.exception("LOCK_RELEASE_FAILED | key=%s", key)
 
 
-class StorageContext:
-    def __init__(self, store: Storage, prefix: str) -> None:
-        self.store = store
-        self.prefix = prefix.rstrip(":")
-
-    def _key(self, key: str) -> str:
-        return f"{self.prefix}:{key}"
-
-    async def get(self, key: str, default: Any = None) -> Any:
-        return await self.store.get(self._key(key), default)
-
-    async def load(self, key: str, default: Any = None) -> Any:
-        return await self.store.load(self._key(key), default)
-
-    async def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
-        return await self.store.set(self._key(key), value, ttl)
-
-    async def save(self, key: str, value: Any, ttl: int | None = None) -> bool:
-        return await self.store.save(self._key(key), value, ttl)
-
-    async def delete(self, *keys: str) -> int:
-        return await self.store.delete(*(self._key(key) for key in keys))
-
-    async def incrby(self, key: str, amount: int) -> int:
-        return await self.store.incrby(self._key(key), amount)
-
-    async def scan(self, pattern: str = "*") -> list[str]:
-        return await self.store.scan(self._key(pattern))
-
-
-storage = Storage()
-
-
-@asynccontextmanager
-async def storage_lifecycle() -> AsyncIterator[Storage]:
-    await storage.start()
-    try:
-        yield storage
-    finally:
-        await storage.close()
+_LOCAL_LOCKS: dict[str, asyncio.Lock] = {}
