@@ -1,7 +1,7 @@
 """Autonomous scheduler plus durable game and secret-event recovery."""
 from __future__ import annotations
 import json
-from datetime import datetime,timedelta
+from datetime import datetime,timedelta,timezone
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram.ext import Application
@@ -14,6 +14,7 @@ from .engines.secret_event_engine import SecretEventEngine
 from .games.would_you_rather import WouldYouRatherGame
 from .games.word_scramble import WordScrambleGame
 from core.oracle_pulse import pulse_callback
+from core.storage import storage
 
 class OracleScheduler:
     """Run scheduled friendship events and recover durable timed workflows."""
@@ -21,14 +22,13 @@ class OracleScheduler:
         """Create the scheduler.""";self.application=application;self.db=db;self.timezone=timezone;self.scheduler=AsyncIOScheduler(timezone=timezone)
     async def _pulse(self)->None:
         """Bridge the Telegram job context expected by Oracle Pulse into APScheduler."""
-        context=type('PulseContext',(),{'application':self.application})()
-        await pulse_callback(context)
+        context=type('PulseContext',(),{'application':self.application})();await pulse_callback(context)
     def start(self)->None:
         """Register autonomous jobs exactly once, including recovery and Oracle Presence."""
         if self.scheduler.running:return
         self.scheduler.add_job(self.morning,'cron',hour=MORNING_HOUR,minute=MORNING_MINUTE,id='oracle_morning',replace_existing=True);self.scheduler.add_job(self.evening,'cron',hour=EVENING_HOUR,minute=EVENING_MINUTE,id='oracle_evening',replace_existing=True);self.scheduler.add_job(self.three_am,'cron',hour=3,minute=0,id='oracle_3am',replace_existing=True);self.scheduler.add_job(self.absence_daily,'cron',hour=14,minute=0,id='oracle_absence',replace_existing=True);self.scheduler.add_job(self.secret_daily,'cron',hour=15,minute=0,id='oracle_secret',replace_existing=True);self.scheduler.add_job(self.recover_timed,'date',run_date=datetime.now(self.timezone)+timedelta(seconds=2),id='oracle_recovery',replace_existing=True);self.scheduler.add_job(self._pulse,'interval',minutes=15,id='oracle_pulse',replace_existing=True,max_instances=1,coalesce=True);self.scheduler.start()
     async def recover_timed(self)->None:
-        """Recover expired WYR polls, reschedule live WYR polls, reset interrupted scrambles, and reveal overdue secret events."""
+        """Recover timed workflows without destroying an interrupted active game."""
         await SecretEventEngine(self.db).recover_unrevealed(self.application.bot)
         wyr=WouldYouRatherGame(self.db)
         rows=await self.db.fetchall("SELECT state FROM game_sessions WHERE game_type='would_you_rather' AND is_active=1")
@@ -40,24 +40,38 @@ class OracleScheduler:
                 if now_ts()>=due:await wyr.close_poll(poll_id,self.application.bot,gid)
                 else:self.scheduler.add_job(wyr.close_poll,'date',run_date=datetime.fromtimestamp(due,tz=self.timezone),args=[poll_id,self.application.bot,gid],id=f'wyr_close_{poll_id}',replace_existing=True)
             except Exception:continue
-        rows=await self.db.fetchall("SELECT group_id FROM game_sessions WHERE game_type='word_scramble' AND is_active=1")
+        # A scramble is already durable. Never announce "starting fresh" or create
+        # a second game merely because the process restarted. Resume its exact round
+        # and schedule only the remaining portion of its 30-second timer.
+        rows=await self.db.fetchall("SELECT group_id,state FROM game_sessions WHERE game_type='word_scramble' AND is_active=1")
         for r in rows:
-            gid=int(r['group_id'])
-            try:await self.application.bot.send_message(gid,'☾ Oracle lost its place. Starting fresh.')
-            except Exception:pass
-            await self.db.execute("UPDATE game_sessions SET is_active=0,ended_at=? WHERE group_id=? AND game_type='word_scramble' AND is_active=1",(now_ts(),gid))
             try:
-                member=type('Member',(),{'user_id':0,'preferred_name':'Oracle','relationship_tier':'known'})()
-                text=await WordScrambleGame(self.db).start(gid,member);await self.application.bot.send_message(gid,text);self.scheduler.add_job(self._scramble_timeout,'date',run_date=datetime.now(self.timezone)+timedelta(seconds=30),args=[gid],id=f'scramble_timeout_{gid}',replace_existing=True)
-            except Exception:pass
+                gid=int(r['group_id']);state=json.loads(r['state']);
+                if not state.get('awaiting_answer'):continue
+                started=float(state.get('round_start_time',0) or 0)
+                remaining=max(0.5,30-(now_ts()-started)) if started else 30
+                self.scheduler.add_job(self._scramble_timeout,'date',run_date=datetime.now(self.timezone)+timedelta(seconds=remaining),args=[gid],id=f'scramble_timeout_{gid}',replace_existing=True)
+            except Exception:continue
     async def _scramble_timeout(self,group_id:int)->None:
         """Resolve a recovered scramble timeout and schedule its next round when needed."""
-        text=await WordScrambleGame(self.db).timeout(group_id)
-        if not text:return
-        try:await self.application.bot.send_message(group_id,text)
-        except Exception:pass
-        row=await WordScrambleGame(self.db).get_active(group_id)
-        if row and json.loads(row['state']).get('awaiting_answer'):self.scheduler.add_job(self._scramble_timeout,'date',run_date=datetime.now(self.timezone)+timedelta(seconds=30),args=[group_id],id=f'scramble_timeout_{group_id}',replace_existing=True)
+        async with storage.lock(f'scramble:{group_id}') as acquired:
+            if not acquired:return
+            game=WordScrambleGame(self.db);row=await game.get_active(group_id)
+            if not row:return
+            try:state=json.loads(row['state'])
+            except (TypeError,ValueError):return
+            if not state.get('awaiting_answer'):return
+            started=float(state.get('round_start_time',0) or 0)
+            if started and now_ts()-started<29:return
+            text=await game.timeout(group_id)
+            if not text:return
+            try:await self.application.bot.send_message(group_id,text)
+            except Exception:return
+            row=await game.get_active(group_id)
+            if row:
+                try:awaiting=json.loads(row['state']).get('awaiting_answer')
+                except (TypeError,ValueError):awaiting=False
+                if awaiting:self.scheduler.add_job(self._scramble_timeout,'date',run_date=datetime.now(self.timezone)+timedelta(seconds=30),args=[group_id],id=f'scramble_timeout_{group_id}',replace_existing=True)
     async def morning(self)->None:
         """Send morning check-ins only to recently active groups."""
         for r in await self.db.fetchall('SELECT group_id,group_name FROM group_profile WHERE morning_active=1'):
