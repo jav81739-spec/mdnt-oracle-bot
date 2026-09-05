@@ -13,9 +13,9 @@ import legacy_bot
 from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule, marriage, deathgames_v2 as deathgames
 from handlers import economy_compat, deathgames_hardened, legacy_economy_atomic
 
-# The betting/vault surface still intentionally uses its legacy key namespace.
-# Harden its read-modify-write helpers before callbacks are registered, without
-# changing the command names or the legacy data format.
+# Harden the still-live legacy betting/vault surface before callbacks are
+# registered. This preserves its legacy keys and user-facing behaviour while
+# serializing unsafe read-modify-write mutations.
 legacy_economy_atomic.harden(legacy_bot)
 
 log = logging.getLogger("midnight.legacy_surface")
@@ -125,9 +125,32 @@ def register_legacy_surface(app) -> dict[str, object]:
         else:
             skipped.append(command)
 
-    # Legacy social/member trackers remain registered below because they feed
-    # separate legacy verdict/title surfaces; do not silently remove them.
-    app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, legacy_bot.track_members), group=13)
-    app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, legacy_bot.track_msg_count), group=14)
+    for command, callback_name in direct_commands.items():
+        if command in reserved or command in existing:
+            continue
+        if _add_command(app, existing, command, legacy_bot, callback_name):
+            added.append(command)
+        else:
+            skipped.append(command)
 
-    return {"added": added, "skipped": skipped, "total": len(added)}
+    try:
+        if callable(getattr(legacy_bot, "mines_cb", None)): app.add_handler(CallbackQueryHandler(legacy_bot.mines_cb, pattern=r"^mn_"), group=0)
+        if callable(getattr(legacy_bot, "fastmath_answer", None)): app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, legacy_bot.fastmath_answer), group=9)
+        if callable(getattr(legacy_bot, "wordbomb_play", None)): app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, legacy_bot.wordbomb_play), group=10)
+        if callable(getattr(legacy_bot, "silence_watcher", None)): app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, legacy_bot.silence_watcher), group=12)
+        if callable(getattr(legacy_bot, "track_groups", None)): app.add_handler(MessageHandler(filters.ChatType.GROUPS, legacy_bot.track_groups), group=15)
+        if callable(getattr(legacy_bot, "track_members", None)): app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, legacy_bot.track_members), group=13)
+        if callable(getattr(legacy_bot, "track_msg_count", None)): app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, legacy_bot.track_msg_count), group=14)
+        if callable(getattr(legacy_bot, "track_group_activity", None)): app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, legacy_bot.track_group_activity), group=11)
+        if callable(getattr(legacy_bot, "_register_bond_activity", None)): app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, legacy_bot._register_bond_activity), group=-10)
+        if callable(getattr(legacy_bot, "handle_channel_post", None)): app.add_handler(MessageHandler(filters.IS_AUTOMATIC_FORWARD & filters.ChatType.GROUPS, legacy_bot.handle_channel_post), group=0)
+        if callable(getattr(legacy_bot, "bbet_handler", None)): app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r"(?i)^bbet\s+\S+"), legacy_bot.bbet_handler), group=0)
+        if callable(getattr(legacy_bot, "midnight_member_welcome", None)):
+            from telegram.ext import ChatMemberHandler
+            app.add_handler(ChatMemberHandler(legacy_bot.midnight_member_welcome, ChatMemberHandler.CHAT_MEMBER))
+    except Exception:
+        log.exception("LEGACY_AUXILIARY_REGISTRATION_FAILED")
+    log.info("LEGACY_SURFACE_READY | added=%d | skipped=%d | total=%d", len(added), len(skipped), len(existing))
+    if skipped:
+        log.warning("LEGACY_SURFACE_SKIPPED | commands=%s", ",".join(sorted(set(skipped))))
+    return {"added": added, "skipped": skipped, "total": len(existing)}
