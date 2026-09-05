@@ -1,9 +1,8 @@
 """Canonical live-chat bridge for Midnight Oracle.
 
 This module deliberately contains no alternate AI implementation. It only connects
-Telegram's text updates to the already-initialized MessageRouter so DM, summoned
-group chat, memory, cooldowns, media, achievements and the real AI generator all
-share one path.
+private Telegram text updates to the already-initialized MessageRouter. Group text
+is routed by the canonical world/game lifecycle first, then by the primary router.
 """
 from __future__ import annotations
 
@@ -26,7 +25,10 @@ async def handle_live_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not text or text.startswith("/"):
         return
 
-    if chat.type not in {"private", "group", "supergroup"}:
+    # Group messages already have a canonical lifecycle handler in main.py.
+    # Keeping this bridge private-only prevents it from running before games and
+    # before the primary group router, which could otherwise produce double work.
+    if chat.type != "private":
         return
 
     router = context.application.bot_data.get("oracle_router")
