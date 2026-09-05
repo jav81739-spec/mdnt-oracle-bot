@@ -1,7 +1,6 @@
 """Private owner diagnostics and safe operational helpers for Midnight Oracle."""
 from __future__ import annotations
 
-from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
@@ -18,7 +17,12 @@ def _owner_id() -> int:
 
 
 def _private(update: Update) -> bool:
-    return bool(update.effective_user and update.effective_user.id == _owner_id())
+    return bool(
+        update.effective_user
+        and update.effective_user.id == _owner_id()
+        and update.effective_chat
+        and update.effective_chat.type == "private"
+    )
 
 
 def _member_label(user: Any) -> str:
@@ -37,7 +41,7 @@ async def owner_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     started = data.get("oracle_started_at")
     await update.effective_message.reply_text(
         "☾ 𝐎𝐖𝐍𝐄𝐑 · 𝐎𝐑𝐀𝐂𝐋𝐄\n\n"
-        f"Runtime: {'online' if started else 'online'}\n"
+        f"Runtime: {'online' if started else 'not marked started'}\n"
         f"Scheduler: {'ready' if getattr(app, 'job_queue', None) else 'unavailable'}\n"
         f"Known chats: {len(data.get('known_chats', {})) if isinstance(data.get('known_chats'), dict) else 0}\n"
         f"Checked: {datetime.now(timezone.utc).isoformat(timespec='seconds')}"
