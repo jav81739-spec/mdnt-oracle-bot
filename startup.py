@@ -22,8 +22,8 @@ async def _store_set(key:str,value:str,ttl:int=0)->bool:
     try:
         if _storage is None:return False
         result=_storage.setex(key,ttl,value) if ttl else _storage.set(key,value)
-        if asyncio.iscoroutine(result):await result
-        return True
+        if asyncio.iscoroutine(result):result=await result
+        return bool(result) if result is not None else True
     except Exception as exc:log.debug("storage.set(%s) failed: %s",key,exc);return False
 async def _store_setnx(key:str,value:str,ttl:int)->bool:
     try:
@@ -55,35 +55,25 @@ async def _store_compare_delete(key:str,expected:str)->bool:
         log.error("storage.compare_delete is unavailable; refusing unsafe lease deletion")
         return False
     except Exception as exc:log.debug("storage.compare_delete(%s) failed: %s",key,exc);return False
-async def _store_delete(key:str)->bool:
-    try:
-        if _storage is None:return False
-        result=_storage.delete(key)
-        if asyncio.iscoroutine(result):await result
-        return True
-    except Exception as exc:log.debug("storage.delete(%s) failed: %s",key,exc);return False
 async def _refresh_lease(raw:str|None=None)->bool:
     current=raw if raw is not None else await _store_get(_LEASE_KEY)
     if not current:return False
-    try:
-        info=json.loads(current)
-        if info.get("instance")!=_INSTANCE_ID:return False
+    try: info=json.loads(current)
     except Exception:return False
+    if info.get("instance")!=_INSTANCE_ID:return False
     replacement=json.dumps({"instance":_INSTANCE_ID,"ts":time.time()})
     return await _store_compare_set(_LEASE_KEY,current,replacement,_LEASE_TTL)
 async def _acquire_lease()->bool:
     raw=await _store_get(_LEASE_KEY)
     if raw:
         try:
-            info=json.loads(raw);owner=info.get("instance");age=time.time()-info.get("ts",0)
+            info=json.loads(raw);owner=info.get("instance");age=time.time()-float(info.get("ts",0))
             if owner==_INSTANCE_ID:return await _refresh_lease(raw)
             if age<_LEASE_TTL:log.info("POLLING_LEASE held by %s (age %.0fs, TTL %ds)",owner,age,_LEASE_TTL);return False
             log.warning("Stale lease from %s (age %.0fs > TTL %ds) — reclaiming",owner,age,_LEASE_TTL)
         except Exception:pass
     token=json.dumps({"instance":_INSTANCE_ID,"ts":time.time()})
-    if await _store_setnx(_LEASE_KEY,token,_LEASE_TTL):
-        log.info("Polling lease acquired by %s",_INSTANCE_ID);return True
-    return False
+    return await _store_setnx(_LEASE_KEY,token,_LEASE_TTL)
 async def _release_lease():
     raw=await _store_get(_LEASE_KEY)
     if raw:
@@ -101,8 +91,7 @@ async def _lease_heartbeat_loop():
         try:
             if not await _refresh_lease():
                 log.error("Polling lease ownership lost — stopping Telegram runtime")
-                await _graceful_shutdown()
-                break
+                await _graceful_shutdown();break
         except Exception as exc:log.warning("Lease refresh failed: %s",exc)
 async def _wait_for_lease()->bool:
     deadline=time.time()+_LEASE_WAIT_MAX
@@ -113,11 +102,21 @@ async def _wait_for_lease()->bool:
         log.info("POLLING_LEASE busy — waiting %.0fs (%.0fs remaining)",wait,remaining);await asyncio.sleep(wait)
     log.error("Could not acquire polling lease within %ds — giving up",_LEASE_WAIT_MAX);return False
 _REGISTRY_KEY="midnight:chat_registry"
+_REGISTRY_LOCK="midnight:chat_registry:lock"
 async def register_chat(chat_id:int,chat_type:str,title:str=""):
-    if chat_type=="private":return
+    if chat_type=="private":return False
+    lock = getattr(_storage,"lock",None) if _storage is not None else None
+    if callable(lock):
+        async with lock(_REGISTRY_LOCK,ttl=60,wait=2) as acquired:
+            if not acquired:return False
+            return await _register_chat_unlocked(chat_id,chat_type,title)
+    return await _register_chat_unlocked(chat_id,chat_type,title)
+async def _register_chat_unlocked(chat_id:int,chat_type:str,title:str=""):
     try:
-        raw=await _store_get(_REGISTRY_KEY);registry:dict=json.loads(raw) if raw else {};registry[str(chat_id)]={"type":chat_type,"title":title[:100],"seen":int(time.time())};await _store_set(_REGISTRY_KEY,json.dumps(registry,ensure_ascii=False))
-    except Exception as exc:log.debug("register_chat failed: %s",exc)
+        raw=await _store_get(_REGISTRY_KEY);registry:dict=json.loads(raw) if raw else {}
+        registry[str(chat_id)]={"type":chat_type,"title":str(title or "")[:100],"seen":int(time.time())}
+        return await _store_set(_REGISTRY_KEY,json.dumps(registry,ensure_ascii=False))
+    except Exception as exc:log.debug("register_chat failed: %s",exc);return False
 async def get_chat_registry()->dict:
     try:
         raw=await _store_get(_REGISTRY_KEY);return json.loads(raw) if raw else {}
@@ -125,7 +124,7 @@ async def get_chat_registry()->dict:
 async def get_broadcast_targets(include_groups:bool=True,include_channels:bool=True)->list[int]:
     registry=await get_chat_registry();targets=[]
     for cid_str,info in registry.items():
-        t=info.get("type","")
+        t=info.get("type","") if isinstance(info,dict) else ""
         if include_groups and t in ("group","supergroup"):targets.append(int(cid_str))
         elif include_channels and t=="channel":targets.append(int(cid_str))
     return targets
@@ -174,7 +173,7 @@ def _install_jobqueue_compat()->None:
         if hasattr(JobQueue,"run_weekly"):return
         def run_weekly(self,callback,time,weekday=0,data=None,name=None,chat_id=None,user_id=None,job_kwargs=None):
             ptb_day=(int(weekday)+1)%7
-            return self.run_daily(callback,time=time,days=(ptb_day,),data=data,name=name,chat_id=chat_id,user_id=user_id,job_kwargs=job_kwargs)
+            return self.run_daily(callback,time=time,days=(ptb_day,),data=data,chat_id=chat_id,user_id=user_id,job_kwargs=job_kwargs,name=name)
         JobQueue.run_weekly=run_weekly;log.info("JobQueue compatibility: installed run_weekly() adapter")
     except Exception as exc:log.exception("Could not install JobQueue compatibility adapter: %s",exc);raise
 async def _verify_command_menu(application)->None:
@@ -184,12 +183,6 @@ async def _verify_command_menu(application)->None:
             commands=await application.bot.get_my_commands(scope=scope);log.info("COMMAND_MENU_VERIFIED | scope=%s | count=%d | commands=%s",label,len(commands),",".join(c.command for c in commands))
     except Exception as exc:log.exception("COMMAND_MENU_VERIFY_FAILED | %r",exc)
 def _install_live_runtime_bridges(application)->None:
-    """Explicitly install the canonical human-chat and autonomous social surfaces.
-
-    This is deliberately done by the canonical startup manager rather than relying
-    on import-time monkey patches, so Render's real process always gets the same
-    handlers and social jobs.
-    """
     try:
         from telegram.ext import MessageHandler,filters
         from handlers.live_chat_bridge import handle_live_chat
@@ -202,19 +195,13 @@ def _install_live_runtime_bridges(application)->None:
             from core.public_output_guard import guard_post
             guard_marker="_midnight_public_output_guard_installed"
             if not application.bot_data.get(guard_marker):
-                social_engine._post=guard_post(social_engine._post)
-                application.bot_data[guard_marker]=True
-                log.info("PUBLIC_OUTPUT_GUARD_READY | expressive=on")
-        except Exception:
-            log.exception("PUBLIC_OUTPUT_GUARD_INSTALL_FAILED")
+                social_engine._post=guard_post(social_engine._post);application.bot_data[guard_marker]=True;log.info("PUBLIC_OUTPUT_GUARD_READY | expressive=on")
+        except Exception:log.exception("PUBLIC_OUTPUT_GUARD_INSTALL_FAILED")
         track_marker="_midnight_social_member_tracker_registered"
         if not application.bot_data.get(track_marker):
             application.add_handler(MessageHandler(filters.ChatType.GROUPS,social_engine.track_member),group=-39);application.bot_data[track_marker]=True;log.info("SOCIAL_MEMBER_REGISTRY_READY")
-        social_engine.register_jobs(application)
-        log.info("AUTONOMOUS_SOCIAL_ENGINE_READY | scheduled=19 | dynamic_group_targets=on")
-    except Exception:
-        log.exception("LIVE_RUNTIME_BRIDGE_INSTALL_FAILED")
-        raise
+        social_engine.register_jobs(application);log.info("AUTONOMOUS_SOCIAL_ENGINE_READY | scheduled=19 | dynamic_group_targets=on")
+    except Exception:log.exception("LIVE_RUNTIME_BRIDGE_INSTALL_FAILED");raise
 async def run(application,storage_client=None):
     global _storage,_app,_lease_task,_polling_started,_shutting_down
     if not logging.root.handlers:logging.basicConfig(format="%(asctime)s %(name)s %(levelname)s %(message)s",level=logging.INFO)
@@ -228,9 +215,7 @@ async def run(application,storage_client=None):
         _install_live_runtime_bridges(application)
         await application.start();await application.bot.get_me();await _verify_command_menu(application)
         await application.updater.start_polling(drop_pending_updates=False,allowed_updates=["message","edited_message","callback_query","chat_member","my_chat_member","poll_answer","poll","inline_query"])
-        _polling_started=True
-        log.info("TELEGRAM_POLLING_STARTED | instance=%s | pending_updates=preserved",_INSTANCE_ID)
-        await asyncio.Event().wait()
+        _polling_started=True;log.info("TELEGRAM_POLLING_STARTED | instance=%s | pending_updates=preserved",_INSTANCE_ID);await asyncio.Event().wait()
     except asyncio.CancelledError:pass
     except Exception as exc:log.exception("Fatal error in polling loop: %s",exc)
     finally:await _graceful_shutdown()
