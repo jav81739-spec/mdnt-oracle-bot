@@ -55,22 +55,15 @@ def harden(legacy_bot) -> None:
     if _CONFIGURED:
         return
 
+    # _addcoins is a single-key read-modify-write. Wrap the original helper
+    # rather than replacing _setcoins too: _addcoins calls _setcoins internally,
+    # and nested acquisition of the same distributed lock would deadlock.
     original_add = getattr(legacy_bot, "_addcoins", None)
     if callable(original_add):
         @_with_lock(lambda uid: f"legacy:economy:coins:{uid}")
         async def atomic_add(uid, amount):
-            # Keep the original implementation and semantics; serialize the
-            # whole read-modify-write so concurrent mutations cannot overwrite
-            # each other.
             return await original_add(uid, amount)
         legacy_bot._addcoins = atomic_add
-
-    original_setcoins = getattr(legacy_bot, "_setcoins", None)
-    if callable(original_setcoins):
-        @_with_lock(lambda uid: f"legacy:economy:coins:{uid}")
-        async def atomic_setcoins(uid, amount):
-            return await original_setcoins(uid, amount)
-        legacy_bot._setcoins = atomic_setcoins
 
     # Deposit/withdraw each move value between coins:<uid> and wallet:<uid>
     # with two writes. Serializing the entire command preserves its existing
