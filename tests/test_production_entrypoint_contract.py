@@ -22,7 +22,8 @@ class ProductionEntrypointContractTests(unittest.TestCase):
         self.assertIn('Application', imported_from_telegram)
         source = pathlib.Path('bot.py').read_text(encoding='utf-8')
         self.assertIn('build_application as _canonical_build_application', source)
-        self.assertIn('asyncio.run(startup.run(build_application(), redis_client))', source)
+        self.assertIn('await startup.run(application, redis_client)', source)
+        self.assertIn('await _post_shutdown(application)', source)
         self.assertNotIn('import legacy_bot', source)
         names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
         self.assertNotIn('ChatMemberHandler', names)
