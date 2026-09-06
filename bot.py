@@ -143,10 +143,6 @@ def build_application():
         except Exception:log.exception("SOCIAL_MEMBER_TRACK_FAILED | chat=%s | user=%s",chat.id,user.id)
 
     app.add_handler(MessageHandler(filters.ChatType.GROUPS,_refresh_group_command_scope),group=-1000)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,_live_human_chat),group=-900)
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,_track_social_member),group=-899)
-    log.info("LIVE_CHAT_BRIDGE_REGISTERED | dm=on | groups=on | trigger=on | fallback=off")
-    log.info("SOCIAL_MEMBER_TRACKER_REGISTERED | groups=on")
     return app
 
 async def _set_commands(app):
