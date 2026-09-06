@@ -24,12 +24,12 @@ async def _safe_refresh_polling_lease():
     try:
         from core.storage import storage as canonical_storage
         key=startup._LEASE_KEY
-        token=json.dumps({"instance":startup._INSTANCE_ID,"ts":time.time()})
+        value=json.dumps({"instance":startup._INSTANCE_ID,"ts":time.time()})
         if canonical_storage.configured:
             result=await canonical_storage.eval(
-                "if redis.call('GET',KEYS[1]) == ARGV[1] then return redis.call('SET',KEYS[1],ARGV[1],'EX',ARGV[2]) else return 0 end",
+                "local v=redis.call('GET',KEYS[1]); if not v then return 0 end; local ok,decoded=pcall(cjson.decode,v); if ok and decoded.instance==ARGV[1] then return redis.call('SET',KEYS[1],ARGV[2],'EX',ARGV[3]) end; return 0",
                 [key],
-                [json.dumps({"instance":startup._INSTANCE_ID,"ts":time.time()}),str(startup._LEASE_TTL)],
+                [startup._INSTANCE_ID,value,str(startup._LEASE_TTL)],
             )
             ok=str(result).upper() in {"OK","TRUE","1"}
             if not ok: log.warning("Polling lease refresh rejected: ownership changed")
@@ -39,7 +39,7 @@ async def _safe_refresh_polling_lease():
             try:
                 if json.loads(raw).get("instance") != startup._INSTANCE_ID:return False
             except Exception:return False
-        return await _storage_client.setex(key,startup._LEASE_TTL,token) if _storage_client is not None else False
+        return await _storage_client.setex(key,startup._LEASE_TTL,value) if _storage_client is not None else False
     except Exception:
         log.exception("Polling lease owner-checked refresh failed")
         return False
