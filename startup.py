@@ -22,8 +22,8 @@ async def _store_set(key:str,value:str,ttl:int=0)->bool:
     try:
         if _storage is None:return False
         result=_storage.setex(key,ttl,value) if ttl else _storage.set(key,value)
-        if asyncio.iscoroutine(result):await result
-        return True
+        if asyncio.iscoroutine(result):result=await result
+        return bool(result)
     except Exception as exc:log.debug("storage.set(%s) failed: %s",key,exc);return False
 async def _store_setnx(key:str,value:str,ttl:int)->bool:
     try:
@@ -38,37 +38,52 @@ async def _store_delete(key:str)->bool:
     try:
         if _storage is None:return False
         result=_storage.delete(key)
-        if asyncio.iscoroutine(result):await result
-        return True
+        if asyncio.iscoroutine(result):result=await result
+        return bool(result)
     except Exception as exc:log.debug("storage.delete(%s) failed: %s",key,exc);return False
-async def _refresh_lease():
-    await _store_set(_LEASE_KEY,json.dumps({"instance":_INSTANCE_ID,"ts":time.time()}),ttl=_LEASE_TTL)
+async def _lease_owner_matches()->bool:
+    raw=await _store_get(_LEASE_KEY)
+    if not raw:return False
+    try:return json.loads(raw).get("instance")==_INSTANCE_ID
+    except Exception:return False
+async def _refresh_lease()->bool:
+    script="local raw=redis.call('GET',KEYS[1]); if not raw then return 0 end; local ok,data=pcall(cjson.decode,raw); if not ok or data.instance~=ARGV[1] then return 0 end; data.ts=tonumber(ARGV[2]); redis.call('SET',KEYS[1],cjson.encode(data),'EX',ARGV[3]); return 1"
+    try:
+        if _storage is not None and hasattr(_storage,"eval"):
+            result=_storage.eval(script,[_LEASE_KEY],[_INSTANCE_ID,str(time.time()),str(_LEASE_TTL)])
+            if asyncio.iscoroutine(result):result=await result
+            return bool(int(result or 0))
+        return False
+    except Exception as exc:log.warning("Lease refresh failed: %s",exc);return False
 async def _acquire_lease()->bool:
     raw=await _store_get(_LEASE_KEY)
     if raw:
         try:
             info=json.loads(raw);owner=info.get("instance");age=time.time()-info.get("ts",0)
-            if owner==_INSTANCE_ID:await _refresh_lease();return True
+            if owner==_INSTANCE_ID:return await _refresh_lease()
             if age<_LEASE_TTL:log.info("POLLING_LEASE held by %s (age %.0fs, TTL %ds)",owner,age,_LEASE_TTL);return False
-            log.warning("Stale lease from %s (age %.0fs > TTL %ds) — reclaiming",owner,age,_LEASE_TTL)
+            log.warning("Stale lease from %s (age %.0fs > TTL %ds) — waiting for expiry",owner,age,_LEASE_TTL)
         except Exception:pass
     token=json.dumps({"instance":_INSTANCE_ID,"ts":time.time()})
     if await _store_setnx(_LEASE_KEY,token,_LEASE_TTL):
         log.info("Polling lease acquired by %s",_INSTANCE_ID);return True
     return False
 async def _release_lease():
-    raw=await _store_get(_LEASE_KEY)
-    if raw:
-        try:
-            if json.loads(raw).get("instance")==_INSTANCE_ID:await _store_delete(_LEASE_KEY);log.info("Polling lease released by %s",_INSTANCE_ID);return
-        except Exception:pass
-    log.debug("Lease not owned by us — skipping release")
+    script="if redis.call('GET',KEYS[1]) then local raw=redis.call('GET',KEYS[1]); local ok,data=pcall(cjson.decode,raw); if ok and data.instance==ARGV[1] then return redis.call('DEL',KEYS[1]) end end; return 0"
+    try:
+        if _storage is not None and hasattr(_storage,"eval"):
+            result=_storage.eval(script,[_LEASE_KEY],[_INSTANCE_ID])
+            if asyncio.iscoroutine(result):result=await result
+            if int(result or 0)>0:log.info("Polling lease released by %s",_INSTANCE_ID);return
+        elif await _lease_owner_matches():
+            log.debug("Lease backend has no atomic release support — refusing non-atomic delete")
+    except Exception as exc:log.warning("Lease release failed: %s",exc)
+    log.debug("Lease not owned by us or release was not atomic — skipping release")
 async def _lease_heartbeat_loop():
     while not _shutting_down:
         await asyncio.sleep(_LEASE_REFRESH)
         if _shutting_down:break
-        try:await _refresh_lease()
-        except Exception as exc:log.warning("Lease refresh failed: %s",exc)
+        await _refresh_lease()
 async def _wait_for_lease()->bool:
     deadline=time.time()+_LEASE_WAIT_MAX
     while time.time()<deadline:
@@ -81,7 +96,13 @@ _REGISTRY_KEY="midnight:chat_registry"
 async def register_chat(chat_id:int,chat_type:str,title:str=""):
     if chat_type=="private":return
     try:
-        raw=await _store_get(_REGISTRY_KEY);registry:dict=json.loads(raw) if raw else {};registry[str(chat_id)]={"type":chat_type,"title":title[:100],"seen":int(time.time())};await _store_set(_REGISTRY_KEY,json.dumps(registry,ensure_ascii=False))
+        lock_factory=getattr(_storage,"lock",None) if _storage is not None else None
+        if lock_factory is None:
+            log.warning("Chat registry lock unavailable; refusing unlocked update for chat=%s",chat_id);return
+        async with lock_factory("chat_registry",ttl=10,wait=3) as acquired:
+            if not acquired:
+                log.warning("Chat registry lock unavailable; skipping update for chat=%s",chat_id);return
+            raw=await _store_get(_REGISTRY_KEY);registry:dict=json.loads(raw) if raw else {};registry[str(chat_id)]={"type":chat_type,"title":title[:100],"seen":int(time.time())};await _store_set(_REGISTRY_KEY,json.dumps(registry,ensure_ascii=False))
     except Exception as exc:log.debug("register_chat failed: %s",exc)
 async def get_chat_registry()->dict:
     try:
