@@ -63,13 +63,22 @@ class Storage:
             await client.aclose()
 
     async def _request(self, method: str, path: str = "/", **kwargs: Any) -> Any:
-        """Execute a storage HTTP request with bounded retries."""
+        """Execute a storage HTTP request with bounded retries.
+
+        Only read-oriented HTTP requests are retried automatically. Redis
+        commands are sent through POST, and a timeout can occur after Redis
+        has already applied a mutation but before the client receives the
+        response. Retrying such a command could replay INCRBY/LPUSH/EVAL/SET
+        and duplicate money or other state changes.
+        """
         if not self.configured:
             raise StorageError("persistent storage is not configured")
         await self.start()
         assert self._client is not None
         last: Exception | None = None
-        for attempt in range(self.retries + 1):
+        retryable = method.upper() in {"GET", "HEAD", "OPTIONS"}
+        max_attempts = self.retries + 1 if retryable else 1
+        for attempt in range(max_attempts):
             try:
                 response = await self._client.request(method, f"{self.url}{path}", **kwargs)
                 response.raise_for_status()
@@ -79,10 +88,10 @@ class Storage:
                 return payload.get("result") if isinstance(payload, dict) else payload
             except (httpx.HTTPError, ValueError, StorageError) as exc:
                 last = exc
-                if attempt >= self.retries:
+                if attempt >= max_attempts - 1:
                     break
                 await asyncio.sleep(0.15 * (2 ** attempt))
-        raise StorageError(f"storage request failed after {self.retries + 1} attempts") from last
+        raise StorageError(f"storage request failed after {max_attempts} attempt(s)") from last
 
     async def _command(self, *parts: Any) -> Any:
         """Execute a Redis command through the Upstash REST command endpoint."""
