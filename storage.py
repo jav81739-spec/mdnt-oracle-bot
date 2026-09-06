@@ -38,6 +38,12 @@ class RedisCompat:
     async def incrby(self, key, amount):
         return await storage.incrby(key, amount)
 
+    async def eval(self, script, keys=(), args=()):
+        return await storage.eval(script, keys, args)
+
+    def lock(self, name, ttl=15, wait=3):
+        return storage.lock(name, ttl=ttl, wait=wait)
+
     async def keys(self, pattern="*"):
         """Compatibility name backed by SCAN, never Redis KEYS."""
         return await storage.scan(pattern)
