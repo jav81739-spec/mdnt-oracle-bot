@@ -21,6 +21,8 @@ try:
 except ImportError:
     from handlers import deathgames
 
+from handlers import legacy_economy_atomic
+
 log = logging.getLogger("midnight.registry")
 
 
@@ -48,6 +50,10 @@ def build_application(token, storage_client):
         log.info("Optional engagement_engine not present; continuing with canonical social engine")
     except Exception:
         log.exception("Optional engagement registration failed; continuing")
+
+    # The legacy economy still owns a few member-facing commands. Harden its
+    # read-modify-write mutations before any handlers capture those callbacks.
+    legacy_economy_atomic.harden(legacy_bot)
 
     if hasattr(legacy_bot, "register_handlers"):
         legacy_bot.register_handlers(app)
