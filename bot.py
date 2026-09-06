@@ -1,6 +1,6 @@
 """Midnight Oracle — single production entrypoint."""
 from __future__ import annotations
-import asyncio, logging, os, sys, random, re
+import asyncio, logging, os, sys, random, re, json, time
 from collections import defaultdict, deque
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -16,7 +16,35 @@ try:
     from storage import redis_client as _storage_client
 except Exception:
     _storage_client=None
-import startup; startup.init(_storage_client)
+import startup
+startup.init(_storage_client)
+
+# Never refresh an expired lease over a lease acquired by another instance.
+async def _safe_refresh_polling_lease():
+    try:
+        from core.storage import storage as canonical_storage
+        key=startup._LEASE_KEY
+        token=json.dumps({"instance":startup._INSTANCE_ID,"ts":time.time()})
+        if canonical_storage.configured:
+            result=await canonical_storage.eval(
+                "if redis.call('GET',KEYS[1]) == ARGV[1] then return redis.call('SET',KEYS[1],ARGV[1],'EX',ARGV[2]) else return 0 end",
+                [key],
+                [json.dumps({"instance":startup._INSTANCE_ID,"ts":time.time()}),str(startup._LEASE_TTL)],
+            )
+            ok=str(result).upper() in {"OK","TRUE","1"}
+            if not ok: log.warning("Polling lease refresh rejected: ownership changed")
+            return ok
+        raw=await _storage_client.get(key) if _storage_client is not None else None
+        if raw:
+            try:
+                if json.loads(raw).get("instance") != startup._INSTANCE_ID:return False
+            except Exception:return False
+        return await _storage_client.setex(key,startup._LEASE_TTL,token) if _storage_client is not None else False
+    except Exception:
+        log.exception("Polling lease owner-checked refresh failed")
+        return False
+startup._refresh_lease=_safe_refresh_polling_lease
+
 from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, MenuButtonCommands
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, PollAnswerHandler, PollHandler, InlineQueryHandler, filters
 import legacy_bot
