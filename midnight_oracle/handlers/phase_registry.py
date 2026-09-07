@@ -34,7 +34,23 @@ def register_phase_surfaces(app) -> None:
     from .callback_handler import handle_callback
     from .inline_handler import handle_inline
     from .prediction_handler import predict, predictions
-    from .command_handler import house
+    from .command_handler import oracle, truth, memory, mymemory, forget, quiet, wake, house
+    from handlers.games import unscramble
+
+    canonical_commands = {
+        "oracle": oracle,
+        "truth": truth,
+        "memory": memory,
+        "mymemory": mymemory,
+        "forget": forget,
+        "quiet": quiet,
+        "wake": wake,
+        "house": house,
+        "unscramble": unscramble,
+    }
+    for command, callback in canonical_commands.items():
+        app.add_handler(CommandHandler(command, callback), group=-30)
+
     for command in ("tod", "wyr", "nhie", "scramble"):
         app.add_handler(CommandHandler(command, start_game), group=-30)
     app.add_handler(CommandHandler("predict", predict), group=-30)
@@ -45,13 +61,3 @@ def register_phase_surfaces(app) -> None:
     app.add_handler(CallbackQueryHandler(handle_callback, pattern=r"^(?:reveal_|secret:).+"), group=-29)
     app.add_handler(InlineQueryHandler(handle_inline), group=-30)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_game_message), group=-29)
-    app.add_handler(CommandHandler("house", house), group=-30)
-
-
-async def house(update, context) -> None:
-    """Open Oracle House through Telegram's Mini App WebApp button when configured."""
-    url = (os.getenv("ORACLE_MINI_APP_URL") or os.getenv("MINI_APP_URL") or "").strip()
-    if not url:
-        await update.effective_message.reply_text("☾ Oracle House is quiet for a moment. The room will open when its window is ready.")
-        return
-    await update.effective_message.reply_text("☾ Oracle House\n\nA quieter room for your memories, achievements, group pulse and games.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Enter the House 🌙", web_app=WebAppInfo(url=url))]]))
