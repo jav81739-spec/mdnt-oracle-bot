@@ -140,7 +140,7 @@ def build_application():
             from handlers import social_engine
             await social_engine.register_member(chat.id,user.id,user.first_name or "friend",user.username or "")
             await social_engine.bump_msg_count(chat.id,user.id)
-        except Exception:log.exception("SOCIAL_MEMBER_TRACK_FAILED | chat=%s | user=%s",chat.id,user.id)
+        except Exception:log.exception("SOCIAL_MEMBER_TRACK_FAILED | chat=%s",chat.id)
 
     app.add_handler(MessageHandler(filters.ChatType.GROUPS,_refresh_group_command_scope),group=-1000)
     return app
@@ -187,7 +187,9 @@ async def _post_init(app):
         _phase1_db=Database(os.getenv("ORACLE_DATABASE_PATH","midnight_oracle.sqlite3"));await _phase1_db.connect();_phase1_memory=Phase1MemoryEngine(_phase1_db);_phase1_engine=Phase1FriendEngine(_phase1_db);_phase1_replies=ReplyGenerator();app.bot_data["oracle_db"]=_phase1_db;app.bot_data["oracle_router"]=MessageRouter(_phase1_engine,_phase1_memory,MoodEngine(),_phase1_replies)
         from midnight_oracle.scheduler import OracleScheduler
         oracle_scheduler=OracleScheduler(app,_phase1_db,ORACLE_TZ);oracle_scheduler.start();app.bot_data["oracle_scheduler"]=oracle_scheduler;log.info("PHASE1_FRIEND_ENGINE_READY | storage=sqlite | generation=openai");log.info("PHASE2_5_SURFACE_READY | scheduler=on | games=on | secret_events=on | mini_app=on")
-    except Exception:log.exception("PHASE1_FRIEND_ENGINE_INIT_FAILED")
+    except Exception as exc:
+        log.exception("PHASE1_FRIEND_ENGINE_INIT_FAILED")
+        raise RuntimeError("Canonical Oracle core initialization failed; refusing to report runtime readiness") from exc
     try:
         from handlers.friend_engine import register
         register(app)
