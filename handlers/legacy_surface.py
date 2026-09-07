@@ -13,11 +13,7 @@ import legacy_bot
 from handlers import chat, games, moderation, utility, aesthetic, friendship, fun, matchmaking, stats, events, economy, timecapsule, marriage, deathgames_v2 as deathgames
 from handlers import economy_compat, deathgames_hardened, legacy_economy_atomic
 
-# Harden the still-live legacy betting/vault surface before callbacks are
-# registered. This preserves its legacy keys and user-facing behaviour while
-# serializing unsafe read-modify-write mutations.
 legacy_economy_atomic.harden(legacy_bot)
-
 log = logging.getLogger("midnight.legacy_surface")
 
 
@@ -82,7 +78,7 @@ def register_legacy_surface(app) -> dict[str, object]:
         "moderation": {"mute": "mute", "unmute": "unmute", "ban": "ban", "kick": "kick", "warn": "warn", "rules": "show_rules", "warnings": "check_warnings", "clearwarns": "clear_warnings", "pin": "pin", "unpin": "unpin", "purge": "purge", "setrules": "set_rules", "lock": "lock", "unlock": "unlock"},
         "utility": {"id": "get_id", "info": "user_info", "remind": "remind", "groupinfo": "group_info", "afk": "set_afk", "report": "report"},
         "aesthetic": {"aura": "aura_command", "identity": "identity_command", "vibecheck": "vibecheck_command", "shadow": "shadow_command", "element": "element_command", "corecode": "corecode_command", "universe": "universe_command", "ritual": "ritual_command", "duality": "duality_command", "glitch": "glitch_command", "nightreport": "nightreport_command", "sigil": "sigil_command"},
-        "friendship": {"bestie": "bestie", "duo": "duo", "friendship": "friendship_score", "tagbestie": "tag_bestie", "squad": "squad", "loyalty": "loyalty", "randomship": "random_ship", "matchmaker": "matchmaker"},
+        "friendship": {"bestie": "bestie", "duo": "duo", "friendship": "friendship_score", "tagbestie": "tag_bestie", "squad": "squad", "loyalty": "loyalty", "randomship": "random_ship", "matchmaker": "matchmaker", "wink": "wink", "dance": "dance", "cheer": "cheer", "comfort": "comfort", "salute": "salute", "stare": "stare", "handshake": "handshake", "fistbump": "fistbump", "shoulderpat": "shoulderpat", "cheers": "cheers", "punch": "punch", "bonk": "bonk"},
         "fun": {"roast": "roast", "compliment": "compliment", "8ball": "eight_ball", "vibe": "vibe", "quote": "quote", "poll": "poll", "ratethis": "rate_this", "impostor": "impostor_start", "revealimpostor": "impostor_reveal"},
         "matchmaking": {"crush": "set_crush", "clearcrush": "clear_crush", "secretadmirer": "secret_admirer"},
         "stats": {"stats": "stats", "topactive": "top_active", "msgcount": "msg_count"},
