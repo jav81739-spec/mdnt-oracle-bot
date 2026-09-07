@@ -11,7 +11,7 @@ from .memory_engine import MemoryEngine
 from .mood_engine import MoodEngine
 from .handlers.message_handler import MessageRouter
 from .handlers.callback_handler import handle_callback
-from .handlers.command_handler import start, help_command, oracle, truth, memory, mymemory, forget, quiet, wake, house
+from .handlers.command_handler import start, help_command, oracle, truth, truth_callback, memory, mymemory, forget, quiet, wake, house
 from .handlers.inline_handler import handle_inline
 from .handlers.world_handler import start_game, end_game, game_callback, handle_game_message, handle_poll_answer, handle_poll
 from .handlers.prediction_handler import predict, predictions
@@ -114,6 +114,7 @@ def _install_world_lifecycle(app: Application) -> None:
     _add_handler_once(app, PollAnswerHandler(handle_poll_answer), group=-30)
     _add_handler_once(app, PollHandler(handle_poll), group=-30)
     _add_handler_once(app, CallbackQueryHandler(game_callback, pattern=r"^game:"), group=-30)
+    _add_handler_once(app, CallbackQueryHandler(truth_callback, pattern=r"^truth:(?:answer|pass)$"), group=-29)
     _add_handler_once(app, CallbackQueryHandler(handle_callback, pattern=r"^(?:reveal_|secret:).+"), group=-29)
     _add_handler_once(app, InlineQueryHandler(handle_inline), group=-30)
     _add_handler_once(app, MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data), group=-30)
