@@ -83,7 +83,10 @@ async def _lease_heartbeat_loop():
     while not _shutting_down:
         await asyncio.sleep(_LEASE_REFRESH)
         if _shutting_down:break
-        await _refresh_lease()
+        if not await _refresh_lease():
+            log.error("POLLING_LEASE_LOST | stopping runtime to prevent duplicate polling")
+            asyncio.create_task(_graceful_shutdown())
+            return
 async def _wait_for_lease()->bool:
     deadline=time.time()+_LEASE_WAIT_MAX
     while time.time()<deadline:
@@ -191,6 +194,7 @@ def _install_live_runtime_bridges(application)->None:
         log.info("AUTONOMOUS_SOCIAL_ENGINE_READY | scheduled=19 | dynamic_group_targets=on")
     except Exception:
         log.exception("LIVE_RUNTIME_BRIDGE_INSTALL_FAILED")
+        raise RuntimeError("Canonical live runtime bridge installation failed; refusing to report runtime readiness")
 async def run(application,storage_client=None):
     global _storage,_app,_lease_task,_ready,_shutting_down
     if not logging.root.handlers:logging.basicConfig(format="%(asctime)s %(name)s %(levelname)s %(message)s",level=logging.INFO)
