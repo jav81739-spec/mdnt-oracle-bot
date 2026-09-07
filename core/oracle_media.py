@@ -23,6 +23,8 @@ TERM_MAP = {
     "celebrate": ("celebration", "party", "excited"),
     "sad": ("sad reaction", "crying", "comfort"),
     "shock": ("shocked reaction", "surprised", "what"),
+    "story": ("story reaction", "plot twist", "curious"),
+    "gossip": ("gossip reaction", "tea", "side eye"),
 }
 
 def _gif_lookup():
@@ -48,9 +50,12 @@ def choose_sticker(text: str, kind: str | None = None, part_index: int | None = 
     """Never invent sticker IDs; contextual StickerHandler owns sticker choice."""
     return None
 
-async def choose_media(subject: str, kind: str | None = None, part_index: int | None = None, *, intent: str | None = None) -> dict[str, Any] | None:
+async def choose_media(subject: str, kind: str | None = None, part_index: int | None = None, *, intent: str | None = None, chat_id: int | str | None = None) -> dict[str, Any] | None:
     """Choose one additive GIF for both chat and autonomous pulse callers."""
-    term = choose_term(str(subject), intent or kind)
+    effective_intent = (intent or "").casefold()
+    if effective_intent not in TERM_MAP:
+        effective_intent = (kind or "").casefold()
+    term = choose_term(str(chat_id if chat_id is not None else subject), effective_intent)
     if not term: return None
     try:
         url = await _gif_lookup()(term)
