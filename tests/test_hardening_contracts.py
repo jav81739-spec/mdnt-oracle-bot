@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 
 class HardeningContractTests(unittest.TestCase):
@@ -44,6 +45,13 @@ class HardeningContractTests(unittest.TestCase):
         self.assertTrue(expected.issubset(friendship.ACTIONS))
         for name in expected:
             self.assertTrue(callable(getattr(friendship, name)))
+
+    def test_legacy_text_handlers_run_before_canonical_router(self):
+        legacy = Path("handlers/legacy_surface.py").read_text()
+        main = Path("midnight_oracle/main.py").read_text()
+        self.assertIn('legacy_bot.fastmath_answer), group=-28', legacy)
+        self.assertIn('legacy_bot.wordbomb_play), group=-27', legacy)
+        self.assertIn('MessageHandler(filters.TEXT & ~filters.COMMAND,_route_message), group=-29', main)
 
 
 if __name__ == "__main__":
