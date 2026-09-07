@@ -3,7 +3,7 @@ from __future__ import annotations
 import re,time
 from .oracle_delivery import deliver
 from .oracle_freshness import FreshnessGovernor
-from .oracle_media import MEDIA_COOLDOWN,choose_media,choose_sticker
+from .oracle_media import MEDIA_COOLDOWN,choose_media,choose_sticker,send_additive_gif
 from .oracle_mind import generate_contextual_piece,language_hint
 from .oracle_narrative import maybe_deliver as maybe_deliver_narrative,rollback as rollback_narrative
 from .oracle_presence import decide_presence
@@ -26,12 +26,13 @@ async def _deliver_narrative_with_media(application,db,group_id,text,kind,state,
         if sticker:
             await application.bot.send_sticker(group_id,sticker)
             await db.set_cooldown("group",str(group_id),MEDIA_COOLDOWN_TYPE,now+MEDIA_COOLDOWN);_log("ORACLE_PULSE_STAGE | stage=media | chat=%s | kind=sticker | delivered=true",group_id);return True
-        media=await choose_media(text,kind,part_index)
+        media=await choose_media(text,kind,part_index,intent=media_intent,chat_id=group_id)
         if not media:return True
-        if media["kind"]=="gif":await application.bot.send_animation(group_id,media["url"],caption=text)
+        if media["kind"]=="gif":
+            if await send_additive_gif(application.bot,group_id,media["url"]):
+                await db.set_cooldown("group",str(group_id),MEDIA_COOLDOWN_TYPE,now+MEDIA_COOLDOWN);_log("ORACLE_PULSE_STAGE | stage=media | chat=%s | kind=gif | delivered=true",group_id)
         elif media["kind"]=="image":await application.bot.send_photo(group_id,media["url"],caption=text)
         else:return True
-        await db.set_cooldown("group",str(group_id),MEDIA_COOLDOWN_TYPE,now+MEDIA_COOLDOWN);_log("ORACLE_PULSE_STAGE | stage=media | chat=%s | kind=%s | delivered=true",group_id,media["kind"])
     except Exception:_log("ORACLE_PULSE_STAGE | stage=media | chat=%s | delivered=false",group_id)
     return True
 
