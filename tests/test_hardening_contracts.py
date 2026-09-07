@@ -34,6 +34,17 @@ class HardeningContractTests(unittest.TestCase):
                 {},
             )
 
+    def test_social_aliases_have_executable_callbacks(self):
+        from handlers import friendship
+
+        expected = {
+            "wink", "dance", "cheer", "comfort", "salute", "stare",
+            "handshake", "fistbump", "shoulderpat", "cheers", "punch", "bonk",
+        }
+        self.assertTrue(expected.issubset(friendship.ACTIONS))
+        for name in expected:
+            self.assertTrue(callable(getattr(friendship, name)))
+
 
 if __name__ == "__main__":
     unittest.main()
