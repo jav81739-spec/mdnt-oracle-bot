@@ -34,7 +34,7 @@ def register_phase_surfaces(app) -> None:
     from .callback_handler import handle_callback
     from .inline_handler import handle_inline
     from .prediction_handler import predict, predictions
-    from .command_handler import oracle, truth, memory, mymemory, forget, quiet, wake, house
+    from .command_handler import oracle, truth, truth_callback, memory, mymemory, forget, quiet, wake, house
     from handlers.games import unscramble
 
     canonical_commands = {
@@ -58,6 +58,7 @@ def register_phase_surfaces(app) -> None:
     app.add_handler(PollAnswerHandler(handle_poll_answer), group=-30)
     app.add_handler(PollHandler(handle_poll), group=-30)
     app.add_handler(CallbackQueryHandler(game_callback, pattern=r"^game:"), group=-30)
+    app.add_handler(CallbackQueryHandler(truth_callback, pattern=r"^truth:(?:answer|pass)$"), group=-29)
     app.add_handler(CallbackQueryHandler(handle_callback, pattern=r"^(?:reveal_|secret:).+"), group=-29)
     app.add_handler(InlineQueryHandler(handle_inline), group=-30)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_game_message), group=-29)
