@@ -168,6 +168,18 @@ ACTIONS = {
     "wave": ("👋 waves at {target}", "anime wave hello"),
     "bite": ("😬 playfully bites {target}", "anime bite"),
     "tickle": ("🤣 tickles {target}", "anime tickle"),
+    "wink": ("😉 winks at {target}", "wink reaction"),
+    "dance": ("💃 dances with {target}", "dance reaction"),
+    "cheer": ("✨ cheers for {target}", "cheering reaction"),
+    "comfort": ("🫂 stays beside {target}", "comfort reaction"),
+    "salute": ("🫡 salutes {target}", "salute reaction"),
+    "stare": ("👁️ stares at {target}", "stare reaction"),
+    "handshake": ("🤝 shakes hands with {target}", "handshake reaction"),
+    "fistbump": ("👊 fist-bumps {target}", "fist bump reaction"),
+    "shoulderpat": ("🫳 gives {target} a reassuring shoulder pat", "shoulder pat reaction"),
+    "cheers": ("🥂 raises a toast to {target}", "cheers reaction"),
+    "punch": ("🥊 throws a playful punch at {target}", "playful punch reaction"),
+    "bonk": ("🔨 bonks {target}", "bonk reaction"),
 }
 
 
@@ -206,3 +218,15 @@ async def cuddle(update: Update, context: ContextTypes.DEFAULT_TYPE): await _act
 async def wave(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "wave")
 async def bite(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "bite")
 async def tickle(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "tickle")
+async def wink(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "wink")
+async def dance(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "dance")
+async def cheer(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "cheer")
+async def comfort(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "comfort")
+async def salute(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "salute")
+async def stare(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "stare")
+async def handshake(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "handshake")
+async def fistbump(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "fistbump")
+async def shoulderpat(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "shoulderpat")
+async def cheers(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "cheers")
+async def punch(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "punch")
+async def bonk(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "bonk")
