@@ -142,7 +142,8 @@ async def _graceful_shutdown():
     global _shutting_down,_ready
     if _shutting_down:return
     _shutting_down=True;_ready=False;log.info("Graceful shutdown started")
-    if _lease_task and not _lease_task.done():
+    current=asyncio.current_task()
+    if _lease_task and not _lease_task.done() and _lease_task is not current:
         _lease_task.cancel()
         try:await _lease_task
         except asyncio.CancelledError:pass
