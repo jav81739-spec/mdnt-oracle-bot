@@ -71,8 +71,22 @@ _private and owner controls stay private._"""
     await update.effective_message.reply_text(text,parse_mode="Markdown")
 
 async def oracle(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:await update.effective_message.reply_text("☾ I'm here. What's on your mind?")
-async def truth(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    text=question(context.args[0] if context.args else 'light');await update.effective_message.reply_text(f"☾ {text}",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('Answer',callback_data='truth:answer'),InlineKeyboardButton('Pass',callback_data='truth:pass')]]))
+async def truth(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:await update.effective_message.reply_text(f"☾ {question(context.args[0] if context.args else 'light')}",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('Answer',callback_data='truth:answer'),InlineKeyboardButton('Pass',callback_data='truth:pass')]]))
+
+async def truth_callback(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
+    query=update.callback_query
+    if not query:return
+    action=(query.data or "").split(":",1)[-1]
+    await query.answer()
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    if action=="answer":
+        await query.message.reply_text("☾ Go on. I'm listening. No pressure to make it sound better than it is.")
+    elif action=="pass":
+        await query.message.reply_text("☾ Fair. The Oracle won't push. 🌙")
+
 async def memory(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
     await update.effective_message.reply_text("☾ I keep the room's moments quietly — not a public ledger. Ask /mymemory for what belongs to you.")
 async def mymemory(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
