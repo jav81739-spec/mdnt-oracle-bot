@@ -131,8 +131,8 @@ def register_legacy_surface(app) -> dict[str, object]:
 
     try:
         if callable(getattr(legacy_bot, "mines_cb", None)): app.add_handler(CallbackQueryHandler(legacy_bot.mines_cb, pattern=r"^mn_"), group=0)
-        if callable(getattr(legacy_bot, "fastmath_answer", None)): app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, legacy_bot.fastmath_answer), group=9)
-        if callable(getattr(legacy_bot, "wordbomb_play", None)): app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, legacy_bot.wordbomb_play), group=10)
+        if callable(getattr(legacy_bot, "fastmath_answer", None)): app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, legacy_bot.fastmath_answer), group=-28)
+        if callable(getattr(legacy_bot, "wordbomb_play", None)): app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, legacy_bot.wordbomb_play), group=-27)
         if callable(getattr(legacy_bot, "silence_watcher", None)): app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, legacy_bot.silence_watcher), group=12)
         if callable(getattr(legacy_bot, "track_groups", None)): app.add_handler(MessageHandler(filters.ChatType.GROUPS, legacy_bot.track_groups), group=15)
         if callable(getattr(legacy_bot, "track_members", None)): app.add_handler(MessageHandler(filters.ALL & filters.ChatType.GROUPS, legacy_bot.track_members), group=13)
