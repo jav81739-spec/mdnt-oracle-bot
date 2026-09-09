@@ -1,4 +1,4 @@
-"""Midnight Oracle runtime compatibility bootstrap.
+"""Midnight Oracle compatibility bootstrap.
 
 The canonical startup path owns lifecycle, polling, command registration and
 chat bridges. This module only preserves the existing Social Engine's fan-out
@@ -6,10 +6,9 @@ behaviour so autonomous features reach every discovered group.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 
-log = logging.getLogger("midnight.autonomous")
+log = logging.getLogger("midnight.runtime")
 
 try:
     from handlers import social_engine as _se
@@ -22,11 +21,12 @@ try:
             import startup
             registry = await startup.get_chat_registry()
             for cid, info in registry.items():
-                if info.get("type") in ("group", "supergroup"):
-                    try:
-                        targets.add(int(cid))
-                    except (TypeError, ValueError):
-                        continue
+                if not isinstance(info, dict) or info.get("type") not in ("group", "supergroup"):
+                    continue
+                try:
+                    targets.add(int(cid))
+                except (TypeError, ValueError):
+                    continue
         except Exception as exc:
             log.debug("Could not read chat registry: %s", exc)
         return sorted(targets)
