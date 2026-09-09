@@ -87,10 +87,12 @@ def _register_canonical_commands(app:Application)->None:
             import asyncio;asyncio.create_task(asyncio_alert)
         except Exception:pass
 
-async def _canonical_startup(context):await _ensure_canonical_db(context.application)
-
 def register(app:Application):
     app.add_handler(CallbackQueryHandler(mood_callback,pattern=r"^oracle:mood:"),group=5);_register_canonical_commands(app)
     if app.job_queue is None:return
-    app.job_queue.run_once(_canonical_startup,when=1,name="canonical_surface_startup");app.job_queue.run_daily(morning,time=time(9,0,tzinfo=TZ),name="oracle_friend_morning");app.job_queue.run_daily(evening,time=time(19,30,tzinfo=TZ),name="oracle_friend_evening");app.job_queue.run_daily(night,time=time(3,0,tzinfo=TZ),name="oracle_friend_3am")
+    # The canonical DB is created by midnight_oracle.main._post_init before
+    # preserved surfaces are registered. The old one-second bootstrap raced
+    # that lifecycle and was observed as a missed cold-start job.
+    # Registration stays synchronous; there is no second startup job to miss.
+    app.job_queue.run_daily(morning,time=time(9,0,tzinfo=TZ),name="oracle_friend_morning");app.job_queue.run_daily(evening,time=time(19,30,tzinfo=TZ),name="oracle_friend_evening");app.job_queue.run_daily(night,time=time(3,0,tzinfo=TZ),name="oracle_friend_3am")
     log.info("FRIEND_ENGINE_READY | morning=09:00 | evening=19:30 | 3am=03:00 | spam_guard=on | canonical_commands=on | mini_app=on")
