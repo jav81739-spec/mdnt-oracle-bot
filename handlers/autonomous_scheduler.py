@@ -76,6 +76,7 @@ async def _tick(context):
         )
         epoch = int(now.timestamp())
         for fn, interval in cadence:
+            # One-minute tick window is safe because the dispatcher itself is unique.
             if epoch % interval < 60:
                 await _safe(fn, context.bot, chat_id)
 
