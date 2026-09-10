@@ -25,6 +25,45 @@ async def _safe(fn, bot, chat_id):
             fn.__name__, chat_id,
         )
 
+
+async def _govern(chat_id: int, feature: str, priority: str = "normal") -> bool:
+    """Decide whether Midnight should speak, instead of blindly firing a schedule."""
+    members = await social_engine._members(chat_id)
+    if len(members) < 2:
+        return False
+
+    now = int(datetime.now(TZ).timestamp())
+    recent_30m = sum(1 for m in members if now - int(m.get("last", 0)) <= 1800)
+    recent_6h = sum(1 for m in members if now - int(m.get("last", 0)) <= 21600)
+
+    # Hard anti-spam gate: one autonomous post per group per 30 minutes.
+    last = await social_engine._get(f"oracle:govern:last:{chat_id}")
+    if last:
+        try:
+            if now - int(last) < 1800:
+                return False
+        except (TypeError, ValueError):
+            pass
+
+    # Don't manufacture conversation in a genuinely dead room.
+    if recent_6h == 0 and priority != "anchor":
+        return False
+
+    # If the room is very active, let the conversation breathe unless the
+    # event is an intentional time anchor (morning/evening/midnight).
+    if recent_30m >= 12 and priority == "normal":
+        return False
+
+    # Record the decision, not every candidate check.
+    await social_engine._set(f"oracle:govern:last:{chat_id}", str(now), ttl=86400 * 2)
+    await social_engine._set(
+        f"oracle:govern:feature:{chat_id}",
+        feature,
+        ttl=86400 * 2,
+    )
+    return True
+
+
 async def _tick(context):
     """Dispatch autonomous features to all registered groups.
 
@@ -57,10 +96,20 @@ async def _tick(context):
 
     for chat_id in targets:
         if (now.hour, now.minute) in daily:
-            await _safe(daily[(now.hour, now.minute)], context.bot, chat_id)
+            fn = daily[(now.hour, now.minute)]
+            priority = "anchor" if fn in (
+                social_engine.energy_forecast,
+                social_engine.midnight_wrap,
+                social_engine.midnight_story,
+            ) else "normal"
+            if await _govern(chat_id, fn.__name__, priority):
+                await _safe(fn, context.bot, chat_id)
+
         weekly_key = (now.weekday(), now.hour, now.minute)
         if weekly_key in weekly:
-            await _safe(weekly[weekly_key], context.bot, chat_id)
+            fn = weekly[weekly_key]
+            if await _govern(chat_id, fn.__name__, "normal"):
+                await _safe(fn, context.bot, chat_id)
 
         # Interval features are anchored to Unix time. This prevents the
         # scheduler's startup time from becoming the cadence origin.
@@ -77,7 +126,7 @@ async def _tick(context):
         epoch = int(now.timestamp())
         for fn, interval in cadence:
             # One-minute tick window is safe because the dispatcher itself is unique.
-            if epoch % interval < 60:
+            if epoch % interval < 60 and await _govern(chat_id, fn.__name__, "normal"):
                 await _safe(fn, context.bot, chat_id)
 
 
