@@ -545,7 +545,6 @@ async def nightcricket(update, context) -> None:
         "captains": {"A": user.id, "B": None},
         "names": {str(user.id): user.first_name or "Captain"},
         "usernames": {str(user.id): user.username},
-        "usernames": {str(user.id): user.username},
         "phase": "lobby", "toss": None, "toss_winner": None,
         "batting_team": None, "bowling_team": None,
         "batter": None, "bowler": None, "bat_idx": 0, "bowl_idx": 0,
@@ -648,7 +647,6 @@ async def nightcricket_callback(update, context) -> None:
         state["teams"][team].append(uid)
         state["names"][str(uid)] = q.from_user.first_name or "Player"
         state.setdefault("usernames", {})[str(uid)] = q.from_user.username
-        state.setdefault("usernames", {})[str(uid)] = q.from_user.username
         if team == "B" and state["captains"]["B"] is None:
             state["captains"]["B"] = uid
         await storage.set(key, state, ttl=3600)
@@ -688,10 +686,13 @@ async def nightcricket_callback(update, context) -> None:
             return
         state["shot"] = shot
         await storage.set(key, state, ttl=3600)
-        await q.message.reply_text(
-            f"🏏 <b>{html.escape(SHOTS[shot][1])}</b> selected.\n\n"
-            "<i>Now choose the number. The bowler's call is already locked.</i>",
-            parse_mode=ParseMode.HTML, reply_markup=_bat_markup(chat_id),
+        await _edit_cricket_status(
+            context.bot, state,
+            f"🌑 <b>DELIVERY LOCKED.</b>\n\n"
+            f"🏏 {_mention(int(state['batter']), state['names'].get(str(state['batter']), 'Batter'), state.get('usernames', {}).get(str(state['batter'])))}\n"
+            f"<b>{html.escape(SHOTS[shot][1])}</b> selected. Now pick <b>1–6</b>.\n"
+            "<i>⏱️ 45 seconds total for the batting turn.</i>",
+            _bat_markup(chat_id),
         )
         return
 
