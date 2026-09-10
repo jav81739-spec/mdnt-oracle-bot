@@ -196,6 +196,56 @@ async def cricket_callback(update, context) -> None:
         parse_mode=ParseMode.HTML, reply_markup=_keyboard("duel") if state["turn"] else None)
 
 
+
+async def elitecricket(update, context) -> None:
+    """Midnight's original cricket arcade hub."""
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🏏 Quick Match", callback_data="elitecricket:quick"),
+         InlineKeyboardButton("⚔️ Duel", callback_data="elitecricket:duel")],
+        [InlineKeyboardButton("🎯 Shot Lab", callback_data="elitecricket:shots")],
+    ])
+    await update.effective_message.reply_text(
+        "<b>🏏 𝐌𝐈𝐃𝐍𝐈𝐆𝐇𝐓 𝐂𝐑𝐈𝐂𝐊𝐄𝐓</b>\n\n"
+        "<i>Read the risk. Pick the shot.</i>\n\n"
+        "A compact cricket arcade built for the room.\n"
+        "No coins. No farming. Just timing, risk and a little madness.\n\n"
+        "<b>QUICK MATCH</b> · six balls against the Oracle\n"
+        "<b>DUEL</b> · challenge someone in the room\n"
+        "<b>SHOT LAB</b> · learn the risk profile of every shot",
+        parse_mode=ParseMode.HTML, reply_markup=keyboard,
+    )
+
+
+async def elitecricket_callback(update, context) -> None:
+    query = update.callback_query
+    if not query or not query.message:
+        return
+    await query.answer()
+    action = (query.data or "").split(":", 1)[-1]
+    if action == "duel":
+        await query.message.reply_text(
+            "🏏 <b>DUEL READY</b>\n\nReply to a player's message with <code>/cricketduel</code>.\n"
+            "<i>Six balls each. No economy. Winner keeps the bragging rights.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+    elif action == "shots":
+        lines = []
+        for key, (icon, name, outcomes, risk) in SHOTS.items():
+            lines.append(f"{icon} <b>{name}</b> · {int(risk * 100)}% control · {','.join(map(str, outcomes))} runs")
+        await query.message.reply_text(
+            "<b>🎯 𝐒𝐇𝐎𝐓 𝐋𝐀𝐁</b>\n\n" + "\n".join(lines) +
+            "\n\n<i>Higher reward usually means a nastier price for missing.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+    else:
+        await query.message.reply_text(
+            "<b>🏏 𝐐𝐔𝐈𝐂𝐊 𝐌𝐀𝐓𝐂𝐇</b>\n\n"
+            "Your first six-ball challenge is ready.\n"
+            "<i>Choose a shot. Read the risk. Survive the over.</i>\n\n"
+            "Use <code>/cricket</code> to enter the existing solo mode.",
+            parse_mode=ParseMode.HTML,
+        )
+
 def _existing(app):
     return {str(c).lower().lstrip("/") for hs in getattr(app, "handlers", {}).values() for h in hs for c in (getattr(h, "commands", None) or ())}
 
@@ -207,9 +257,10 @@ def register(app):
     for command, callback in (
         ("oraclepair", oraclepair), ("vow", vow), ("mprofile", mprofile),
         ("achievements", achievements), ("midnightevent", midnightevent),
-        ("cricketduel", cricketduel),
+        ("cricketduel", cricketduel), ("elitecricket", elitecricket),
     ):
         if command not in existing:
             app.add_handler(CommandHandler(command, callback), group=16); existing.add(command)
     if not any(getattr(h, "callback", None) is cricket_callback for hs in getattr(app, "handlers", {}).values() for h in hs):
         app.add_handler(CallbackQueryHandler(cricket_callback, pattern=r"^v2cricket:"), group=16)
+    app.add_handler(CallbackQueryHandler(elitecricket_callback, pattern=r"^elitecricket:"), group=16)
