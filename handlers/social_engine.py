@@ -756,6 +756,56 @@ async def constellation_map(bot, chat_id):
     )
 
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  FEATURE 20 — MIDNIGHT STORY
+# ══════════════════════════════════════════════════════════════════════════════
+async def midnight_story(bot, chat_id):
+    ms = await _members(chat_id)
+    if len(ms) < 2: return
+    today = date.today().isoformat()
+    if await _done(f"story:{chat_id}:{today}", 86400): return
+    rng = random.Random(_seed("story", chat_id))
+    a, b = _pick(ms, 2, _seed("story-pair", chat_id))
+    scenes = [
+        f"At {rng.choice(['12:07 AM','12:31 AM','1:13 AM'])}, {_handle(a)} said something that made {_handle(b)} stop scrolling.",
+        f"_The chat was unusually quiet. Then {_handle(a)} appeared. {_handle(b)} noticed._",
+        f"Nobody planned this scene. Somehow {_handle(a)} and {_handle(b)} ended up in the same chapter.",
+    ]
+    endings = [
+        "The Oracle won't explain why. Some stories lose their magic when explained.",
+        "No conclusion yet. Midnight likes unfinished stories.",
+        "Perhaps it meant nothing. Perhaps that is exactly the point.",
+    ]
+    await _post(bot, chat_id,
+        f"📖 *MIDNIGHT STORY*\n{_sep()}\n\n{rng.choice(scenes)}\n\n"
+        f"{rng.choice(endings)}\n\n_☾ — Midnight Oracle_"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  FEATURE 21 — ORACLE GOSSIP
+# ══════════════════════════════════════════════════════════════════════════════
+async def oracle_gossip(bot, chat_id):
+    ms = await _members(chat_id)
+    if len(ms) < 3: return
+    today = date.today().isoformat()
+    if await _done(f"gossip:{chat_id}:{today}", 86400): return
+    rng = random.Random(_seed("gossip", chat_id))
+    a, b, c = _pick(ms, 3, _seed("gossip-pick", chat_id))
+    lines = [
+        f"👀 {_handle(a)} has the energy of someone who knows what {_handle(b)} is about to say.",
+        f"🌚 Rumour from the Midnight desk: {_handle(a)} and {_handle(b)} keep appearing in the same plot.",
+        f"🫢 Nobody asked, but {_handle(c)} has officially become a recurring character in tonight's chaos.",
+        f"☕ The Oracle has no evidence. Which is exactly why this is gossip.",
+    ]
+    await _post(bot, chat_id,
+        f"☕ *MIDNIGHT GOSSIP*\n{_sep()}\n\n{rng.choice(lines)}\n\n"
+        "_For entertainment only. No private information. No real-world accusations._\n\n"
+        "☾ *— Midnight Oracle*"
+    )
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  MEMBER TRACKING MIDDLEWARE
 # ══════════════════════════════════════════════════════════════════════════════
