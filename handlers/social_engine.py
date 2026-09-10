@@ -832,6 +832,13 @@ def _w(fn):
     return job
 
 def register_jobs(app: Application):
+    """Legacy-compatible wrapper; install the single dynamic dispatcher only."""
+    from .autonomous_scheduler import register as register_autonomous
+    if register_autonomous(app):
+        log.info("SOCIAL_ENGINE_SCHEDULER_BRIDGE_READY | dynamic=on")
+    else:
+        log.info("SOCIAL_ENGINE_SCHEDULER_ALREADY_REGISTERED")
+    return
     jq = app.job_queue
     if not jq:
         log.warning("No job queue — social engine not scheduled"); return
