@@ -425,6 +425,68 @@ async def _nightcricket_timeout(context) -> None:
         await _start_ball(context.bot, state, context)
 
 
+
+def _mention(uid: int, name: str, username: str | None = None) -> str:
+    label = f"@{username}" if username else name
+    return f'<a href="tg://user?id={uid}">{html.escape(label)}</a>'
+
+
+def _schedule_cricket_timer(context, chat_id: int, phase: str, uid: int, seconds: int = 20) -> None:
+    if getattr(context, "job_queue", None):
+        context.job_queue.run_once(
+            _nightcricket_timeout, seconds,
+            data={"chat_id": chat_id, "phase": phase, "uid": uid},
+            name=f"nightcricket:{chat_id}:{phase}:{uid}",
+        )
+
+
+async def _edit_cricket_status(bot, state: dict, text: str, reply_markup=None) -> None:
+    mid = state.get("status_message_id")
+    if not mid:
+        return
+    try:
+        await bot.edit_message_text(
+            chat_id=int(state["chat_id"]), message_id=int(mid),
+            text=text, parse_mode=ParseMode.HTML, reply_markup=reply_markup,
+        )
+    except Exception:
+        pass
+
+
+async def _nightcricket_timeout(context) -> None:
+    data = context.job.data or {}
+    chat_id = int(data.get("chat_id", 0))
+    phase = data.get("phase")
+    uid = int(data.get("uid", 0))
+    key = f"nightcricket:match:{chat_id}"
+    state = await storage.load(key, None)
+    if not isinstance(state, dict) or state.get("phase") != phase:
+        return
+    if phase == "bowler_dm" and state.get("bowler") == uid:
+        state["bowl"] = random.randint(1, 6)
+        state["phase"] = "batting"
+        await storage.set(key, state, ttl=3600)
+        await _edit_cricket_status(
+            context.bot, state,
+            f"⏱️ <b>Bowler's 20 seconds are up.</b> Delivery auto-locked.\n\n"
+            f"<b>{html.escape(state['names'].get(str(state['batter']), 'Batter'))}</b> — choose your shot.\n"
+            "<i>⏱️ 20 seconds.</i>",
+            _shot_markup(chat_id),
+        )
+        _schedule_cricket_timer(context, chat_id, "batting", int(state["batter"]), 20)
+    elif phase == "batting" and state.get("batter") == uid:
+        await _edit_cricket_status(
+            context.bot, state,
+            f"⏱️ <b>{html.escape(state['names'].get(str(uid), 'Batter'))}</b> timed out.\n"
+            "<i>No spam. Next ball is loading.</i>",
+        )
+        state["bat_idx"] += 1
+        state["bowl_idx"] += 1
+        state.pop("shot", None)
+        await storage.set(key, state, ttl=3600)
+        await _start_ball(context.bot, state, context)
+
+
 async def _ask_bowler(bot, state: dict, context=None) -> None:
     bowler = int(state["bowler"])
     await storage.set(f"nightcricket:bowler:{bowler}", {"chat_id": int(state["chat_id"])}, ttl=300)
@@ -434,7 +496,7 @@ async def _ask_bowler(bot, state: dict, context=None) -> None:
             text="<b>🏏 NIGHT CRICKET · PRIVATE BALL</b>\n\n"
                  "You are bowling now.\n"
                  "Send me <b>one number: 1–6</b>.\n\n"
-                 "<i>Your delivery stays hidden until the batter commits.</i>",
+                 "<i>⏱️ 20 seconds. Your delivery stays hidden until the batter commits.</i>",
             parse_mode=ParseMode.HTML,
         )
     except Exception:
@@ -452,11 +514,16 @@ async def _start_ball(bot, state: dict, context=None) -> None:
     sent = await bot.send_message(
         chat_id=int(state["chat_id"]),
         text=f"🌑 <b>BALL {state['ball'] + 1}/6</b>\n\n"
-             f"Bowler: <b>{html.escape(state['names'].get(str(state['bowler']), 'Bowler'))}</b> — private call sent.\n"
-             f"Batter: <b>{html.escape(state['names'].get(str(state['batter']), 'Batter'))}</b>\n\n"
-             "<i>Wait for the delivery. Then choose your number.</i>",
+             f"🎯 Bowler: {_mention(int(state['bowler']), state['names'].get(str(state['bowler']), 'Bowler'), state.get('usernames', {}).get(str(state['bowler'])))}\n"
+             f"🏏 Batter: {_mention(int(state['batter']), state['names'].get(str(state['batter']), 'Batter'), state.get('usernames', {}).get(str(state['batter'])))}\n\n"
+             "Open Midnight's DM and send <b>1–6</b> for the delivery.\n"
+             "<i>⏱️ Bowler has 20 seconds.</i>",
         parse_mode=ParseMode.HTML,
     )
+    state["status_message_id"] = sent.message_id
+    await storage.set(f"nightcricket:match:{state['chat_id']}", state, ttl=3600)
+    if context:
+        _schedule_cricket_timer(context, int(state["chat_id"]), "bowler_dm", int(state["bowler"]), 20)
 
 
 async def nightcricket(update, context) -> None:
@@ -477,6 +544,7 @@ async def nightcricket(update, context) -> None:
         "teams": {"A": [user.id], "B": []},
         "captains": {"A": user.id, "B": None},
         "names": {str(user.id): user.first_name or "Captain"},
+        "usernames": {str(user.id): user.username},
         "usernames": {str(user.id): user.username},
         "phase": "lobby", "toss": None, "toss_winner": None,
         "batting_team": None, "bowling_team": None,
@@ -515,12 +583,14 @@ async def nightcricket_dm(update, context) -> None:
     state["phase"] = "batting"
     await storage.set(key, state, ttl=3600)
     await storage.delete(f"nightcricket:bowler:{user.id}")
-    await context.bot.send_message(
-        chat_id=state["chat_id"],
-        text=f"🌑 <b>DELIVERY LOCKED.</b>\n\n"
-             f"<b>{html.escape(state['names'].get(str(state['batter']), 'Batter'))}</b> — choose your shot first.",
-        parse_mode=ParseMode.HTML, reply_markup=_shot_markup(int(state["chat_id"])),
+    await _edit_cricket_status(
+        context.bot, state,
+        f"🌑 <b>DELIVERY LOCKED.</b>\n\n"
+        f"🏏 {_mention(int(state['batter']), state['names'].get(str(state['batter']), 'Batter'), state.get('usernames', {}).get(str(state['batter'])))} — choose your shot.\n"
+        "<i>⏱️ 20 seconds.</i>",
+        _shot_markup(int(state["chat_id"])),
     )
+    _schedule_cricket_timer(context, int(state["chat_id"]), "batting", int(state["batter"]), 20)
 
 
 async def nightcricket_group_text(update, context) -> None:
@@ -577,6 +647,7 @@ async def nightcricket_callback(update, context) -> None:
             return
         state["teams"][team].append(uid)
         state["names"][str(uid)] = q.from_user.first_name or "Player"
+        state.setdefault("usernames", {})[str(uid)] = q.from_user.username
         state.setdefault("usernames", {})[str(uid)] = q.from_user.username
         if team == "B" and state["captains"]["B"] is None:
             state["captains"]["B"] = uid
@@ -657,7 +728,7 @@ async def nightcricket_callback(update, context) -> None:
         state["bat_idx"] += 1
         state["bowl_idx"] += 1
         state.pop("shot", None)
-        await _start_ball(context.bot, state)
+        await _start_ball(context.bot, state, context)
 
 def _existing(app):
     return {str(c).lower().lstrip("/") for hs in getattr(app, "handlers", {}).values() for h in hs for c in (getattr(h, "commands", None) or ())}
