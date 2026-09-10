@@ -618,4 +618,4 @@ def register(app):
     app.add_handler(CallbackQueryHandler(nightcricket_callback, pattern=r"^nightcricket:"), group=16)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, nightcricket_dm), group=16)
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, nightcricket_group_text), group=16)
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, nightcricket_dm), group=16)
+
