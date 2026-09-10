@@ -9,68 +9,89 @@ from ..memory_engine import MemoryEngine
 def _house_url() -> str:return (os.getenv("ORACLE_WEBAPP_URL") or os.getenv("ORACLE_MINI_APP_URL") or os.getenv("MINI_APP_URL") or "").strip()
 
 async def start(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    user=update.effective_user; name=f"@{user.username}" if user and user.username else (user.first_name if user else "you")
-    if update.effective_chat and update.effective_chat.type=="private":text=f"🌙 *Midnight Oracle*\n\nHey, {name}.\n\nI'm around for conversation, games, strange little moments and whatever the room turns into.\n\nTry /help when you want the map."
-    else:text=f"🌙 *Midnight Oracle*\n\nHey, {name}. I'm in.\n\nI'll join the room when there's actually something worth adding."
-    await update.effective_message.reply_text(text,parse_mode="Markdown")
+    user=update.effective_user
+    name=f"@{user.username}" if user and user.username else (user.first_name if user else "friend")
+    if update.effective_chat and update.effective_chat.type=="private":
+        text=f"""☾ <b>MIDNIGHT ORACLE</b>
+
+<b>The room is open.</b>
+──────────────
+Hey, <b>{name}</b>.
+
+No ceremony needed. Talk to me, start a game, ask for a reading, or bring whatever is keeping you awake.
+
+<i>Some nights need answers. Some only need company.</i>
+
+⌁ <b>/help</b>  open the rooms"""
+    else:
+        text=f"""☾ <b>MIDNIGHT ORACLE</b>
+
+<b>Midnight has arrived.</b>
+──────────────
+<b>{name}</b> is here.
+
+I'll stay quiet until the room gives me a reason to speak.
+
+<i>Good conversations don't need an announcement.</i>"""
+    await update.effective_message.reply_text(text,parse_mode="HTML")
 
 async def help_command(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    text="""🌙 *MIDNIGHT ORACLE*
-━━━━━━━━━━━━━━━━━━
-_conversation, games, readings, chaos and the occasional unexpected moment._
+    text="""☾ <b>MIDNIGHT ORACLE</b>
+<i>Conversation, games, readings, chaos.</i>
+──────────────
 
-━━━━ *🔮 READINGS* ━━━━
-`/oracle` `/aura` `/vibecheck` `/identity` `/shadow` `/element` `/corecode`
-`/universe` `/ritual` `/duality` `/nightreport` `/sigil` `/glitch`
+<b>⌁ READINGS</b>
+<code>/oracle</code> <code>/aura</code> <code>/vibecheck</code> <code>/identity</code> <code>/shadow</code> <code>/element</code> <code>/corecode</code>
+<code>/universe</code> <code>/ritual</code> <code>/duality</code> <code>/nightreport</code> <code>/sigil</code> <code>/glitch</code>
 
-━━━━ *💬 CONVERSATION* ━━━━
-`/chat` `/persona` `/vent` `/checkin` `/streakcheck`
+<b>⌁ CONVERSATION</b>
+<code>/chat</code> <code>/persona</code> <code>/vent</code> <code>/checkin</code> <code>/streakcheck</code>
 
-━━━━ *🎮 GAMES* ━━━━
-`/quiz` `/truth` `/dare` `/wyr` `/nhie` `/rps`
-`/riddle` `/riddleanswer` `/scramble` `/unscramble` `/guess` `/leaderboard`
-`/dice` `/darts` `/basketball` `/bowling` `/football` `/slot`
-`/hangman` `/hangmanguess` `/tictactoe` `/ttt` `/wordchain` `/chainword`
-`/trivia` `/wordle` `/wordleguess` `/ratethis` `/impostor` `/revealimpostor`
+<b>⌁ GAMES</b>
+<code>/quiz</code> <code>/truth</code> <code>/dare</code> <code>/wyr</code> <code>/nhie</code> <code>/rps</code>
+<code>/riddle</code> <code>/riddleanswer</code> <code>/scramble</code> <code>/unscramble</code> <code>/guess</code> <code>/leaderboard</code>
+<code>/dice</code> <code>/darts</code> <code>/basketball</code> <code>/bowling</code> <code>/football</code> <code>/slot</code>
+<code>/hangman</code> <code>/hangmanguess</code> <code>/tictactoe</code> <code>/ttt</code> <code>/wordchain</code> <code>/chainword</code>
+<code>/trivia</code> <code>/wordle</code> <code>/wordleguess</code> <code>/ratethis</code> <code>/impostor</code> <code>/revealimpostor</code>
 
-━━━━ *👥 PEOPLE* ━━━━
-`/bestie` `/duo` `/friendship` `/ship` `/tagbestie` `/squad` `/loyalty`
-`/hug` `/pat` `/highfive` `/slap` `/kiss` `/poke` `/cuddle` `/wave` `/bite` `/tickle`
+<b>⌁ PEOPLE</b>
+<code>/bestie</code> <code>/duo</code> <code>/friendship</code> <code>/ship</code> <code>/tagbestie</code> <code>/squad</code> <code>/loyalty</code>
+<code>/hug</code> <code>/pat</code> <code>/highfive</code> <code>/slap</code> <code>/kiss</code> <code>/poke</code> <code>/cuddle</code> <code>/wave</code> <code>/bite</code> <code>/tickle</code>
 
-━━━━ *💘 MATCHMAKING* ━━━━
-`/matchmaker` `/randomship` `/secretadmirer` `/crush` `/clearcrush`
+<b>⌁ MATCHMAKING</b>
+<code>/matchmaker</code> <code>/randomship</code> <code>/secretadmirer</code> <code>/crush</code> <code>/clearcrush</code>
 
-━━━━ *🎉 FUN* ━━━━
-`/roast` `/compliment` `/8ball` `/vibe` `/quote` `/poll` `/rank`
+<b>⌁ CHAOS</b>
+<code>/roast</code> <code>/compliment</code> <code>/8ball</code> <code>/vibe</code> <code>/quote</code> <code>/poll</code> <code>/rank</code>
 
-━━━━ *🛠️ UTILITY* ━━━━
-`/id` `/info` `/remind` `/groupinfo` `/afk` `/report`
+<b>⌁ UTILITY</b>
+<code>/id</code> <code>/info</code> <code>/remind</code> <code>/groupinfo</code> <code>/afk</code> <code>/report</code>
 
-━━━━ *📊 STATS* ━━━━
-`/stats` `/topactive` `/msgcount` `/joined` `/left`
+<b>⌁ STATS · ECONOMY</b>
+<code>/stats</code> <code>/topactive</code> <code>/msgcount</code> <code>/joined</code> <code>/left</code>
+<code>/daily</code> <code>/balance</code> <code>/rob</code> <code>/gamble</code> <code>/richest</code>
 
-━━━━ *💰 ECONOMY* ━━━━
-`/daily` `/balance` `/rob` `/gamble` `/richest`
+<b>⌁ MARRIAGE · SHOP</b>
+<code>/marry</code> <code>/accept</code> <code>/divorce</code> <code>/profile</code> <code>/work</code> <code>/chests</code>
+<code>/shop</code> <code>/buy</code> <code>/inventory</code> <code>/gift</code> <code>/settings</code>
 
-━━━━ *💍 MARRIAGE & SHOP* ━━━━
-`/marry` `/accept` `/divorce` `/profile` `/work` `/chests`
-`/shop` `/buy` `/inventory` `/gift` `/settings`
+<b>⌁ TIME CAPSULE</b>
+<code>/timecapsule</code> <code>/capsules</code>
 
-━━━━ *⏳ TIME CAPSULE* ━━━━
-`/timecapsule` `/capsules`
+<b>⌁ DEATH GAMES</b>
+<code>/survive</code> <code>/revive</code> <code>/deathstatus</code> <code>/roulette</code> <code>/deathgame</code> <code>/joingame</code>
+<code>/startround</code> <code>/vote</code> <code>/endgame</code>
 
-━━━━ *💀 DEATH GAMES* ━━━━
-`/survive` `/revive` `/deathstatus` `/roulette` `/deathgame` `/joingame`
-`/startround` `/vote` `/endgame`
+<b>⌁ CORE</b>
+<code>/memory</code> <code>/mymemory</code> <code>/forget</code> <code>/quiet</code> <code>/wake</code> <code>/tod</code>
+<code>/predict</code> <code>/predictions</code> <code>/house</code>
 
-━━━━ *☾ CORE* ━━━━
-`/memory` `/mymemory` `/forget` `/quiet` `/wake` `/tod` `/predict` `/predictions` `/house`
+──────────────
+<i>Private and owner controls stay private.</i>"""
+    await update.effective_message.reply_text(text,parse_mode="HTML")
 
-━━━━━━━━━━━━━━━━━━
-_private and owner controls stay private._"""
-    await update.effective_message.reply_text(text,parse_mode="Markdown")
-
-async def oracle(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:await update.effective_message.reply_text("☾ I'm here. What's on your mind?")
+async def oracle(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
+    await update.effective_message.reply_text("☾ <b>I’m listening.</b>\n──────────────\nTell me what’s actually on your mind.\n\n<i>No polished version required.</i>",parse_mode="HTML")
 async def truth(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:await update.effective_message.reply_text(f"☾ {question(context.args[0] if context.args else 'light')}",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('Answer',callback_data='truth:answer'),InlineKeyboardButton('Pass',callback_data='truth:pass')]]))
 
 async def truth_callback(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
