@@ -56,7 +56,7 @@ async def ship(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tier = "low" if score < 40 else "mid" if score < 75 else "high"
     verdict = random.choice(SHIP_VERDICTS[tier])
     ship_name = _ship_name(name1_display, name2_display)
-    await update.message.reply_text(f"🚢 Shipping {mention1} + {mention2}\n\nShip name: *{ship_name}*\n{bar_filled}{bar_empty} {score}%\n_{verdict}_", parse_mode="Markdown")
+    await update.message.reply_text(f"🚢 Shipping {mention1} + {mention2}\n\nShip name: *{ship_name}*\n{bar_filled}{bar_empty} {score}%\n_{verdict}_", parse_mode="HTML")
 
 
 async def random_ship(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -201,11 +201,10 @@ async def _action(update: Update, context: ContextTypes.DEFAULT_TYPE, action_key
         return
     actor = update.effective_user
     target = update.message.reply_to_message.from_user
-    text_template, gif_term = ACTIONS[action_key]
+    text_template, _gif_term = ACTIONS[action_key]
     text = text_template.format(target=mention(target.id, target.first_name))
-    full_text = f"{mention(actor.id, actor.first_name)} {text}"
-    from handlers.chat import send_text_with_gif
-    await send_text_with_gif(context.bot, update.effective_chat.id, full_text, gif_term)
+    full_text = f"☾ {mention(actor.id, actor.first_name)} {text}\n\n<i>Midnight witnessed it.</i>"
+    await update.message.reply_text(full_text, parse_mode="HTML")
 
 
 async def hug(update: Update, context: ContextTypes.DEFAULT_TYPE): await _action(update, context, "hug")
