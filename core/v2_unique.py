@@ -198,40 +198,103 @@ async def cricket_callback(update, context) -> None:
 
 
 async def elitecricket(update, context) -> None:
-    """Midnight's original cricket arcade hub."""
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🏏 Quick Match", callback_data="elitecricket:quick"),
-         InlineKeyboardButton("⚔️ Duel", callback_data="elitecricket:duel")],
-        [InlineKeyboardButton("🎯 Shot Lab", callback_data="elitecricket:shots")],
+    """A Midnight-native six-ball cricket arcade."""
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🏏 SOLO · 6 BALLS", callback_data="elitecricket:quick")],
+        [InlineKeyboardButton("⚔️ DUEL", callback_data="elitecricket:duel"),
+         InlineKeyboardButton("🎯 SHOT LAB", callback_data="elitecricket:shots")],
+        [InlineKeyboardButton("✦ HOW TO PLAY", callback_data="elitecricket:help")],
     ])
     await update.effective_message.reply_text(
         "<b>🏏 𝐌𝐈𝐃𝐍𝐈𝐆𝐇𝐓 𝐂𝐑𝐈𝐂𝐊𝐄𝐓</b>\n\n"
-        "<i>Read the risk. Pick the shot.</i>\n\n"
-        "A compact cricket arcade built for the room.\n"
-        "No coins. No farming. Just timing, risk and a little madness.\n\n"
-        "<b>QUICK MATCH</b> · six balls against the Oracle\n"
-        "<b>DUEL</b> · challenge someone in the room\n"
-        "<b>SHOT LAB</b> · learn the risk profile of every shot",
-        parse_mode=ParseMode.HTML, reply_markup=keyboard,
+        "<i>Read the risk. Pick the shot.</i>\n"
+        "──────────────\n"
+        "A six-ball arcade built for the room.\n\n"
+        "<b>SOLO</b> · face the Oracle\n"
+        "<b>DUEL</b> · challenge a member\n"
+        "<b>SHOT LAB</b> · study the risk\n\n"
+        "<code>no coins · no farming · just cricket</code>",
+        parse_mode=ParseMode.HTML, reply_markup=markup,
     )
 
 
 async def elitecricket_callback(update, context) -> None:
     query = update.callback_query
-    if not query or not query.message:
+    if not query or not query.message or not query.from_user:
         return
-    await query.answer()
     action = (query.data or "").split(":", 1)[-1]
+    await query.answer()
+
+    if action == "quick":
+        state = {"uid": query.from_user.id, "runs": 0, "balls": 0, "wickets": 0, "last": "The Oracle has the ball."}
+        await storage.set(f"elitecricket:solo:{query.message.chat.id}:{query.from_user.id}", state, ttl=1800)
+        buttons = [[InlineKeyboardButton(str(n), callback_data=f"elitecricket:ball:{n}") for n in range(1, 4)],
+                   [InlineKeyboardButton(str(n), callback_data=f"elitecricket:ball:{n}") for n in range(4, 7)]]
+        await query.message.reply_text(
+            "<b>🏏 𝐒𝐎𝐋𝐎 · BALL 1/6</b>\n\n"
+            "<i>You are batting. Pick a number from 1 to 6.</i>\n"
+            "If your number matches the Oracle's delivery: <b>WICKET.</b>\n"
+            "Otherwise, your number becomes the runs.\n\n"
+            "<code>Choose like you mean it.</code>",
+            parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons),
+        )
+        return
+
+    if action == "ball":
+        raw = (query.data or "").rsplit(":", 1)[-1]
+        if not raw.isdigit() or not 1 <= int(raw) <= 6:
+            return
+        uid = query.from_user.id
+        key = f"elitecricket:solo:{query.message.chat.id}:{uid}"
+        state = await storage.load(key, None)
+        if not isinstance(state, dict):
+            await query.message.reply_text("🌘 That innings has gone cold. Use /elitecricket to start again.")
+            return
+        if state.get("uid") != uid:
+            return
+        choice = int(raw)
+        bowl = random.randint(1, 6)
+        state["balls"] = int(state.get("balls", 0)) + 1
+        if choice == bowl:
+            state["wickets"] = int(state.get("wickets", 0)) + 1
+            state["last"] = f"💥 You picked <b>{choice}</b>. Oracle bowled <b>{bowl}</b> — <b>WICKET.</b>"
+        else:
+            state["runs"] = int(state.get("runs", 0)) + choice
+            state["last"] = f"🏏 You picked <b>{choice}</b>. Oracle bowled <b>{bowl}</b> — <b>{choice} RUNS.</b>"
+        if state["balls"] >= 6 or state["wickets"] >= 2:
+            result = "🔥 <b>INNINGS CLOSED.</b>"
+            if state["wickets"] >= 2:
+                result = "💀 <b>TWO WICKETS. INNINGS OVER.</b>"
+            await storage.set(key, state, ttl=1800)
+            await query.message.reply_text(
+                f"<b>🏏 𝐌𝐈𝐃𝐍𝐈𝐆𝐇𝐓 𝐂𝐑𝐈𝐂𝐊𝐄𝐓 · 𝐅𝐈𝐍𝐈𝐒𝐇𝐄𝐃</b>\n\n"
+                f"<b>{state['runs']}/{state['wickets']}</b> · {state['balls']} balls\n\n"
+                f"{state['last']}\n\n{result}\n"
+                "<i>Come back when you want another over.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        await storage.set(key, state, ttl=1800)
+        next_ball = state["balls"] + 1
+        buttons = [[InlineKeyboardButton(str(n), callback_data=f"elitecricket:ball:{n}") for n in range(1, 4)],
+                   [InlineKeyboardButton(str(n), callback_data=f"elitecricket:ball:{n}") for n in range(4, 7)]]
+        await query.message.reply_text(
+            f"<b>🏏 𝐌𝐈𝐃𝐍𝐈𝐆𝐇𝐓 𝐂𝐑𝐈𝐂𝐊𝐄𝐓 · BALL {next_ball}/6</b>\n\n"
+            f"<b>{state['runs']}/{state['wickets']}</b>\n\n{state['last']}\n\n"
+            "<i>Your turn. Read the risk.</i>",
+            parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons),
+        )
+        return
+
     if action == "duel":
         await query.message.reply_text(
-            "🏏 <b>DUEL READY</b>\n\nReply to a player's message with <code>/cricketduel</code>.\n"
-            "<i>Six balls each. No economy. Winner keeps the bragging rights.</i>",
+            "⚔️ <b>DUEL READY</b>\n\nReply to a member with <code>/cricketduel</code>.\n"
+            "<i>Six balls. No economy. Bragging rights only.</i>",
             parse_mode=ParseMode.HTML,
         )
     elif action == "shots":
-        lines = []
-        for key, (icon, name, outcomes, risk) in SHOTS.items():
-            lines.append(f"{icon} <b>{name}</b> · {int(risk * 100)}% control · {','.join(map(str, outcomes))} runs")
+        lines = [f"{icon} <b>{name}</b> · {int(risk * 100)}% control · {','.join(map(str, outcomes))} runs"
+                 for _, (icon, name, outcomes, risk) in SHOTS.items()]
         await query.message.reply_text(
             "<b>🎯 𝐒𝐇𝐎𝐓 𝐋𝐀𝐁</b>\n\n" + "\n".join(lines) +
             "\n\n<i>Higher reward usually means a nastier price for missing.</i>",
@@ -239,12 +302,14 @@ async def elitecricket_callback(update, context) -> None:
         )
     else:
         await query.message.reply_text(
-            "<b>🏏 𝐐𝐔𝐈𝐂𝐊 𝐌𝐀𝐓𝐂𝐇</b>\n\n"
-            "Your first six-ball challenge is ready.\n"
-            "<i>Choose a shot. Read the risk. Survive the over.</i>\n\n"
-            "Use <code>/cricket</code> to enter the existing solo mode.",
+            "<b>✦ 𝐇𝐎𝐖 𝐓𝐎 𝐏𝐋𝐀𝐘</b>\n\n"
+            "You bat for six balls.\n"
+            "Pick <b>1–6</b>. The Oracle secretly bowls <b>1–6</b>.\n"
+            "Match = wicket. No match = your chosen number in runs.\n\n"
+            "<i>It's simple. The fun is pretending you knew the ball.</i> ☾",
             parse_mode=ParseMode.HTML,
         )
+
 
 def _existing(app):
     return {str(c).lower().lstrip("/") for hs in getattr(app, "handlers", {}).values() for h in hs for c in (getattr(h, "commands", None) or ())}
