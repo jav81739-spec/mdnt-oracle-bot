@@ -340,6 +340,13 @@ def _lobby_markup(chat_id: int) -> InlineKeyboardMarkup:
     ])
 
 
+def _shot_markup(chat_id: int) -> InlineKeyboardMarkup:
+    items = [(k, v[0], v[1]) for k, v in SHOTS.items()]
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"{icon} {name}", callback_data=f"nightcricket:shot:{key}:{chat_id}") for key, icon, name in items[i:i+2]]
+        for i in range(0, len(items), 2)
+    ])
+
 def _bat_markup(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(str(n), callback_data=f"nightcricket:bat:{n}:{chat_id}") for n in range(1, 4)],
@@ -451,8 +458,8 @@ async def nightcricket_dm(update, context) -> None:
     await context.bot.send_message(
         chat_id=state["chat_id"],
         text=f"🌑 <b>DELIVERY LOCKED.</b>\n\n"
-             f"<b>{html.escape(state['names'].get(str(state['batter']), 'Batter'))}</b> — your number. Pick <b>1–6</b>.",
-        parse_mode=ParseMode.HTML, reply_markup=_bat_markup(int(state["chat_id"])),
+             f"<b>{html.escape(state['names'].get(str(state['batter']), 'Batter'))}</b> — choose your shot first.",
+        parse_mode=ParseMode.HTML, reply_markup=_shot_markup(int(state["chat_id"])),
     )
 
 
@@ -540,14 +547,32 @@ async def nightcricket_callback(update, context) -> None:
         )
         return
 
+    if action == "shot" and len(parts) >= 3:
+        if state.get("phase") != "batting" or uid != state.get("batter"):
+            await q.answer("Not your turn.", show_alert=True)
+            return
+        shot = parts[2]
+        if shot not in SHOTS:
+            return
+        state["shot"] = shot
+        await storage.set(key, state, ttl=3600)
+        await q.message.reply_text(
+            f"🏏 <b>{html.escape(SHOTS[shot][1])}</b> selected.\n\n"
+            "<i>Now choose the number. The bowler's call is already locked.</i>",
+            parse_mode=ParseMode.HTML, reply_markup=_bat_markup(chat_id),
+        )
+        return
+
     if action == "bat" and len(parts) >= 3:
         if state.get("phase") != "batting" or uid != state.get("batter"):
             await q.answer("Not your turn.", show_alert=True)
             return
         bat = int(parts[2])
-        if not 1 <= bat <= 6:
+        if not 1 <= bat <= 6 or not state.get("shot"):
+            await q.answer("Choose a shot first.", show_alert=True)
             return
         bowl = int(state.get("bowl", 0))
+        shot = state["shot"]
         state["ball"] += 1
         if bat == bowl:
             state["wickets"] += 1
@@ -555,7 +580,6 @@ async def nightcricket_callback(update, context) -> None:
             caption = f"🎙️ <b>{html.escape(state['names'].get(str(state['bowler']), 'Bowler'))}</b> comes in... {html.escape(state['names'].get(str(state['batter']), 'Batter'))} is beaten — <b>WICKET!</b>"
         else:
             state["runs"] += bat
-            shot = random.choice(tuple(CRICKET_MEDIA))
             term = CRICKET_MEDIA[shot]
             caption = f"🎙️ <b>{html.escape(state['names'].get(str(state['batter']), 'Batter'))}</b> finds the gap... <b>{'SIX!' if bat == 6 else 'FOUR!' if bat == 4 else str(bat) + ' RUNS!'}</b>"
         await storage.set(key, state, ttl=3600)
@@ -571,6 +595,7 @@ async def nightcricket_callback(update, context) -> None:
             return
         state["bat_idx"] += 1
         state["bowl_idx"] += 1
+        state.pop("shot", None)
         await _start_ball(context.bot, state)
 
 def _existing(app):
