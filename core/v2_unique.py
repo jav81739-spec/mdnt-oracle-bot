@@ -11,7 +11,7 @@ from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.ext import CallbackQueryHandler, CommandHandler
+from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from .storage import storage
 
@@ -249,126 +249,232 @@ async def _cricket_ball_media(bot, chat_id: int, shot_key: str, *,
     await _cricket_replay(bot, chat_id, term, caption)
 
 
+CRICKET_MEDIA = {
+    "defend": "cricket defensive shot live action",
+    "cover": "cricket cover drive live action",
+    "cut": "cricket square cut live action",
+    "sweep": "cricket sweep shot live action",
+    "pull": "cricket pull shot live action",
+    "hook": "cricket hook shot live action",
+    "loft": "cricket lofted drive live action",
+    "straight": "cricket straight drive live action",
+    "helicopter": "cricket helicopter shot live action",
+    "reverse": "cricket reverse sweep live action",
+}
+CRICKET_BOWL_MEDIA = (
+    "cricket fast bowler delivery live action",
+    "cricket spin bowler delivery live action",
+    "cricket wicket bowling live action",
+    "cricket bowler celebration live action",
+)
+
+
+def _cricket_markup(chat_id: int, phase: str = "join") -> InlineKeyboardMarkup:
+    rows = []
+    if phase == "join":
+        rows.append([InlineKeyboardButton("🏏 JOIN", callback_data=f"nightcricket:join:{chat_id}")])
+        rows.append([InlineKeyboardButton("🪙 HEADS", callback_data=f"nightcricket:toss:heads:{chat_id}"),
+                     InlineKeyboardButton("🪙 TAILS", callback_data=f"nightcricket:toss:tails:{chat_id}")])
+    elif phase == "bat":
+        rows.append([InlineKeyboardButton(str(n), callback_data=f"nightcricket:bat:{n}:{chat_id}") for n in range(1, 4)])
+        rows.append([InlineKeyboardButton(str(n), callback_data=f"nightcricket:bat:{n}:{chat_id}") for n in range(4, 7)])
+    return InlineKeyboardMarkup(rows)
+
+
+async def _send_cricket_media(bot, chat_id: int, term: str, caption: str) -> None:
+    try:
+        from handlers.chat import get_gif_url
+        url = await get_gif_url(term)
+        if url:
+            await bot.send_animation(chat_id=chat_id, animation=url, caption=caption[:1024], parse_mode=ParseMode.HTML)
+            return
+    except Exception:
+        pass
+    await bot.send_message(chat_id=chat_id, text=caption, parse_mode=ParseMode.HTML)
+
+
+def _cricket_caption(batter: str, bowler: str, shot: str, bowl: int, bat: int) -> tuple[str, str]:
+    if bat == bowl:
+        return (
+            CRICKET_BOWL_MEDIA[bowl % len(CRICKET_BOWL_MEDIA)],
+            f"🎙️ <b>{html.escape(bowler)}</b> comes in... {html.escape(batter)} commits — <b>WICKET!</b>\n"
+            f"<i>Bowled {bowl}, batted {bat}. The numbers met.</i>",
+        )
+    runs = bat
+    term = CRICKET_MEDIA.get(shot, "cricket batting shot live action")
+    if runs == 6:
+        call = f"🎙️ <b>{html.escape(batter)}</b> gets underneath it... <b>SIX!</b> That has gone miles."
+    elif runs == 4:
+        call = f"🎙️ <b>{html.escape(batter)}</b> finds the gap... <b>FOUR!</b> Beautifully timed."
+    else:
+        call = f"🎙️ <b>{html.escape(batter)}</b> picks it up... <b>{runs}</b> run{'s' if runs != 1 else ''}."
+    return term, call + f"\n<i>Bowled {bowl}, batted {bat}.</i>"
+
+
 async def nightcricket(update, context) -> None:
-    """Midnight's cricket room: original six-ball arcade, with optional action media."""
-    markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🏏 SOLO · 6 BALLS", callback_data="nightcricket:quick")],
-        [InlineKeyboardButton("⚔️ DUEL", callback_data="nightcricket:duel"),
-         InlineKeyboardButton("🎯 SHOT LAB", callback_data="nightcricket:shots")],
-        [InlineKeyboardButton("✦ HOW IT PLAYS", callback_data="nightcricket:help")],
-    ])
+    chat = update.effective_chat
+    user = update.effective_user
+    if not chat or chat.type not in {"group", "supergroup"}:
+        await update.effective_message.reply_text("🏏 <b>Night Cricket belongs in the group.</b>\nStart it from a group chat.", parse_mode=ParseMode.HTML)
+        return
+    key = f"nightcricket:match:{chat.id}"
+    state = await storage.load(key, None)
+    if isinstance(state, dict) and state.get("phase") not in {"finished", None}:
+        await update.effective_message.reply_text("🏏 <b>Night Cricket is already running here.</b>\nJoin the current room or let its captain finish it.", parse_mode=ParseMode.HTML)
+        return
+    state = {
+        "chat_id": chat.id, "captain": user.id, "players": [user.id],
+        "names": {str(user.id): user.first_name or "Captain"}, "phase": "lobby",
+        "toss": None, "batting": None, "bowling": None, "ball": 0,
+        "runs": 0, "wickets": 0, "last_shot": "cover",
+    }
+    await storage.set(key, state, ttl=3600)
     await update.effective_message.reply_text(
         "<b>🏏 𝐍𝐈𝐆𝐇𝐓 𝐂𝐑𝐈𝐂𝐊𝐄𝐓</b>\n\n"
-        "<i>Read the risk. Pick the shot.</i>\n"
+        "<i>The group becomes the ground.</i>\n"
         "──────────────\n"
-        "A six-ball cricket room where every choice has a consequence.\n\n"
-        "<b>SOLO</b> · face the Oracle\n"
-        "<b>DUEL</b> · face someone in the room\n"
-        "<b>SHOT LAB</b> · study the shots\n\n"
-        "<code>no coins · no farming · just cricket</code>",
-        parse_mode=ParseMode.HTML, reply_markup=markup,
+        f"👑 Captain: <b>{html.escape(user.first_name or 'Captain')}</b>\n"
+        "Tap <b>JOIN</b> to enter. The captain calls the toss.\n\n"
+        "<i>Heads or tails decides who gets first choice: bat or bowl.</i>",
+        parse_mode=ParseMode.HTML, reply_markup=_cricket_markup(chat.id, "join"),
+    )
+
+
+async def nightcricket_dm(update, context) -> None:
+    """Receives the bowler's private 1–6 delivery before the group sees the ball."""
+    chat = update.effective_chat
+    user = update.effective_user
+    msg = update.effective_message
+    if not chat or chat.type != "private" or not user or not msg:
+        return
+    text = (msg.text or "").strip()
+    if text not in {"1", "2", "3", "4", "5", "6"}:
+        return
+    matches = await storage.load(f"nightcricket:bowler:{user.id}", None)
+    if not isinstance(matches, dict):
+        return
+    match_key = f"nightcricket:match:{int(matches.get('chat_id', 0))}"
+    state = await storage.load(match_key, None)
+    if not isinstance(state, dict) or state.get("phase") != "bowler_dm" or state.get("bowling") != user.id:
+        return
+    state["bowl"] = int(text)
+    state["phase"] = "batting"
+    await storage.set(match_key, state, ttl=3600)
+    await storage.delete(f"nightcricket:bowler:{user.id}")
+    await context.bot.send_message(
+        chat_id=state["chat_id"],
+        text="<b>🏏 BALL IS LOADED.</b>\n\n"
+             f"<i>{html.escape(state['names'].get(str(state['bowling']), 'Bowler'))} has chosen the delivery.</i>\n"
+             f"<b>{html.escape(state['names'].get(str(state['batting']), 'Batter'))}</b> — your turn. Pick <b>1–6</b>.",
+        parse_mode=ParseMode.HTML, reply_markup=_cricket_markup(int(state["chat_id"]), "bat"),
     )
 
 
 async def nightcricket_callback(update, context) -> None:
-    query = update.callback_query
-    if not query or not query.message or not query.from_user:
+    q = update.callback_query
+    if not q or not q.message or not q.from_user:
         return
-    await query.answer()
-    parts = (query.data or "").split(":")
-    action = parts[1] if len(parts) > 1 else ""
+    await q.answer()
+    parts = (q.data or "").split(":")
+    if len(parts) < 3 or parts[0] != "nightcricket":
+        return
+    action = parts[1]
+    chat_id = int(parts[-1]) if parts[-1].lstrip("-").isdigit() else q.message.chat.id
+    key = f"nightcricket:match:{chat_id}"
+    state = await storage.load(key, None)
+    if not isinstance(state, dict):
+        await q.message.reply_text("🌘 That match has gone cold. Start /nightcricket again.")
+        return
 
-    if action == "quick":
-        state = {"uid": query.from_user.id, "runs": 0, "balls": 0, "wickets": 0}
-        key = f"nightcricket:solo:{query.message.chat.id}:{query.from_user.id}"
-        await storage.set(key, state, ttl=1800)
-        buttons = [
-            [InlineKeyboardButton(str(n), callback_data=f"nightcricket:ball:{n}") for n in range(1, 4)],
-            [InlineKeyboardButton(str(n), callback_data=f"nightcricket:ball:{n}") for n in range(4, 7)],
-        ]
-        await query.message.reply_text(
-            "<b>🏏 𝐍𝐈𝐆𝐇𝐓 𝐂𝐑𝐈𝐂𝐊𝐄𝐓 · 𝐁𝐀𝐋𝐋 𝟏/𝟔</b>\n\n"
-            "<i>You bat. The Oracle bowls.</i>\n\n"
-            "Pick <b>1–6</b>. Match the delivery and you're gone. Miss it and your number becomes the runs.\n\n"
-            "<code>Choose like you mean it.</code>",
-            parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons),
+    uid = q.from_user.id
+    if action == "join":
+        if uid not in state["players"]:
+            state["players"].append(uid)
+            state["names"][str(uid)] = q.from_user.first_name or "Player"
+            await storage.set(key, state, ttl=3600)
+        await q.message.reply_text(
+            f"🏏 <b>{html.escape(q.from_user.first_name or 'Player')}</b> is in.\n"
+            f"<i>{len(state['players'])} player{'s' if len(state['players']) != 1 else ''} in the room. Captain controls the toss.</i>",
+            parse_mode=ParseMode.HTML,
         )
         return
 
-    if action == "ball" and len(parts) == 3 and parts[2].isdigit():
-        choice = int(parts[2])
-        if not 1 <= choice <= 6:
+    if action == "toss":
+        if uid != state["captain"]:
+            await q.answer("Only the captain calls the toss.", show_alert=True)
             return
-        key = f"nightcricket:solo:{query.message.chat.id}:{query.from_user.id}"
-        state = await storage.load(key, None)
-        if not isinstance(state, dict) or state.get("uid") != query.from_user.id:
-            await query.message.reply_text("🌘 That innings has gone cold. Use /nightcricket to begin again.")
+        choice = parts[2].lower()
+        result = random.choice(("heads", "tails"))
+        winner = uid if choice == result else next((p for p in state["players"] if p != uid), None)
+        if winner is None:
+            await q.message.reply_text("Need at least two players before the toss. 🏏")
             return
-        bowl = random.randint(1, 6)
-        state["balls"] += 1
-        if choice == bowl:
-            state["wickets"] += 1
-            await storage.set(key, state, ttl=1800)
-            await _cricket_ball_media(context.bot, query.message.chat.id, "defend",
-                                      batter=query.from_user.first_name or "Batter",
-                                      bowler="the Oracle", outcome="wicket")
-        else:
-            state["runs"] += choice
-            await storage.set(key, state, ttl=1800)
-            shot = random.choice(tuple(CRICKET_SHOT_TERMS))
-            await _cricket_ball_media(context.bot, query.message.chat.id, shot,
-                                      batter=query.from_user.first_name or "Batter",
-                                      bowler="the Oracle", outcome="runs", runs=choice)
+        state["toss"] = result
+        state["toss_winner"] = winner
+        state["phase"] = "choice"
+        await storage.set(key, state, ttl=3600)
+        await q.message.reply_text(
+            f"🪙 <b>{result.upper()}</b>.\n\n"
+            f"👑 <b>{html.escape(state['names'].get(str(winner), 'Captain'))}</b> won the toss.\n"
+            "<i>Reply to this message with <b>BAT</b> or <b>BOWL</b>.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
 
-        if state["balls"] >= 6 or state["wickets"] >= 2:
-            result = "🔥 <b>INNINGS CLOSED.</b>" if state["wickets"] < 2 else "💀 <b>TWO WICKETS. INNINGS OVER.</b>"
-            await query.message.reply_text(
-                f"<b>🏏 𝐍𝐈𝐆𝐇𝐓 𝐂𝐑𝐈𝐂𝐊𝐄𝐓 · 𝐅𝐈𝐍𝐈𝐒𝐇𝐄𝐃</b>\n\n"
-                f"<b>{state['runs']}/{state['wickets']}</b> · {state['balls']} balls\n\n"
-                f"{result}\n<i>Come back when you want another over.</i>",
+    if action == "bat":
+        if state.get("phase") != "batting" or uid != state.get("batting"):
+            await q.answer("Not your turn.", show_alert=True)
+            return
+        bat = int(parts[2])
+        bowl = int(state["bowl"])
+        state["ball"] += 1
+        shot = random.choice(tuple(CRICKET_MEDIA))
+        state["last_shot"] = shot
+        if bat == bowl:
+            state["wickets"] += 1
+            outcome = "wicket"
+        else:
+            state["runs"] += bat
+            outcome = "runs"
+        term, caption = _cricket_caption(state["names"].get(str(uid), "Batter"),
+                                         state["names"].get(str(state["bowling"]), "Bowler"),
+                                         shot, bowl, bat)
+        await storage.set(key, state, ttl=3600)
+        await _send_cricket_media(context.bot, chat_id, term, f"🏏 <b>LIVE FROM MIDNIGHT</b>\n\n{caption}")
+        if state["ball"] >= 6 or state["wickets"] >= 2:
+            await q.message.reply_text(
+                f"<b>🏏 INNINGS CLOSED</b>\n\n<b>{state['runs']}/{state['wickets']}</b> · {state['ball']} balls\n"
+                "<i>Next innings / team mode is ready for the same group.</i>",
                 parse_mode=ParseMode.HTML,
             )
+            state["phase"] = "finished"
+            await storage.set(key, state, ttl=900)
             return
-
-        next_ball = state["balls"] + 1
-        buttons = [
-            [InlineKeyboardButton(str(n), callback_data=f"nightcricket:ball:{n}") for n in range(1, 4)],
-            [InlineKeyboardButton(str(n), callback_data=f"nightcricket:ball:{n}") for n in range(4, 7)],
-        ]
-        await query.message.reply_text(
-            f"<b>🏏 𝐍𝐈𝐆𝐇𝐓 𝐂𝐑𝐈𝐂𝐊𝐄𝐓 · 𝐁𝐀𝐋𝐋 {next_ball}/6</b>\n\n"
-            f"<b>{state['runs']}/{state['wickets']}</b>\n\n"
-            "<i>Next ball. Read the risk.</i>",
-            parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons),
-        )
+        state["phase"] = "bowler_dm"
+        await storage.set(key, state, ttl=3600)
+        state_key = f"nightcricket:bowler:{state['bowling']}"
+        await storage.set(state_key, {"chat_id": chat_id}, ttl=300)
+        try:
+            await context.bot.send_message(
+                chat_id=state["bowling"],
+                text="<b>🏏 NIGHT CRICKET · PRIVATE BALL</b>\n\n"
+                     "You are bowling.\n"
+                     "Send me <b>one number: 1–6</b>.\n\n"
+                     "<i>Your number stays private until the batsman commits.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+            await q.message.reply_text(
+                "🌑 <b>The bowler has been sent the private call.</b>\n"
+                "<i>Batsman, wait. The delivery is being loaded.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            await q.message.reply_text(
+                "⚠️ <b>Bowler DM is not open.</b>\n"
+                "The bowler must start a private chat with Midnight first, then continue the match.",
+                parse_mode=ParseMode.HTML,
+            )
         return
-
-    if action == "duel":
-        await query.message.reply_text(
-            "⚔️ <b>DUEL READY</b>\n\nReply to a member with <code>/cricketduel</code>.\n"
-            "<i>Six balls. No coins. Bragging rights only.</i>",
-            parse_mode=ParseMode.HTML,
-        )
-    elif action == "shots":
-        lines = [
-            f"{icon} <b>{name}</b> · {int(risk * 100)}% control · {','.join(map(str, outcomes))} runs"
-            for _, (icon, name, outcomes, risk) in SHOTS.items()
-        ]
-        await query.message.reply_text(
-            "<b>🎯 𝐒𝐇𝐎𝐓 𝐋𝐀𝐁</b>\n\n" + "\n".join(lines) +
-            "\n\n<i>Every shot has its own risk. The clips follow the shot you play.</i>",
-            parse_mode=ParseMode.HTML,
-        )
-    elif action == "help":
-        await query.message.reply_text(
-            "<b>✦ 𝐇𝐎𝐖 𝐈𝐓 𝐏𝐋𝐀𝐘𝐒</b>\n\n"
-            "You bat for six balls.\n"
-            "Pick <b>1–6</b>. The Oracle secretly bowls <b>1–6</b>.\n"
-            "Match = wicket. No match = your chosen number in runs.\n\n"
-            "Every ball can return a shot/bowling action clip with a live-style commentary line.\n\n"
-            "<i>It should feel like a tiny cricket broadcast inside the group — without pretending to be an actual live match.</i> ☾",
-            parse_mode=ParseMode.HTML,
-        )
 
 
 
@@ -390,3 +496,4 @@ def register(app):
     if not any(getattr(h, "callback", None) is cricket_callback for hs in getattr(app, "handlers", {}).values() for h in hs):
         app.add_handler(CallbackQueryHandler(cricket_callback, pattern=r"^v2cricket:"), group=16)
     app.add_handler(CallbackQueryHandler(nightcricket_callback, pattern=r"^nightcricket:"), group=16)
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, nightcricket_dm), group=16)
