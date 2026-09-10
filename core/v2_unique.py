@@ -287,7 +287,7 @@ def _mention(uid: int, name: str, username: str | None = None) -> str:
     return f'<a href="tg://user?id={uid}">{html.escape(label)}</a>'
 
 
-def _schedule_cricket_timer(context, chat_id: int, phase: str, uid: int, seconds: int = 20) -> None:
+def _schedule_cricket_timer(context, chat_id: int, phase: str, uid: int, seconds: int = 45) -> None:
     if getattr(context, "job_queue", None):
         context.job_queue.run_once(
             _nightcricket_timeout, seconds,
@@ -406,12 +406,12 @@ async def _nightcricket_timeout(context) -> None:
         await storage.set(key, state, ttl=3600)
         await _edit_cricket_status(
             context.bot, state,
-            f"⏱️ <b>Bowler's 20 seconds are up.</b> Delivery auto-locked.\n\n"
+            f"⏱️ <b>Bowler's 45 seconds are up.</b> Delivery auto-locked.\n\n"
             f"<b>{html.escape(state['names'].get(str(state['batter']), 'Batter'))}</b> — choose your shot.\n"
-            "<i>⏱️ You have 20 seconds.</i>",
+            "<i>⏱️ You have 45 seconds.</i>",
             _shot_markup(chat_id),
         )
-        _schedule_cricket_timer(context, chat_id, "batting", int(state["batter"]), 20)
+        _schedule_cricket_timer(context, chat_id, "batting", int(state["batter"]), 45)
     elif phase == "batting" and state.get("batter") == uid:
         await _edit_cricket_status(
             context.bot, state,
@@ -431,7 +431,7 @@ def _mention(uid: int, name: str, username: str | None = None) -> str:
     return f'<a href="tg://user?id={uid}">{html.escape(label)}</a>'
 
 
-def _schedule_cricket_timer(context, chat_id: int, phase: str, uid: int, seconds: int = 20) -> None:
+def _schedule_cricket_timer(context, chat_id: int, phase: str, uid: int, seconds: int = 45) -> None:
     if getattr(context, "job_queue", None):
         context.job_queue.run_once(
             _nightcricket_timeout, seconds,
@@ -468,12 +468,12 @@ async def _nightcricket_timeout(context) -> None:
         await storage.set(key, state, ttl=3600)
         await _edit_cricket_status(
             context.bot, state,
-            f"⏱️ <b>Bowler's 20 seconds are up.</b> Delivery auto-locked.\n\n"
+            f"⏱️ <b>Bowler's 45 seconds are up.</b> Delivery auto-locked.\n\n"
             f"<b>{html.escape(state['names'].get(str(state['batter']), 'Batter'))}</b> — choose your shot.\n"
-            "<i>⏱️ 20 seconds.</i>",
+            "<i>⏱️ 45 seconds.</i>",
             _shot_markup(chat_id),
         )
-        _schedule_cricket_timer(context, chat_id, "batting", int(state["batter"]), 20)
+        _schedule_cricket_timer(context, chat_id, "batting", int(state["batter"]), 45)
     elif phase == "batting" and state.get("batter") == uid:
         await _edit_cricket_status(
             context.bot, state,
@@ -496,7 +496,7 @@ async def _ask_bowler(bot, state: dict, context=None) -> None:
             text="<b>🏏 NIGHT CRICKET · PRIVATE BALL</b>\n\n"
                  "You are bowling now.\n"
                  "Send me <b>one number: 1–6</b>.\n\n"
-                 "<i>⏱️ 20 seconds. Your delivery stays hidden until the batter commits.</i>",
+                 "<i>⏱️ 45 seconds. Your delivery stays hidden until the batter commits.</i>",
             parse_mode=ParseMode.HTML,
         )
     except Exception:
@@ -517,13 +517,13 @@ async def _start_ball(bot, state: dict, context=None) -> None:
              f"🎯 Bowler: {_mention(int(state['bowler']), state['names'].get(str(state['bowler']), 'Bowler'), state.get('usernames', {}).get(str(state['bowler'])))}\n"
              f"🏏 Batter: {_mention(int(state['batter']), state['names'].get(str(state['batter']), 'Batter'), state.get('usernames', {}).get(str(state['batter'])))}\n\n"
              "Open Midnight's DM and send <b>1–6</b> for the delivery.\n"
-             "<i>⏱️ Bowler has 20 seconds.</i>",
+             "<i>⏱️ Bowler has 45 seconds.</i>",
         parse_mode=ParseMode.HTML,
     )
     state["status_message_id"] = sent.message_id
     await storage.set(f"nightcricket:match:{state['chat_id']}", state, ttl=3600)
     if context:
-        _schedule_cricket_timer(context, int(state["chat_id"]), "bowler_dm", int(state["bowler"]), 20)
+        _schedule_cricket_timer(context, int(state["chat_id"]), "bowler_dm", int(state["bowler"]), 45)
 
 
 async def nightcricket(update, context) -> None:
@@ -587,10 +587,10 @@ async def nightcricket_dm(update, context) -> None:
         context.bot, state,
         f"🌑 <b>DELIVERY LOCKED.</b>\n\n"
         f"🏏 {_mention(int(state['batter']), state['names'].get(str(state['batter']), 'Batter'), state.get('usernames', {}).get(str(state['batter'])))} — choose your shot.\n"
-        "<i>⏱️ 20 seconds.</i>",
+        "<i>⏱️ 45 seconds.</i>",
         _shot_markup(int(state["chat_id"])),
     )
-    _schedule_cricket_timer(context, int(state["chat_id"]), "batting", int(state["batter"]), 20)
+    _schedule_cricket_timer(context, int(state["chat_id"]), "batting", int(state["batter"]), 45)
 
 
 async def nightcricket_group_text(update, context) -> None:
