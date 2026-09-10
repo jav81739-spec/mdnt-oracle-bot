@@ -15,13 +15,12 @@ from ..engines.achievement_engine import AchievementEngine
 from ..handlers.sticker_handler import StickerHandler
 from ..voice_engine import VoiceEngine
 from ..voice_triggers import wants_voice
-from ..media_brain import decide as media_decide, enabled as media_enabled
 from middleware.cooldown import cooldown_seconds, is_cooling
 from middleware.recent_buffer import load_recent, save_recent
 from middleware.alert import soft_alert
 
 class MessageRouter:
-    """Coordinate one coherent conversation path: context, memory, voice and media."""
+    """Coordinate one coherent conversation path: context, memory and voice."""
     def __init__(self, engine: FriendEngine, memory: MemoryEngine, mood: MoodEngine, replies: ReplyGenerator | None = None) -> None:
         self.engine=engine; self.memory=memory; self.mood=mood; self.replies=replies or ReplyGenerator(); self.recent={}; self._seen_updates=deque(maxlen=4096)
         db=getattr(engine,'db',None); self.jokes=JokeEngine(db) if db else None; self.identity=GroupIdentityEngine(db) if db else None; self.achievements=AchievementEngine(db) if db else None; self.stickers=StickerHandler(db) if db else None; self.voice=VoiceEngine()
@@ -37,16 +36,6 @@ class MessageRouter:
                     await message.reply_voice(voice=audio); self.voice.record(chat_id,user_id,reply); return
                 except Exception as exc: await soft_alert(None,'voice_delivery',exc)
         await message.reply_text(reply)
-        if media_enabled():
-            try:
-                media=media_decide(update,text=text)
-                if media and media.kind=='gif':
-                    from handlers.chat import get_gif_url
-                    from core.oracle_media import send_additive_gif
-                    url=await get_gif_url(media.query)
-                    if url:
-                        await send_additive_gif(context.bot,chat_id,url,reply_to_message_id=getattr(message,'message_id',None))
-            except Exception as exc: await soft_alert(None,'media_delivery',exc)
 
     async def _announce_achievements(self,message,member,group_id,event):
         if not self.achievements:return
