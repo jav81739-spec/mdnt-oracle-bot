@@ -548,7 +548,7 @@ async def nightcricket(update, context) -> None:
         "phase": "lobby", "toss": None, "toss_winner": None,
         "batting_team": None, "bowling_team": None,
         "batter": None, "bowler": None, "bat_idx": 0, "bowl_idx": 0,
-        "ball": 0, "runs": 0, "wickets": 0,
+        "ball": 0, "runs": 0, "wickets": 0, "innings": 1, "target": None, "scorecards": {"A": {"runs": 0, "wickets": 0, "balls": 0}, "B": {"runs": 0, "wickets": 0, "balls": 0}},
     }
     await storage.set(key, state, ttl=3600)
     await update.effective_message.reply_text(
@@ -717,12 +717,50 @@ async def nightcricket_callback(update, context) -> None:
             caption = f"🎙️ <b>{html.escape(state['names'].get(str(state['batter']), 'Batter'))}</b> finds the gap... <b>{'SIX!' if bat == 6 else 'FOUR!' if bat == 4 else str(bat) + ' RUNS!'}</b>"
         await storage.set(key, state, ttl=3600)
         await _send_cricket_media(context.bot, chat_id, term, f"🏏 <b>LIVE FROM MIDNIGHT</b>\n\n{caption}\n\n<i>Bowled {bowl} · Batted {bat}</i>")
-        if state["ball"] >= 6 or state["wickets"] >= 2:
+        batting_team = state["batting_team"]
+        card = state["scorecards"][batting_team]
+        card["runs"], card["wickets"], card["balls"] = state["runs"], state["wickets"], state["ball"]
+        state["scorecards"][batting_team] = card
+        # Two-innings chase: after the first six balls, swap sides and set a target.
+        if state["innings"] == 1 and (state["ball"] >= 6 or state["wickets"] >= 2):
+            state["target"] = state["runs"] + 1
+            state["innings"] = 2
+            state["ball"] = state["runs"] = state["wickets"] = 0
+            state["bat_idx"] = state["bowl_idx"] = 0
+            state["batting_team"], state["bowling_team"] = state["bowling_team"], state["batting_team"]
+            state["phase"] = "starting"
+            await storage.set(key, state, ttl=3600)
+            await q.message.reply_text(
+                f"<b>🏏 INNINGS BREAK</b>\n\n"
+                f"First innings: <b>{card['runs']}/{card['wickets']}</b>\n"
+                f"🎯 Target: <b>{state['target']}</b>\n\n"
+                f"<b>{html.escape(state['names'].get(str(state['batting_team']), state['batting_team']))}</b> now chase.\n"
+                "<i>Second innings loading...</i>",
+                parse_mode=ParseMode.HTML,
+            )
+            await _start_ball(context.bot, state, context)
+            return
+        if state["innings"] == 2 and (state["runs"] >= int(state["target"] or 0) or state["ball"] >= 6 or state["wickets"] >= 2):
+            first = state["scorecards"][state["bowling_team"]]
+            second = state["scorecards"][state["batting_team"]]
+            if state["runs"] >= int(state["target"] or 0):
+                winner = state["batting_team"]
+                result = f"<b>{winner} XI win the chase.</b>"
+            elif second["runs"] > first["runs"]:
+                winner = state["batting_team"]
+                result = f"<b>{winner} XI win.</b>"
+            elif second["runs"] < first["runs"]:
+                winner = state["bowling_team"]
+                result = f"<b>{winner} XI defend the total.</b>"
+            else:
+                result = "<b>Match tied.</b>"
             state["phase"] = "finished"
             await storage.set(key, state, ttl=900)
             await q.message.reply_text(
-                f"<b>🏏 INNINGS CLOSED</b>\n\n<b>{state['runs']}/{state['wickets']}</b> · {state['ball']} balls\n"
-                f"🌙 Moon XI vs ☀️ Sun XI\n\n<i>One over. One memory.</i>",
+                f"<b>☾ NIGHT CRICKET · FULL TIME</b>\n\n"
+                f"🌙 Moon XI <b>{state['scorecards']['A']['runs']}/{state['scorecards']['A']['wickets']}</b>\n"
+                f"☀️ Sun XI <b>{state['scorecards']['B']['runs']}/{state['scorecards']['B']['wickets']}</b>\n\n"
+                f"🏆 {result}",
                 parse_mode=ParseMode.HTML,
             )
             return
