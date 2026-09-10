@@ -44,6 +44,8 @@ async def _tick(context):
         (2, 22): social_engine.the_unnamed,
         (18, 6): social_engine.friction_pair,
         (23, 59): social_engine.midnight_wrap,
+        (21, 17): social_engine.midnight_story,
+        (22, 47): social_engine.oracle_gossip,
     }
     weekly = {
         (0, 23, 11): social_engine.soul_thread,
