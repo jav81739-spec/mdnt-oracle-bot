@@ -9,18 +9,39 @@ from ..memory_engine import MemoryEngine
 def _house_url() -> str:return (os.getenv("ORACLE_WEBAPP_URL") or os.getenv("ORACLE_MINI_APP_URL") or os.getenv("MINI_APP_URL") or "").strip()
 
 async def start(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    user=update.effective_user; name=f"@{user.username}" if user and user.username else (user.first_name if user else "you")
-    if update.effective_chat and update.effective_chat.type=="private":text=f"🌙 *Midnight Oracle*\n\nHey, {name}.\n\nI'm around for conversation, games, strange little moments and whatever the room turns into.\n\nTry /help when you want the map."
-    else:text=f"🌙 *Midnight Oracle*\n\nHey, {name}. I'm in.\n\nI'll join the room when there's actually something worth adding."
-    await update.effective_message.reply_text(text,parse_mode="Markdown")
+    user=update.effective_user
+    name=f"@{user.username}" if user and user.username else (user.first_name if user else "friend")
+    if update.effective_chat and update.effective_chat.type=="private":
+        text=f"""☾ <b>MIDNIGHT ORACLE</b>
+
+<b>The room is open.</b>
+──────────────
+Hey, <b>{name}</b>.
+
+No ceremony needed. Talk to me, start a game, ask for a reading, or bring whatever is keeping you awake.
+
+<i>Some nights need answers. Some only need company.</i>
+
+⌁ <b>/help</b>  open the rooms"""
+    else:
+        text=f"""☾ <b>MIDNIGHT ORACLE</b>
+
+<b>Midnight has arrived.</b>
+──────────────
+<b>{name}</b> is here.
+
+I'll stay quiet until the room gives me a reason to speak.
+
+<i>Good conversations don't need an announcement.</i>"""
+    await update.effective_message.reply_text(text,parse_mode="HTML")
 
 async def help_command(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
-    text="""🌙 *MIDNIGHT ORACLE*
-━━━━━━━━━━━━━━━━━━
+    text="""☾ <b>MIDNIGHT ORACLE</b>
+──────────────
 _conversation, games, readings, chaos and the occasional unexpected moment._
 
-━━━━ *🔮 READINGS* ━━━━
-`/oracle` `/aura` `/vibecheck` `/identity` `/shadow` `/element` `/corecode`
+⌁ <b>🔮 READINGS</b>
+<code>/oracle</code> <code>/aura</code> <code>/vibecheck</code> `/identity` `/shadow` `/element` `/corecode`
 `/universe` `/ritual` `/duality` `/nightreport` `/sigil` `/glitch`
 
 ━━━━ *💬 CONVERSATION* ━━━━
@@ -67,10 +88,11 @@ _conversation, games, readings, chaos and the occasional unexpected moment._
 `/memory` `/mymemory` `/forget` `/quiet` `/wake` `/tod` `/predict` `/predictions` `/house`
 
 ━━━━━━━━━━━━━━━━━━
-_private and owner controls stay private._"""
+<i>Private and owner controls stay private.</i>"""
     await update.effective_message.reply_text(text,parse_mode="Markdown")
 
-async def oracle(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:await update.effective_message.reply_text("☾ I'm here. What's on your mind?")
+async def oracle(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
+    await update.effective_message.reply_text("☾ <b>I’m listening.</b>\n──────────────\nTell me what’s actually on your mind.\n\n<i>No polished version required.</i>",parse_mode="HTML")
 async def truth(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:await update.effective_message.reply_text(f"☾ {question(context.args[0] if context.args else 'light')}",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('Answer',callback_data='truth:answer'),InlineKeyboardButton('Pass',callback_data='truth:pass')]]))
 
 async def truth_callback(update:Update,context:ContextTypes.DEFAULT_TYPE)->None:
