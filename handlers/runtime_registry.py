@@ -18,6 +18,19 @@ def build_application(token,storage_client):
                 await register_chat(chat_obj.id,chat_obj.type,chat_obj.title or "")
             except Exception:log.exception("CHAT_REGISTRY_FAILED | chat_id=%s",getattr(chat_obj,"id",None))
     app.add_handler(MessageHandler(filters.ALL,chat_registry),group=-999)
+    # Explicitly retain membership-change updates. This is the strongest
+    # Telegram-side signal available to a bot when it is added/removed.
+    try:
+        from telegram.ext import ChatMemberHandler
+        async def membership_registry(update, context):
+            event = update.my_chat_member
+            chat_obj = getattr(event, "chat", None)
+            if chat_obj and chat_obj.type in ("group", "supergroup", "channel"):
+                from startup import register_chat
+                await register_chat(chat_obj.id, chat_obj.type, chat_obj.title or "")
+        app.add_handler(ChatMemberHandler(membership_registry, ChatMemberHandler.MY_CHAT_MEMBER), group=-998)
+    except Exception:
+        log.exception("MY_CHAT_MEMBER_REGISTRATION_FAILED")
     try:
         from handlers.engagement_engine import init_storage as init_engagement_storage,register as register_engagement
         init_engagement_storage(storage_client);register_engagement(app)

@@ -185,6 +185,15 @@ async def _verify_command_menu(application)->None:
     except Exception as exc:log.exception("COMMAND_MENU_VERIFY_FAILED | %r",exc)
 def _install_live_runtime_bridges(application)->None:
     try:
+        from telegram.ext import MessageHandler, filters
+        from handlers.recovery import register as register_recovery
+        register_recovery(application)
+        log.info("RECOVERY_AUDIT_READY | command=/recover | read_only=true")
+    except Exception:
+        log.exception("RECOVERY_AUDIT_REGISTRATION_FAILED")
+        raise
+
+    try:
         from telegram.ext import MessageHandler,filters
         from handlers.live_chat_bridge import handle_live_chat
         marker="_midnight_human_bridge_registered"
