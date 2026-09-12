@@ -179,7 +179,7 @@ def _install_jobqueue_compat()->None:
     except Exception as exc:log.exception("Could not install JobQueue compatibility adapter: %s",exc);raise
 async def _verify_command_menu(application)->None:
     try:
-        from telegram import BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats
+        from telegram import BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, BotCommandScopeChat
         registered = set()
         for hs in getattr(application, "handlers", {}).values():
             for handler in hs:
@@ -187,7 +187,23 @@ async def _verify_command_menu(application)->None:
         menu = [BotCommand(c, "Midnight Oracle /" + c) for c in sorted(c for c in registered if c and c != "recover" and c != "midnightmap")]
         await application.bot.set_my_commands(menu, scope=BotCommandScopeAllPrivateChats())
         await application.bot.set_my_commands(menu, scope=BotCommandScopeAllGroupChats())
-        for label,scope in (("private",BotCommandScopeAllPrivateChats()),("groups",BotCommandScopeAllGroupChats())):
+        # The owner gets a private scope with the complete command surface,
+        # including owner-only recovery/map commands. Telegram keeps this
+        # scope separate from the public private-chat menu.
+        owner_id = int(os.getenv("OWNER_ID", "0") or 0)
+        if owner_id:
+            owner_commands = list(menu)
+            for name, description in (
+                ("midnightmap", "owner map of known chats"),
+                ("recover", "audit known chats safely"),
+            ):
+                if not any(cmd.command == name for cmd in owner_commands):
+                    owner_commands.append(BotCommand(name, description))
+            await application.bot.set_my_commands(
+                owner_commands,
+                scope=BotCommandScopeChat(chat_id=owner_id),
+            )
+        for label,scope in (("private",BotCommandScopeAllPrivateChats()),("groups",BotCommandScopeAllGroupChats()),("owner",BotCommandScopeChat(chat_id=int(os.getenv("OWNER_ID","0") or 0)) if int(os.getenv("OWNER_ID","0") or 0) else BotCommandScopeAllPrivateChats())):
             commands=await application.bot.get_my_commands(scope=scope);log.info("COMMAND_MENU_VERIFIED | scope=%s | count=%d | commands=%s",label,len(commands),",".join(c.command for c in commands))
     except Exception as exc:log.exception("COMMAND_MENU_VERIFY_FAILED | %r",exc)
 def _install_live_runtime_bridges(application)->None:
