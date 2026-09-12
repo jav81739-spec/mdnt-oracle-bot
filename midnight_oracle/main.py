@@ -100,6 +100,11 @@ async def _post_shutdown(application: Application) -> None:
 async def _route_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Route active games first, then canonical human conversation."""
     if update.effective_chat and update.effective_chat.type in {"group", "supergroup"}:
+        try:
+            from startup import register_chat
+            await register_chat(chat_id=update.effective_chat.id, chat_type=update.effective_chat.type, title=update.effective_chat.title or "")
+        except Exception:
+            log.exception("LIVE_CHAT_DISCOVERY_FAILED | chat_id=%s", update.effective_chat.id)
         await handle_game_message(update, context)
         db = context.application.bot_data.get("oracle_db")
         if db:
@@ -139,6 +144,10 @@ def build_application() -> Application:
     for name, callback in commands.items():
         _add_handler_once(app, CommandHandler(name, callback), group=-30)
     _install_world_lifecycle(app)
+    from handlers import events
+    events.register(app)
+    from handlers.recovery import register as register_recovery
+    register_recovery(app)
     _register_preserved_surfaces(app)
     return app
 

@@ -5,7 +5,7 @@ import logging
 
 from telegram import ChatMemberUpdated, Update
 from telegram.error import TelegramError
-from telegram.ext import ContextTypes
+from telegram.ext import ChatMemberHandler, ContextTypes
 
 from core.storage import storage
 
@@ -147,3 +147,27 @@ async def show_left(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No leaves logged yet.")
         return
     await update.message.reply_text("📤 Recent leaves:\n" + ", ".join(names))
+
+
+async def on_bot_membership_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Persist the bot's own membership status for recovery diagnostics."""
+    result = update.my_chat_member
+    chat = update.effective_chat
+    if not result or not chat:
+        return
+    state = await _load()
+    record = _chat(state, chat.id)
+    record["bot_status"] = result.new_chat_member.status
+    record["bot_status_before"] = result.old_chat_member.status
+    record["title"] = chat.title or record.get("title") or ""
+    record["type"] = chat.type
+    record["last_membership_update"] = int(result.date.timestamp())
+    await _save(state)
+    log.info("BOT_MEMBERSHIP_STATE | chat_id=%s | %s -> %s", chat.id, result.old_chat_member.status, result.new_chat_member.status)
+
+
+def register(application) -> None:
+    application.add_handler(
+        ChatMemberHandler(on_bot_membership_update, ChatMemberHandler.MY_CHAT_MEMBER),
+        group=85,
+    )

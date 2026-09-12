@@ -46,7 +46,7 @@ async def recover_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return
 
-    counts = {"active": 0, "left": 0, "kicked": 0, "unavailable": 0, "error": 0}
+    counts = {"active": 0, "left": 0, "kicked": 0, "unavailable": 0, "historical": 0, "error": 0}
     lines = [
         "☾ MIDNIGHT RECOVERY",
         "┄" * 18,
@@ -77,16 +77,19 @@ async def recover_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             counts[state] += 1
             lines.append(f"• {title} [{chat.type}] → {state} ({status})")
         except Exception as exc:
-            counts["unavailable"] += 1
+            counts["historical"] += 1
             detail = str(exc).replace("\n", " ")[:180]
-            lines.append(f"• {title} [{cid_text}] → unavailable ({type(exc).__name__}: {detail})")
+            bot_status = info.get("bot_status") if isinstance(info, dict) else None
+            evidence = f"historical bot_status={bot_status}" if bot_status else "no live membership evidence"
+            lines.append(f"• {title} [{cid_text}] → unresolved ({type(exc).__name__}: {detail}; {evidence})")
 
     lines.extend([
         "",
         f"🟢 Active: {counts['active']}",
         f"🟡 Left: {counts['left']}",
         f"🔴 Kicked: {counts['kicked']}",
-        f"⚫ Unavailable: {counts['unavailable']}",
+        f"⚫ Unresolved: {counts['unavailable']}",
+        f"🔵 Historical only: {counts['historical']}",
         "",
         "Read-only audit. No join, add, message, or membership change was attempted.",
     ])
