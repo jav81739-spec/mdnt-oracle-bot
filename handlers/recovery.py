@@ -78,7 +78,8 @@ async def recover_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             lines.append(f"• {title} [{chat.type}] → {state} ({status})")
         except Exception as exc:
             counts["unavailable"] += 1
-            lines.append(f"• {title} [{cid_text}] → unavailable ({type(exc).__name__})")
+            detail = str(exc).replace("\n", " ")[:180]
+            lines.append(f"• {title} [{cid_text}] → unavailable ({type(exc).__name__}: {detail})")
 
     lines.extend([
         "",
