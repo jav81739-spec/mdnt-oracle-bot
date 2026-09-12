@@ -13,6 +13,7 @@ from .handlers.message_handler import MessageRouter
 from .handlers.callback_handler import handle_callback
 from .handlers.command_handler import start, oracle, truth, truth_callback, memory, mymemory, forget, quiet, wake, house
 from handlers.help_command import help_command
+from handlers.midnightmap import midnightmap_command
 from .handlers.inline_handler import handle_inline
 from .handlers.world_handler import start_game, end_game, game_callback, handle_game_message, handle_poll_answer, handle_poll
 from .handlers.prediction_handler import predict, predictions
@@ -133,7 +134,7 @@ def build_application() -> Application:
         "wake": wake, "house": house, "voice": voice,
         "tod": start_game, "wyr": start_game, "nhie": start_game, "scramble": start_game,
         "predict": predict, "predictions": predictions, "endgame": end_game,
-        "mysterybox": mysterybox, "nightgift": nightgift, "muse": muse, "glitch": glitch,
+        "mysterybox": mysterybox, "nightgift": nightgift, "muse": muse, "glitch": glitch, "midnightmap": midnightmap_command,
     }
     for name, callback in commands.items():
         _add_handler_once(app, CommandHandler(name, callback), group=-30)
