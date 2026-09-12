@@ -179,7 +179,14 @@ def _install_jobqueue_compat()->None:
     except Exception as exc:log.exception("Could not install JobQueue compatibility adapter: %s",exc);raise
 async def _verify_command_menu(application)->None:
     try:
-        from telegram import BotCommandScopeAllPrivateChats,BotCommandScopeAllGroupChats
+        from telegram import BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats
+        registered = set()
+        for hs in getattr(application, "handlers", {}).values():
+            for handler in hs:
+                registered.update(str(c).lower().lstrip("/") for c in (getattr(handler, "commands", None) or ()))
+        menu = [BotCommand(c, "Midnight Oracle /" + c) for c in sorted(c for c in registered if c and c != "recover" and c != "midnightmap")]
+        await application.bot.set_my_commands(menu, scope=BotCommandScopeAllPrivateChats())
+        await application.bot.set_my_commands(menu, scope=BotCommandScopeAllGroupChats())
         for label,scope in (("private",BotCommandScopeAllPrivateChats()),("groups",BotCommandScopeAllGroupChats())):
             commands=await application.bot.get_my_commands(scope=scope);log.info("COMMAND_MENU_VERIFIED | scope=%s | count=%d | commands=%s",label,len(commands),",".join(c.command for c in commands))
     except Exception as exc:log.exception("COMMAND_MENU_VERIFY_FAILED | %r",exc)
