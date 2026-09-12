@@ -63,7 +63,7 @@ def register_legacy_surface(app) -> dict[str, object]:
     reserved = {
         "start", "help", "oracle", "truth", "memory", "mymemory", "forget",
         "tod", "wyr", "nhie", "scramble", "unscramble", "predict", "predictions",
-        "house", "quiet", "wake",
+        "house", "quiet", "wake", "recover",
     }
     module_map = {
         "chat": chat, "games": games, "moderation": moderation, "utility": utility,
