@@ -187,6 +187,15 @@ async def _verify_command_menu(application)->None:
         menu = [BotCommand(c, "Midnight Oracle /" + c) for c in sorted(c for c in registered if c and c != "recover" and c != "midnightmap")]
         await application.bot.set_my_commands(menu, scope=BotCommandScopeAllPrivateChats())
         await application.bot.set_my_commands(menu, scope=BotCommandScopeAllGroupChats())
+        # Explicitly restore Telegram's bot menu button. Command registration
+        # alone does not guarantee that the UI button is shown to the user.
+        from telegram import MenuButtonCommands
+        await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+        if owner_id:
+            await application.bot.set_chat_menu_button(
+                chat_id=owner_id,
+                menu_button=MenuButtonCommands(),
+            )
         # The owner gets a private scope with the complete command surface,
         # including owner-only recovery/map commands. Telegram keeps this
         # scope separate from the public private-chat menu.
